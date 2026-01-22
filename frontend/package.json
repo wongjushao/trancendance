@@ -1,0 +1,11 @@
+{
+  "name": "trancendance-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "serve -s build -l 3000",
+    "build": "echo 'No build configured; replace with react-scripts build'"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}
