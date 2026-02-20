@@ -1,4 +1,3 @@
-version: '3.8'
 services:
   backend:
     build: ./backend
@@ -13,6 +12,12 @@ services:
       - "3000:80"
     depends_on:
       - backend
+  
+  node-exporter:
+    image: prom/node-exporter:latest
+    ports:
+      - "9101:9100"
+
 
   prometheus:
     image: prom/prometheus:latest

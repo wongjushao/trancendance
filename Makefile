@@ -1,7 +1,5 @@
 # Developer Makefile for trancendance
 
-.PHONY: start-server start-server-fg backend-local build down logs
-
 start-server:
 	@echo "Starting stack in background..."
 	@docker compose up --build -d
@@ -22,3 +20,5 @@ down:
 
 logs:
 	@docker compose logs --follow
+
+.PHONY: start-server start-server-fg backend-local build down logs

@@ -4,7 +4,7 @@ This minimal setup runs:
 - Flask backend exposing Prometheus metrics at /metrics
 - Static React-like frontend served by nginx (proxy /api to backend)
 - Prometheus scraping the Flask metrics
-- Grafana provisioned with Prometheus datasource and a sample dashboard
+- Grafana provisioned with Prometheus datasource and preloaded dashboards
 
 Quick start (Windows PowerShell):
 
@@ -22,6 +22,7 @@ Services:
 Notes:
 - The Flask app uses a simple Counter metric; adjust as needed.
 - Grafana provisioning points to the Prometheus container name.
+- Custom dashboard: **Backend Observability** (CPU, RAM, backend status, request rate)
 
 Grafana
 
