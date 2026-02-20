@@ -6,18 +6,27 @@ This minimal setup runs:
 - Prometheus scraping the Flask metrics
 - Grafana provisioned with Prometheus datasource and preloaded dashboards
 
-Quick start (Windows PowerShell):
+Quick start:
 
-```powershell
-cd c:\Users\wongj\OneDrive\Desktop\trancendance
+```bash
+cd /path/to/trancendance
+cp .env.example .env
 docker compose up --build
 ```
+
+Environment configuration:
+- All environment values are stored in `.env`.
+- Update SMTP values in `.env` before testing Grafana notifications:
+	- `GF_SMTP_HOST`
+	- `GF_SMTP_USER`
+	- `GF_SMTP_PASSWORD`
+	- `GF_SMTP_FROM_ADDRESS`
 
 Services:
 - Backend: http://localhost:5000
 - Frontend: http://localhost:3000
 - Prometheus: http://localhost:9090
-- Grafana: http://localhost:3001 (login: admin/admin)
+- Grafana: http://localhost:3001 (login from `.env`: `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD`)
 
 Notes:
 - The Flask app uses a simple Counter metric; adjust as needed.

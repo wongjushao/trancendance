@@ -18,6 +18,9 @@ build:
 down:
 	@docker compose down
 
+fclean:
+	@docker compose down --rmi all --volumes --remove-orphans
+
 logs:
 	@docker compose logs --follow
 
