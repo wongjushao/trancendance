@@ -8,10 +8,6 @@ start-server-fg:
 	@echo "Starting stack in foreground (attach)..."
 	@docker compose up --build
 
-backend-local:
-	@echo "Run backend locally (ensure virtualenv activated if needed)"
-	@python -m src.app
-
 build:
 	@docker compose build
 
@@ -24,4 +20,4 @@ fclean:
 logs:
 	@docker compose logs --follow
 
-.PHONY: start-server start-server-fg backend-local build down logs
+.PHONY: start-server start-server-fg auth-local chat-local org-local build down logs

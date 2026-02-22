@@ -1,17 +1,38 @@
 services:
-  backend:
-    build: ./backend
+  auth-service:
+    build: ./backend/services/auth_service
     ports:
-      - "5000:5000"
+      - "5001:5001"
     environment:
-      - FLASK_ENV=${FLASK_ENV}
+      - AUTH_SUPABASE_URL=${AUTH_SUPABASE_URL}
+      - AUTH_SUPABASE_ANON_KEY=${AUTH_SUPABASE_ANON_KEY}
+
+  chat-service:
+    build: ./backend/services/chat_service
+    ports:
+      - "5002:5002"
+    environment:
+      - CHAT_SUPABASE_URL=${CHAT_SUPABASE_URL}
+      - CHAT_SUPABASE_SERVICE_ROLE_KEY=${CHAT_SUPABASE_SERVICE_ROLE_KEY}
+      - CHAT_TABLE=${CHAT_TABLE}
+
+  org-service:
+    build: ./backend/services/org_service
+    ports:
+      - "5003:5003"
+    environment:
+      - ORG_SUPABASE_URL=${ORG_SUPABASE_URL}
+      - ORG_SUPABASE_SERVICE_ROLE_KEY=${ORG_SUPABASE_SERVICE_ROLE_KEY}
+      - ORG_TABLE=${ORG_TABLE}
 
   frontend:
     build: ./frontend
     ports:
       - "3000:80"
     depends_on:
-      - backend
+      - auth-service
+      - chat-service
+      - org-service
   
   node-exporter:
     image: prom/node-exporter:latest

@@ -2,21 +2,153 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>React-like Frontend</title>
+    <title>Service Test Dashboard</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 24px;
+      }
+
+      h1 {
+        margin-bottom: 8px;
+      }
+
+      p {
+        margin-top: 0;
+      }
+
+      button {
+        padding: 8px 14px;
+        cursor: pointer;
+      }
+
+      .row {
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        padding: 10px;
+        margin-top: 10px;
+      }
+
+      .ok {
+        color: #0a7a23;
+        font-weight: bold;
+      }
+
+      .fail {
+        color: #b81d13;
+        font-weight: bold;
+      }
+
+      .skip {
+        color: #946200;
+        font-weight: bold;
+      }
+
+      pre {
+        background: #f7f7f7;
+        padding: 10px;
+        border-radius: 6px;
+        overflow-x: auto;
+        white-space: pre-wrap;
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <h1>Backend Service Test Dashboard</h1>
+    <p>Tests isolated services through REST endpoints behind nginx proxy.</p>
+    <button id="run-tests">Run Tests</button>
+    <div id="summary"></div>
+    <div id="results"></div>
     <script>
-      async function callBackend(){
-        try{
-          const r = await fetch('/api')
-          const j = await r.json()
-          document.getElementById('root').innerText = j.message
-        }catch(e){
-          document.getElementById('root').innerText = 'Could not reach backend: '+e
-        }
+      const tests = [
+        { name: 'Auth health', method: 'GET', url: '/api/auth/health', group: 'core' },
+        { name: 'Chat health', method: 'GET', url: '/api/chat/health', group: 'core' },
+        { name: 'Org health', method: 'GET', url: '/api/org/health', group: 'core' },
+        { name: 'Chat list messages', method: 'GET', url: '/api/chat/messages', group: 'dependency' },
+        { name: 'Org list orgs', method: 'GET', url: '/api/org/orgs', group: 'dependency' },
+      ]
+
+      function makeResultRow(result) {
+        const row = document.createElement('div')
+        row.className = 'row'
+
+        const statusClass = result.outcome === 'pass' ? 'ok' : (result.outcome === 'skip' ? 'skip' : 'fail')
+        const statusLabel = result.outcome === 'pass' ? 'PASS' : (result.outcome === 'skip' ? 'SKIP' : 'FAIL')
+        const payloadText = typeof result.body === 'string' ? result.body : JSON.stringify(result.body, null, 2)
+
+        row.innerHTML = `
+          <div><strong>${result.name}</strong> <small>(${result.group})</small></div>
+          <div>Endpoint: ${result.method} ${result.url}</div>
+          <div class="${statusClass}">${statusLabel} (HTTP ${result.status})</div>
+          <pre>${payloadText}</pre>
+        `
+
+        return row
       }
-      callBackend()
+
+      async function runTests(){
+        const summaryEl = document.getElementById('summary')
+        const resultsEl = document.getElementById('results')
+        summaryEl.innerText = 'Running tests...'
+        resultsEl.innerHTML = ''
+
+        const results = []
+
+        for (const test of tests) {
+          let result
+
+          try {
+            const response = await fetch(test.url, { method: test.method })
+            let body
+            try {
+              body = await response.json()
+            } catch (jsonError) {
+              body = await response.text()
+            }
+
+            result = {
+              ...test,
+              ok: response.ok,
+              status: response.status,
+              body,
+            }
+
+            const bodyText = typeof body === 'string' ? body : JSON.stringify(body)
+            const dependencyNotConfigured =
+              test.group === 'dependency' &&
+              response.status === 503 &&
+              bodyText.toLowerCase().includes('not configured')
+
+            result.outcome = dependencyNotConfigured ? 'skip' : (response.ok ? 'pass' : 'fail')
+          } catch (error) {
+            result = {
+              ...test,
+              ok: false,
+              status: 0,
+              body: String(error),
+              outcome: 'fail',
+            }
+          }
+
+          results.push(result)
+          resultsEl.appendChild(makeResultRow(result))
+        }
+
+        const coreResults = results.filter((item) => item.group === 'core')
+        const dependencyResults = results.filter((item) => item.group === 'dependency')
+        const corePassed = coreResults.filter((item) => item.outcome === 'pass').length
+        const dependencyPassed = dependencyResults.filter((item) => item.outcome === 'pass').length
+        const dependencySkipped = dependencyResults.filter((item) => item.outcome === 'skip').length
+
+        summaryEl.innerHTML = `
+          <h3>Core service health: ${corePassed}/${coreResults.length} passed</h3>
+          <h3>External dependency checks: ${dependencyPassed} passed, ${dependencySkipped} skipped, ${dependencyResults.length - dependencyPassed - dependencySkipped} failed</h3>
+        `
+      }
+
+      document.getElementById('run-tests').addEventListener('click', runTests)
+
+      runTests()
     </script>
   </body>
 </html>

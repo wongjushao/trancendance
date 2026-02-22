@@ -9,12 +9,3 @@ contactPoints:
           addresses: wongjushao@gmail.com
           singleEmail: false
         disableResolveMessage: false
-
-  - orgId: 1
-    name: email receiver
-    receivers:
-      - uid: email-receiver-1
-        type: email
-        settings:
-          addresses: example@email.com
-        disableResolveMessage: false
