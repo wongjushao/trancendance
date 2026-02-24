@@ -1,272 +1,248 @@
-// Use DBML to define your database structure
-// Docs: https://dbml.dbdiagram.io/docs
-
-//Users & Authentication
-
-Table users {
-  id integer [primary key]
-  email varchar unique [not null]
-  password_hash varchar
-  username varchar
-  avatar_url varchar
-  bio varchar
-  status varchar (active,suspended) [default: "active"]
-  role varchar
-  created_at timestamp
+Project LMS_Supabase {
+  database_type: "PostgreSQL"
+  Note: "Supabase 标准做法：auth.users 由 Supabase Auth 管理；业务表放 public schema，并启用 RLS。"
 }
 
-Table profiles {
-  user_id integer [not null]
-  timezone varchar
-  languague varchar
-  social_links_json varchar
+/* -------------------------
+   Supabase Auth (示意表)
+   实际由 Supabase 管理，你不用自己建。
+------------------------- */
+Table auth.users {
+  id uuid [pk]
+  email text
+  created_at timestamptz
 }
 
-Table oauth_accounts {
-  id  integer [primary key]
-  user_id integer [not null]
-  provider varchar [not null]
-  provider_user_id varchar [not null]
-  access_token_ref text
-  created_at timestamp
+/* -------------------------
+   Users / Profiles (public)
+------------------------- */
+Table public.profiles {
+  id uuid [pk, not null, ref: > auth.users.id] // 与 auth.users.id 同一个 uuid
+  username text
+  avatar_url text
+  bio text
+  timezone text
+  language text
+  social_links jsonb
+  created_at timestamptz [default: `now()`]
 }
 
-Table two_factor_method {
-  id integer [primary key]
-  user_id integer [not null]
-  type varchar
-  secret_enc text [not null]
-  enabled bool [default: true]
+/* API Keys */
+Table public.api_keys {
+  id bigint [pk, increment]
+  user_id uuid [not null, ref: > public.profiles.id]
+  key_hash text [not null]
+  rate_limit_per_min int [default: 60]
+  expires_at timestamptz
+  last_used_at timestamptz
+  created_at timestamptz [default: `now()`]
 }
 
-Table api_key {
-  id integer [primary key]
-  user_id integer [not null]
-  key_hash varchar [not null]
-  rate_limit_per_min integer [default: 60]
-  expires_at timestamp
-  created_at timestamp
-}
-
-//Organizations, Roles, Permissions
-
-Table organizations {
-  id integer [primary key]
-  name varchar
+/* -------------------------
+   Organizations / RBAC
+------------------------- */
+Table public.organizations {
+  id bigint [pk, increment]
+  name text [not null]
   description text
-  created_by_user_id integer [not null]
-  created_at timestamp
+  created_by uuid [not null, ref: > public.profiles.id]
+  created_at timestamptz [default: `now()`]
 }
 
-Table organizations_members {
-  id integer [primary key]
-  organization_id integer [not null]
-  user_id integer [not null]
-  role_label varchar
+Table public.organization_members {
+  id bigint [pk, increment]
+  organization_id bigint [not null, ref: > public.organizations.id]
+  user_id uuid [not null, ref: > public.profiles.id]
+  member_role text [default: "member"] // 可选：member/admin/owner
+  created_at timestamptz [default: `now()`]
+
+  indexes {
+    (organization_id, user_id) [unique]
+  }
 }
 
-Table roles {
-  id integer [primary key]
-  name varchar [not null]
-  organization_id integer
+Table public.roles {
+  id bigint [pk, increment]
+  name text [not null]
+  organization_id bigint [ref: > public.organizations.id]
 }
 
-Table permissions {
-  id integer [primary key]
-  code varchar [unique, not null]
+Table public.permissions {
+  id bigint [pk, increment]
+  code text [not null, unique] // e.g. "course.create"
 }
 
-Table role_permissions {
-  role_id integer [not null]
-  permission_id integer [not null]
+Table public.role_permissions {
+  role_id bigint [not null, ref: > public.roles.id]
+  permission_id bigint [not null, ref: > public.permissions.id]
+
+  indexes {
+    (role_id, permission_id) [unique]
+  }
 }
 
-Table user_roles {
-  user_id integer [not null]
-  role_id integer [not null]
-  organization_id integer [not null]
+Table public.user_roles {
+  user_id uuid [not null, ref: > public.profiles.id]
+  role_id bigint [not null, ref: > public.roles.id]
+  organization_id bigint [not null, ref: > public.organizations.id]
+
+  indexes {
+    (user_id, role_id, organization_id) [unique]
+  }
 }
 
-//Courses & Learning Content
-
-Table courses {
-  id integer [primary key]
-  organization_id integer [not null]
-  title varchar
+/* -------------------------
+   Courses / Learning
+------------------------- */
+Table public.courses {
+  id bigint [pk, increment]
+  organization_id bigint [not null, ref: > public.organizations.id]
+  title text [not null]
   description text
-  visibility varchar [default: "private"]
-  created_by integer [not null]
-  created_at timestamp
+  visibility text [default: "private"] // private/public/org
+  created_by uuid [not null, ref: > public.profiles.id]
+  created_at timestamptz [default: `now()`]
 }
 
-Table course_members {
-  id integer [primary key]
-  course_id integer [not null]
-  user_id integer [not null]
-  role varchar (instructor, student, teacher)
+Table public.course_members {
+  id bigint [pk, increment]
+  course_id bigint [not null, ref: > public.courses.id]
+  user_id uuid [not null, ref: > public.profiles.id]
+  role text [default: "student"] // instructor/student
+
+  indexes {
+    (course_id, user_id) [unique]
+  }
 }
 
-Table modules {
-  id integer [primary key]
-  course_id integer
-  title varchar
-  order_index integer
+Table public.modules {
+  id bigint [pk, increment]
+  course_id bigint [not null, ref: > public.courses.id]
+  title text [not null]
+  order_index int
 }
 
-Table lessons {
-  id integer [primary key]
-  module_id int
-  title varchar [not null]
-  content_type varchar
+Table public.lessons {
+  id bigint [pk, increment]
+  module_id bigint [not null, ref: > public.modules.id]
+  title text [not null]
+  content_type text
   content_url text
-  content_json text
-  order_index integer
+  content_json jsonb
+  order_index int
 }
 
-Table assigments {
-  id integer [primary key]
-  course_id integer [not null]
-  lesson_id integer [not null]
-  title varchar
+Table public.assignments {
+  id bigint [pk, increment]
+  course_id bigint [not null, ref: > public.courses.id]
+  lesson_id bigint [ref: > public.lessons.id]
+  title text [not null]
   description text
-  due_at  timestamp
+  due_at timestamptz
+  created_at timestamptz [default: `now()`]
 }
 
-Table submissions {
-  id integer [primary key]
-  assigment_id integer [not null]
-  user_id integer [not null]
+Table public.submissions {
+  id bigint [pk, increment]
+  assignment_id bigint [not null, ref: > public.assignments.id]
+  user_id uuid [not null, ref: > public.profiles.id]
   content_url text
   text_content text
-  grade integer
+  grade int
   feedback text
-  submitted_at timestamp
+  submitted_at timestamptz [default: `now()`]
+
+  indexes {
+    (assignment_id, user_id) [unique]
+  }
 }
 
-//Social (Friends + Chat)
+/* -------------------------
+   Social / Chat
+------------------------- */
+Table public.friendships {
+  id bigint [pk, increment]
+  requester_id uuid [not null, ref: > public.profiles.id]
+  addressee_id uuid [not null, ref: > public.profiles.id]
+  status text [default: "pending"] // pending/accepted/blocked
+  created_at timestamptz [default: `now()`]
 
-Table friendships {
-  id integer [primary key]
-  requester_id integer [not null]
-  addressee_id integer [not null]
-  status varchar
-  created_at timestamp
+  indexes {
+    (requester_id, addressee_id) [unique]
+  }
 }
 
-Table chat_rooms {
-  id integer [primary key]
-  type varchar (direct, group, course)
-  related_id integer
+Table public.chat_rooms {
+  id bigint [pk, increment]
+  type text [not null] // direct/group/course
+  related_course_id bigint // 如果 type=course，可存 courses.id
+  created_at timestamptz [default: `now()`]
 }
 
-Table chat_room_members {
-  room_id integer [not null]
-  user_id integer [not null]
+Table public.chat_room_members {
+  room_id bigint [not null, ref: > public.chat_rooms.id]
+  user_id uuid [not null, ref: > public.profiles.id]
+  joined_at timestamptz [default: `now()`]
+
+  indexes {
+    (room_id, user_id) [unique]
+  }
 }
 
-Table messages {
-  id bigint [primary key]
-  room_id integer
-  sender_id integer
+Table public.messages {
+  id bigint [pk, increment]
+  room_id bigint [not null, ref: > public.chat_rooms.id]
+  sender_id uuid [not null, ref: > public.profiles.id]
   content text
-  message_type varchar
-  created_at timestamp [not null]
+  message_type text [default: "text"]
+  created_at timestamptz [default: `now()`]
 }
 
-//Notifications
-
-Table notifications {
-  id integer [primary key]
-  user_id integer [not null]
-  type varchar
-  title varchar
+/* -------------------------
+   Notifications / Logs / GDPR / Audit
+------------------------- */
+Table public.notifications {
+  id bigint [pk, increment]
+  user_id uuid [not null, ref: > public.profiles.id]
+  type text
+  title text
   body text
   link text
-  read_at timestamp
-  created_at timestamp
+  read_at timestamptz
+  created_at timestamptz [default: `now()`]
 }
 
-//Activity & Analytics
-
-Table user_activity_logs {
-  id integer [primary key]
-  user_id integer [not null]
-  action varchar
-  entity_type varchar
-  entity_id integer
-  metadata text
-  created_at timestamp
+Table public.user_activity_logs {
+  id bigint [pk, increment]
+  user_id uuid [not null, ref: > public.profiles.id]
+  action text
+  entity_type text
+  entity_id bigint
+  metadata jsonb
+  created_at timestamptz [default: `now()`]
 }
 
-//GDPR & Data Portability
-
-Table user_consents {
-  id integer [primary key]
-  user_id integer [not null]
-  type varchar
-  accepted_at timestamp
+Table public.user_consents {
+  id bigint [pk, increment]
+  user_id uuid [not null, ref: > public.profiles.id]
+  type text
+  accepted_at timestamptz [default: `now()`]
 }
 
-Table data_exports {
-  id integer [primary key]
-  user_id integer 
-  status varchar
+Table public.data_exports {
+  id bigint [pk, increment]
+  user_id uuid [ref: > public.profiles.id]
+  status text
   file_url text
-  created_at timestamp
+  created_at timestamptz [default: `now()`]
 }
 
-//Audit Logs (Security)
-
-Table audit_logs {
-  id integer [primary key]
-  actor_id integer [not null]
-  action varchar
-  entity_type varchar
-  entity_id integer
-  ip_address inet6
-  created_at timestamp
+Table public.audit_logs {
+  id bigint [pk, increment]
+  actor_id uuid [not null, ref: > public.profiles.id]
+  action text
+  entity_type text
+  entity_id bigint
+  ip_address inet
+  created_at timestamptz [default: `now()`]
 }
-
-//Users & Authentication
-Ref: profiles.user_id - users.id
-Ref: oauth_accounts.user_id > users.id
-Ref: two_factor_method.user_id - users.id
-Ref: api_key.user_id - users.id
-
-//Organizations, Roles, Permissions
-Ref: organizations.created_by_user_id - users.id
-Ref: organizations_members.organization_id - organizations.id
-Ref: organizations_members.user_id < users.id
-Ref: roles.organization_id - organizations.id
-Ref: role_permissions.role_id - roles.id
-Ref: role_permissions.permission_id - permissions.id
-Ref: user_roles.user_id - users.id
-Ref: user_roles.role_id - roles.id
-Ref: user_roles.organization_id - organizations.id
-
-//Courses & Learning Content
-Ref: courses.organization_id - organizations.id
-Ref: course_members.course_id - courses.id
-Ref: course_members.user_id < users.id
-Ref: modules.course_id > courses.id
-Ref: lessons.module_id - modules.id
-Ref: assigments.course_id - courses.id
-Ref: assigments.lesson_id - lessons.id
-Ref: submissions.assigment_id > assigments.id
-Ref: submissions.user_id - users.id
-
-//Social (Friends + Chat)
-Ref: friendships.requester_id - users.id
-Ref: friendships.addressee_id - users.id
-Ref: messages.room_id - chat_rooms.id
-Ref: messages.sender_id - users.id
-
-//Notifications
-Ref: notifications.user_id > users.id
-
-//GDPR & Data Portability
-Ref: user_consents.user_id - users.id
-Ref: data_exports.user_id - users.id
-
-//Audit Logs (Security)
-Ref: audit_logs.actor_id - users.id

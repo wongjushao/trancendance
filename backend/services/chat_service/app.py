@@ -1,30 +1,46 @@
 import os
+import uuid
 
 from flask import Flask, jsonify, request
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
-from supabase import create_client
+from sqlalchemy.exc import SQLAlchemyError
+
+from backend.common.db import create_engine_and_session
+from backend.common.models import Message
 
 
 REQUESTS = Counter("chat_requests_total", "Total chat service HTTP requests")
 
 
-def is_valid_supabase_config(url: str, key: str) -> bool:
-    if not url or not key:
+def is_valid_database_url(database_url: str) -> bool:
+    if not database_url:
         return False
-    if "your-project-ref.supabase.co" in url:
+    if "[YOUR-PASSWORD]" in database_url:
         return False
-    if key in {"your-service-role-key", "your-anon-key"}:
+    if "localhost" in database_url and "postgresql://" not in database_url and "postgres://" not in database_url:
         return False
     return True
+
+
+def serialize_message(message: Message) -> dict:
+    return {
+        "id": message.id,
+        "room_id": message.room_id,
+        "sender_id": str(message.sender_id),
+        "content": message.content,
+        "message_type": message.message_type,
+        "created_at": message.created_at.isoformat() if message.created_at else None,
+    }
 
 
 def create_app():
     app = Flask(__name__)
 
-    supabase_url = os.getenv("CHAT_SUPABASE_URL", "")
-    service_role_key = os.getenv("CHAT_SUPABASE_SERVICE_ROLE_KEY", "")
-    chat_table = os.getenv("CHAT_TABLE", "chat_messages")
-    supabase = create_client(supabase_url, service_role_key) if is_valid_supabase_config(supabase_url, service_role_key) else None
+    database_url = os.getenv("DATABASE_URL", "")
+    db_session = None
+
+    if is_valid_database_url(database_url):
+        _, db_session = create_engine_and_session(database_url)
 
     @app.before_request
     def before_request():
@@ -36,41 +52,64 @@ def create_app():
 
     @app.get("/messages")
     def list_messages():
-        if not supabase:
-            return jsonify({"error": "Supabase chat store is not configured. Set valid CHAT_SUPABASE_URL and CHAT_SUPABASE_SERVICE_ROLE_KEY"}), 503
+        if db_session is None:
+            return jsonify({"error": "Database is not configured. Set valid DATABASE_URL"}), 503
 
+        session = db_session()
         try:
-            response = supabase.table(chat_table).select("*").order("created_at", desc=False).limit(100).execute()
-            return jsonify(response.data or [])
-        except Exception as exc:
+            messages = session.query(Message).order_by(Message.created_at.asc()).limit(100).all()
+            return jsonify([serialize_message(message) for message in messages])
+        except SQLAlchemyError as exc:
             return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
 
     @app.post("/messages")
     def create_message():
-        if not supabase:
-            return jsonify({"error": "Supabase chat store is not configured. Set valid CHAT_SUPABASE_URL and CHAT_SUPABASE_SERVICE_ROLE_KEY"}), 503
+        if db_session is None:
+            return jsonify({"error": "Database is not configured. Set valid DATABASE_URL"}), 503
 
         payload = request.get_json(silent=True) or {}
-        text = payload.get("text")
-        author = payload.get("author")
+        room_id = payload.get("room_id")
+        sender_id = payload.get("sender_id") or payload.get("author")
+        content = payload.get("content") or payload.get("text")
+        message_type = payload.get("message_type") or "text"
 
-        if not text or not author:
-            return jsonify({"error": "Fields 'author' and 'text' are required"}), 400
+        if not room_id or not sender_id or not content:
+            return jsonify({"error": "Fields 'room_id', 'sender_id' (or 'author') and 'content' (or 'text') are required"}), 400
 
-        record = {
-            "author": author,
-            "text": text,
-        }
+        session = db_session()
 
         try:
-            response = supabase.table(chat_table).insert(record).execute()
-            return jsonify(response.data or []), 201
-        except Exception as exc:
+            sender_uuid = uuid.UUID(str(sender_id))
+        except (TypeError, ValueError):
+            return jsonify({"error": "Field 'sender_id' must be a valid UUID"}), 400
+
+        try:
+            message = Message(
+                room_id=room_id,
+                sender_id=sender_uuid,
+                content=content,
+                message_type=message_type,
+            )
+            session.add(message)
+            session.commit()
+            session.refresh(message)
+            return jsonify(serialize_message(message)), 201
+        except SQLAlchemyError as exc:
+            session.rollback()
             return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
 
     @app.get("/metrics")
     def metrics():
         return generate_latest(), 200, {"Content-Type": CONTENT_TYPE_LATEST}
+
+    @app.teardown_appcontext
+    def shutdown_session(_exception=None):
+        if db_session is not None:
+            db_session.remove()
 
     return app
 

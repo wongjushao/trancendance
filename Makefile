@@ -20,4 +20,12 @@ fclean:
 logs:
 	@docker compose logs --follow
 
-.PHONY: start-server start-server-fg auth-local chat-local org-local build down logs
+migrate-up:
+	@docker build -f backend/migrations/Dockerfile -t trancendance-migrate .
+	@docker run --rm -e DATABASE_URL=$(shell grep SUPABASE_DB_URL .env | cut -d= -f2-) trancendance-migrate
+
+migrate-down:
+	@docker build -f backend/migrations/Dockerfile -t trancendance-migrate .
+	@docker run --rm -e DATABASE_URL=$(shell grep SUPABASE_DB_URL .env | cut -d= -f2-) trancendance-migrate alembic -c backend/migrations/alembic.ini downgrade -1
+
+.PHONY: start-server start-server-fg auth-local chat-local org-local build down logs migrate-up migrate-down

@@ -2,9 +2,12 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
-COPY app.py .
+COPY backend/services/chat_service/requirements.txt .
+RUN /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
 
-CMD ["gunicorn", "-b", "0.0.0.0:5002", "app:app"]
+COPY backend /app/backend
+
+CMD ["/opt/venv/bin/gunicorn", "-b", "0.0.0.0:5002", "backend.services.chat_service.app:app"]

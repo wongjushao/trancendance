@@ -1,31 +1,38 @@
 services:
   auth-service:
-    build: ./backend/services/auth_service
+    image: trancendance-auth-service:latest
+    build:
+      context: .
+      dockerfile: backend/services/auth_service/Dockerfile
     ports:
       - "5001:5001"
     environment:
       - AUTH_SUPABASE_URL=${AUTH_SUPABASE_URL}
       - AUTH_SUPABASE_ANON_KEY=${AUTH_SUPABASE_ANON_KEY}
+      - DATABASE_URL=${SUPABASE_DB_URL}
 
   chat-service:
-    build: ./backend/services/chat_service
+    image: trancendance-chat-service:latest
+    build:
+      context: .
+      dockerfile: backend/services/chat_service/Dockerfile
     ports:
       - "5002:5002"
     environment:
-      - CHAT_SUPABASE_URL=${CHAT_SUPABASE_URL}
-      - CHAT_SUPABASE_SERVICE_ROLE_KEY=${CHAT_SUPABASE_SERVICE_ROLE_KEY}
-      - CHAT_TABLE=${CHAT_TABLE}
+      - DATABASE_URL=${SUPABASE_DB_URL}
 
   org-service:
-    build: ./backend/services/org_service
+    image: trancendance-org-service:latest
+    build:
+      context: .
+      dockerfile: backend/services/org_service/Dockerfile
     ports:
       - "5003:5003"
     environment:
-      - ORG_SUPABASE_URL=${ORG_SUPABASE_URL}
-      - ORG_SUPABASE_SERVICE_ROLE_KEY=${ORG_SUPABASE_SERVICE_ROLE_KEY}
-      - ORG_TABLE=${ORG_TABLE}
+      - DATABASE_URL=${SUPABASE_DB_URL}
 
   frontend:
+    image: trancendance-frontend:latest
     build: ./frontend
     ports:
       - "3000:80"
