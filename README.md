@@ -11,7 +11,7 @@ This setup runs isolated backend services behind the frontend proxy:
 ## Technology stack and roles
 
 - Frontend:
-	- UI is a static web page (`index.html`).
+	- UI is a React application.
 	- Built in Docker with Node.js (`node:20-alpine`) stage.
 	- Served at runtime by Nginx (`nginx:stable-alpine`).
 - Backend:
@@ -64,8 +64,13 @@ trancendance/
 ├── frontend/
 │   ├── default.conf
 │   ├── Dockerfile
-│   ├── index.html
 │   └── package.json
+│   ├── public/
+│   │   └── index.html
+│   └── src/
+│       ├── App.css
+│       ├── App.js
+│       └── index.js
 ├── grafana/
 │   ├── dashboards/
 │   │   └── Node Exporter-1771620042641.json

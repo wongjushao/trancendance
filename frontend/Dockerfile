@@ -5,8 +5,7 @@ COPY package.json ./
 RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
 COPY . .
-RUN npm run build || true
-RUN if [ ! -d /app/build ] || [ -z "$(ls -A /app/build 2>/dev/null)" ]; then mkdir -p /app/build && cp /app/index.html /app/build/index.html; fi
+RUN npm run build
 
 FROM nginx:stable-alpine
 WORKDIR /usr/share/nginx/html
