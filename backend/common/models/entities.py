@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from sqlite3 import Date
 import uuid
 from datetime import datetime
 
@@ -17,6 +18,8 @@ class Profile(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     # FK to auth.users.id is managed by Supabase; not declared here to avoid
     # DDL conflicts with the Supabase-managed auth schema.
+    bithday: Mapped[datetime | None] = mapped_column(Text)
+    phone_number: Mapped[str | None] = mapped_column(Text)
     username: Mapped[str | None] = mapped_column(Text)
     avatar_url: Mapped[str | None] = mapped_column(Text)
     bio: Mapped[str | None] = mapped_column(Text)
