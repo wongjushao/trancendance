@@ -102,7 +102,7 @@ Frontend proxy routes (`frontend/next.config.mjs`):
 - `/api/org/:path*` -> `http://org-service:5003/:path*`
 
 Common service endpoints:
-- Auth: `POST /verify`, `POST /profiles/sync`, `GET /health`, `GET /metrics`
+- Auth: `POST /api/auth-service/register` (requires `Authorization: Bearer <api-key>`), `GET /api/auth-service/health`, `GET /api/auth-service/metrics`, `GET /api/auth-service/docs`
 - Chat: `GET|POST /messages`, `GET /health`, `GET /metrics`
 - Org: `GET|POST /orgs`, `GET /health`, `GET /metrics`
 
