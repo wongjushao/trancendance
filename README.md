@@ -1,38 +1,39 @@
-# Loosely-Coupled Backend Services + Frontend + Prometheus + Grafana
+# Trancendance Stack (Flask Microservices + Next.js + Prometheus + Grafana)
 
-This setup runs isolated backend services behind the frontend proxy:
-- `auth-service` (token verification with Supabase Auth)
-- `chat-service` (chat messages with SQLAlchemy ORM)
-- `org-service` (organization data with SQLAlchemy ORM)
-- Static frontend served by nginx
-- Prometheus scraping all backend service metrics
-- Grafana with provisioned datasource/dashboards
+This repository runs a loosely-coupled service architecture in Docker Compose:
+- `auth-service`: Supabase token verification + profile sync endpoints
+- `chat-service`: chat message read/write endpoints
+- `org-service`: organization read/write endpoints
+- `frontend`: Next.js app with `/api/*` rewrites to backend services
+- `prometheus`: metrics collection
+- `grafana`: dashboards and alerting
+- `node-exporter`: host metrics exporter
 
-## Technology stack and roles
+## Technology stack
 
 - Frontend:
-	- UI is a React application.
-	- Built in Docker with Node.js (`node:20-alpine`) stage.
-	- Served at runtime by Nginx (`nginx:stable-alpine`).
+	- Next.js 14 + React 18
+	- Built and served from `node:20.19-alpine`
+	- Uses Next.js rewrites for backend proxying
 - Backend:
-	- 3 independent Flask microservices (`auth-service`, `chat-service`, `org-service`).
-	- Each service runs with Gunicorn in Python 3.11 Docker images.
-	- Services expose REST endpoints and `/metrics` for monitoring.
+	- 3 independent Flask services (`auth`, `chat`, `org`)
+	- Run with Gunicorn in `python:3.11-slim`
+	- Expose REST endpoints + `/metrics`
 - Database and auth:
-	- Supabase is used for authentication token validation (Auth API).
-	- Supabase Postgres is accessed directly with SQLAlchemy ORM via `DATABASE_URL`.
-	- Shared models are managed in one place and migrations are unified under one Alembic tree.
+	- Supabase Auth validates bearer tokens (`auth-service`)
+	- Supabase Postgres accessed via SQLAlchemy (`DATABASE_URL`)
+	- Shared models in `backend/common/models`, migrations in one Alembic tree
 - Monitoring:
-	- Prometheus collects metrics from backend services and node-exporter.
-	- Grafana reads Prometheus data to display dashboards and send alerts.
+	- Prometheus scrapes service and node-exporter metrics
+	- Grafana is provisioned with datasource, dashboards, and alerting config
 
-## Supabase auth and data flow
+## Request/data flow
 
-1. User sends request from frontend to `/api/...` on the frontend container.
-2. Nginx forwards the request to the matching backend service.
-3. For protected endpoints, backend verifies the user token with Supabase Auth.
-4. If token is valid, backend reads/writes data in Supabase tables.
-5. Backend returns response to frontend.
+1. Client calls the frontend on port `3000`.
+2. Frontend routes `/api/auth/*`, `/api/chat/*`, `/api/org/*` to backend services via Next.js rewrites.
+3. Protected auth operations validate bearer tokens against Supabase Auth.
+4. Services read/write Supabase Postgres through SQLAlchemy.
+5. Prometheus scrapes `/metrics`; Grafana visualizes and alerts.
 
 ## Program structure
 
@@ -43,97 +44,100 @@ trancendance/
 ├── Makefile
 ├── README.md
 ├── backend/
-│   ├── README.md
 │   ├── common/
 │   │   ├── db.py
 │   │   └── models/
 │   ├── migrations/
+│   │   ├── initial_schema.sql
+│   │   └── versions/
 │   └── services/
 │       ├── auth_service/
-│       │   ├── app.py
-│       │   ├── Dockerfile
-│       │   └── requirements.txt
 │       ├── chat_service/
-│       │   ├── app.py
-│       │   ├── Dockerfile
-│       │   └── requirements.txt
 │       └── org_service/
-│           ├── app.py
-│           ├── Dockerfile
-│           └── requirements.txt
 ├── frontend/
-│   ├── default.conf
 │   ├── Dockerfile
-│   └── package.json
-│   ├── public/
-│   │   └── index.html
+│   ├── next.config.mjs
+│   ├── package.json
+│   ├── pages/
 │   └── src/
-│       ├── App.css
-│       ├── App.js
-│       └── index.js
 ├── grafana/
 │   ├── dashboards/
-│   │   └── Node Exporter-1771620042641.json
 │   └── provisioning/
-│       ├── alerting/
-│       │   ├── alert-rules-1771776420679.yaml
-│       │   └── contact-points-1771620370160.yaml
-│       ├── dashboards/
-│       │   └── dashboards.yml
-│       ├── datasources/
-│       │   └── prometheus.yml
-│       └── plugins/
 └── prometheus/
-	└── prometheus.yml
+    └── prometheus.yml
 ```
 
 ## Quick start
 
 ```bash
 cd /path/to/trancendance
-cp .env.example .env
 docker compose up --build
 ```
 
-This setup runs fully in Docker containers:
-- Flask services run in `python:3.11-slim` images.
-- Frontend build uses `node:20-alpine` in Docker, then serves with nginx.
-- You do not need local Node.js or Flask installed on your machine.
+Useful Make targets:
+- `make start-server` (detached)
+- `make start-server-fg` (foreground)
+- `make down`
+- `make logs`
 
-## Service endpoints
+Run frontend dev server profile (hot reload):
 
-- Frontend: http://localhost:3000
-- Auth service (direct): http://localhost:5001
-- Chat service (direct): http://localhost:5002
-- Org service (direct): http://localhost:5003
-- Prometheus: http://localhost:9090
-- Grafana: http://localhost:3001
+```bash
+docker compose --profile dev up frontend-dev auth-service chat-service org-service
+```
 
-Frontend proxy routes:
-- `POST /api/auth/verify` -> `auth-service /verify`
-- `GET|POST /api/chat/messages` -> `chat-service /messages`
-- `GET|POST /api/org/orgs` -> `org-service /orgs`
+## Endpoints
+
+- Frontend (Next.js): `http://localhost:3000`
+- Frontend dev profile: `http://localhost:5173`
+- Auth service (direct): `http://localhost:5001`
+- Chat service (direct): `http://localhost:5002`
+- Org service (direct): `http://localhost:5003`
+- Prometheus: `http://localhost:9090`
+- Grafana: `http://localhost:3001`
+
+Frontend proxy routes (`frontend/next.config.mjs`):
+- `/api/auth/:path*` -> `http://auth-service:5001/:path*`
+- `/api/chat/:path*` -> `http://chat-service:5002/:path*`
+- `/api/org/:path*` -> `http://org-service:5003/:path*`
+
+Common service endpoints:
+- Auth: `POST /verify`, `POST /profiles/sync`, `GET /health`, `GET /metrics`
+- Chat: `GET|POST /messages`, `GET /health`, `GET /metrics`
+- Org: `GET|POST /orgs`, `GET /health`, `GET /metrics`
 
 ## Environment configuration
 
-All runtime values are read from `.env`.
+Runtime values are read from `.env`.
 
-Supabase variables:
+Core variables:
 - `AUTH_SUPABASE_URL`
 - `AUTH_SUPABASE_ANON_KEY`
-- `SUPABASE_DB_URL` (injected as `DATABASE_URL` to all backend services)
+- `SUPABASE_DB_URL` (injected as `DATABASE_URL` to backend services)
 
-Grafana variables (for SMTP + admin):
+Grafana variables:
 - `GRAFANA_ADMIN_USER`
 - `GRAFANA_ADMIN_PASSWORD`
+- `GF_SMTP_ENABLED`
 - `GF_SMTP_HOST`
 - `GF_SMTP_USER`
 - `GF_SMTP_PASSWORD`
 - `GF_SMTP_FROM_ADDRESS`
+- `GF_SMTP_FROM_NAME`
+- `GF_SMTP_SKIP_VERIFY`
+- `GF_SMTP_STARTTLS_POLICY`
+- `GF_SMTP_EHLO_IDENTITY`
+
+## Migrations
+
+Use Makefile helpers:
+- `make migrate-up`
+- `make migrate-down`
+
+Migrations are centralized under `backend/migrations/`.
 
 ## Notes
 
-- Each backend service has an isolated image, runtime, port, and environment.
-- All DB schema changes are managed centrally via `backend/migrations/`.
-- Prometheus scrapes `/metrics` on each service.
-- Default Grafana login is from `.env`.
+- Services are isolated by image/runtime/port and connected by Docker network.
+- Monitoring uses Prometheus scrape targets for all backend `/metrics` endpoints.
+- Grafana datasource/dashboards/alerting are provisioned from `grafana/provisioning/`.

@@ -18,6 +18,9 @@ Table auth.users {
 ------------------------- */
 Table public.profiles {
   id uuid [pk, not null, ref: > auth.users.id] // 与 auth.users.id 同一个 uuid
+  birthday date
+  invite_code text [unique]
+  invited_by uuid [ref: > public.profiles.id]
   username text
   avatar_url text
   bio text

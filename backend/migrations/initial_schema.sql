@@ -20,6 +20,9 @@ CREATE TABLE public.permissions (
 
 CREATE TABLE public.profiles (
 	id UUID NOT NULL, 
+	birthday DATE, 
+	invite_code TEXT, 
+	invited_by UUID, 
 	username TEXT, 
 	avatar_url TEXT, 
 	bio TEXT, 
@@ -27,7 +30,9 @@ CREATE TABLE public.profiles (
 	language TEXT, 
 	social_links JSONB, 
 	created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT now() NOT NULL, 
-	PRIMARY KEY (id)
+	PRIMARY KEY (id), 
+	UNIQUE (invite_code), 
+	FOREIGN KEY(invited_by) REFERENCES public.profiles (id)
 );
 
 CREATE TABLE public.api_keys (

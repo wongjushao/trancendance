@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from sqlite3 import Date
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import BigInteger, ForeignKey, Integer, PrimaryKeyConstraint, Text, UniqueConstraint, text
+from sqlalchemy import BigInteger, Date, ForeignKey, Integer, PrimaryKeyConstraint, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -18,7 +17,9 @@ class Profile(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     # FK to auth.users.id is managed by Supabase; not declared here to avoid
     # DDL conflicts with the Supabase-managed auth schema.
-    bithday: Mapped[datetime | None] = mapped_column(Text)
+    birthday: Mapped[date | None] = mapped_column(Date)
+    invite_code: Mapped[str | None] = mapped_column(Text, unique=True)
+    invited_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"))
     phone_number: Mapped[str | None] = mapped_column(Text)
     username: Mapped[str | None] = mapped_column(Text)
     avatar_url: Mapped[str | None] = mapped_column(Text)
