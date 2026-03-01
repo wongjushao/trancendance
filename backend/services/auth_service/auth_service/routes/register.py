@@ -23,6 +23,10 @@ def _parse_uuid(value: str | None):
         return None
     return uuid.UUID(str(value))
 
+def _validate_language(value: str | None):
+	if value in ("EN", "CN", "BM"):
+		return value
+	return None
 
 def serialize_profile(profile: Profile) -> dict:
     return {
@@ -73,13 +77,13 @@ def register_profile():
         profile.username = payload.get("username")
         profile.phone_number = payload.get("phone_number")
         profile.birthday = birthday
-        profile.invite_code = payload.get("invite_code")
+        profile.invite_code = None
         profile.invited_by = invited_by
-        profile.avatar_url = payload.get("avatar_url")
+        profile.avatar_url = None
         profile.bio = payload.get("bio")
         profile.timezone = payload.get("timezone")
-        profile.language = payload.get("language")
-        profile.social_links = payload.get("social_links")
+        profile.language = _validate_language(payload.get("language"))
+        profile.social_links = None
 
         session.commit()
         session.refresh(profile)
