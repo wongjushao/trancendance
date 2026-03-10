@@ -4,6 +4,10 @@ start-server:
 	@echo "Starting stack in background..."
 	@docker compose up --build -d
 
+start-server-wsl2:
+	@echo "Starting stack in background for WSL2..."
+	@docker compose up --build -d --scale node-exporter=0
+
 start-server-fg:
 	@echo "Starting stack in foreground (attach)..."
 	@docker compose up --build
@@ -28,4 +32,4 @@ migrate-down:
 	@docker build -f backend/migrations/Dockerfile -t trancendance-migrate .
 	@docker run --rm -e DATABASE_URL=$(shell grep SUPABASE_DB_URL .env | cut -d= -f2-) trancendance-migrate alembic -c backend/migrations/alembic.ini downgrade -1
 
-.PHONY: start-server start-server-fg auth-local chat-local org-local build down logs migrate-up migrate-down
+.PHONY: start-server start-server-wsl2 start-server-fg auth-local chat-local org-local build down logs migrate-up migrate-down
