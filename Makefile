@@ -20,6 +20,8 @@ down:
 
 fclean:
 	@docker compose down --rmi all --volumes --remove-orphans
+	@docker network prune -f
+	@docker system prune -f
 
 logs:
 	@docker compose logs --follow

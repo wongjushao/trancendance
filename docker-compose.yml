@@ -33,6 +33,8 @@ services:
 
   frontend:
     image: trancendance-frontend:latest
+    profiles:
+      - prod
     build:
       context: ./frontend
       dockerfile: Dockerfile
