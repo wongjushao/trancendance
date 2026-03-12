@@ -5,13 +5,17 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { 
   Search, Bell, Globe, Moon, User, ChevronDown, 
-  Settings, CreditCard, Award, HelpCircle, BookOpen, Sparkles
+  Settings, CreditCard, Award, HelpCircle, BookOpen, Sparkles,
+  MessageSquare, MessageCircleOff // NEW: Messaging Icons
 } from "lucide-react";
 import SignOutButton from "./SignOutButton";
 
 export default function Navbar({ user }: { user: any }) {
   const pathname = usePathname();
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
+  
+  // NEW: State for messaging visibility
+  const [isMessagingEnabled, setIsMessagingEnabled] = useState(true);
 
   if (pathname === "/onboarding") return null;
 
@@ -24,9 +28,16 @@ export default function Navbar({ user }: { user: any }) {
     window.dispatchEvent(new Event("trigger-auth-focus"));
   };
 
-  // NEW: Reset logic for Landing Page
   const handleLogoClick = () => {
     window.dispatchEvent(new Event("reset-landing-page"));
+  };
+
+  // NEW: Toggle messaging event
+  const toggleMessaging = () => {
+    const newState = !isMessagingEnabled;
+    setIsMessagingEnabled(newState);
+    // Custom event so the floating bubble knows when to hide/show
+    window.dispatchEvent(new CustomEvent("toggle-chat-visibility", { detail: newState }));
   };
 
   return (
@@ -86,6 +97,17 @@ export default function Navbar({ user }: { user: any }) {
           </Link>
           
           <div className="flex items-center gap-1 border-r border-white/10 pr-4 mr-1">
+            {/* NEW: Chat Toggle Button (Only if logged in) */}
+            {user && (
+              <button 
+                onClick={toggleMessaging} 
+                className={`p-2 transition ${isMessagingEnabled ? 'text-emerald-500' : 'text-slate-500'}`}
+                title={isMessagingEnabled ? "Disable Chat Bubble" : "Enable Chat Bubble"}
+              >
+                {isMessagingEnabled ? <MessageSquare size={20} /> : <MessageCircleOff size={20} />}
+              </button>
+            )}
+
             <div className="relative">
               <button onClick={() => toggleDropdown('lang')} className="p-2 text-slate-400 hover:text-emerald-400 transition" title="Change Language">
                 <Globe size={20} />

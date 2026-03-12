@@ -1,6 +1,7 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server-client";
 import { redirect } from "next/navigation";
 import Link from "next/link";
+import MessagingBubble from "../components/MessagingBubble";
 import { 
   BookOpen, Clock, Trophy, PlayCircle, ChevronRight, LayoutDashboard, 
   Settings, Flame, Search, Sparkles, Users, Star, ArrowUpRight, TrendingUp,
@@ -221,6 +222,7 @@ export default async function DashboardPage() {
 
         </div>
       </main>
+      <MessagingBubble user={user} />
     </div>
   );
 }
