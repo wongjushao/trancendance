@@ -111,8 +111,8 @@ Common service endpoints:
 Runtime values are read from `.env`.
 
 Core variables:
-- `AUTH_SUPABASE_URL`
-- `AUTH_SUPABASE_ANON_KEY`
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
 - `SUPABASE_DB_URL` (injected as `DATABASE_URL` to backend services)
 
 Grafana variables:

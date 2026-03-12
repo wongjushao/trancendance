@@ -14,10 +14,11 @@ export function getSupabaseBrowserClient(): SupabaseClient<SupabaseSchema> {
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  // Mapped from SUPABASE_URL / SUPABASE_ANON_KEY in docker-compose
 
   if (!supabaseUrl || !supabaseAnonKey) {
     throw new Error(
-      "Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY"
+      "Missing SUPABASE_URL or SUPABASE_ANON_KEY"
     );
   }
 

@@ -7,8 +7,8 @@ services:
     ports:
       - "5001:5001"
     environment:
-      - AUTH_SUPABASE_URL=${AUTH_SUPABASE_URL}
-      - AUTH_SUPABASE_ANON_KEY=${AUTH_SUPABASE_ANON_KEY}
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
       - DATABASE_URL=${SUPABASE_DB_URL}
 
   chat-service:
@@ -32,31 +32,15 @@ services:
       - DATABASE_URL=${SUPABASE_DB_URL}
 
   frontend:
-    image: trancendance-frontend:latest
-    profiles:
-      - prod
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    ports:
-      - "3000:3000"
-    depends_on:
-      - auth-service
-      - chat-service
-      - org-service
-    env_file:
-      - ./.env
-
-  frontend-dev:
     image: node:20.19-alpine
-    profiles:
-      - dev
     working_dir: /app
     command: sh -c "npm install && npm run dev -- -H 0.0.0.0 -p 3000"
     ports:
-      - "5173:3000"
+      - "3000:3000"
     environment:
       - CHOKIDAR_USEPOLLING=true
+      - NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL}
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
     volumes:
       - ./frontend:/app
       - /app/node_modules

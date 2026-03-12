@@ -12,9 +12,7 @@ start-server-fg:
 	@echo "Starting stack in foreground (attach)..."
 	@docker compose up --build
 
-frontend-dev:
-	@echo "Starting frontend in development mode..."
-	@docker compose --profile dev up --build -d frontend-dev
+
 
 build:
 	@docker compose build
