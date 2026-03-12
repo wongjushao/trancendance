@@ -44,6 +44,8 @@ services:
       - auth-service
       - chat-service
       - org-service
+    env_file:
+      - ./frontend/.env.local
 
   frontend-dev:
     image: node:20.19-alpine
@@ -62,6 +64,8 @@ services:
       - auth-service
       - chat-service
       - org-service
+    env_file:
+      - ./frontend/.env.local
   
   node-exporter:
     image: prom/node-exporter:latest

@@ -15,6 +15,12 @@ const nextConfig: NextConfig = {
         source: '/api/org/:path*',
         destination: 'http://org-service:5003/:path*',
       },
+      {
+        // This is what you call in fetch()
+        source: '/api/auth-service/:path*',
+        // This is where your Flask app is running
+        destination: 'http://127.0.0.1:5001/api/auth-service/:path*',
+      },
     ]
   },
 }
