@@ -7,6 +7,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from backend.common.db import create_engine_and_session
 from backend.common.models import Message
+from backend.services.chat_service.chat_service.routes import health_bp, metrics_bp
 
 
 REQUESTS = Counter("chat_requests_total", "Total chat service HTTP requests")
@@ -110,6 +111,9 @@ def create_app():
     def shutdown_session(_exception=None):
         if db_session is not None:
             db_session.remove()
+
+    app.register_blueprint(health_bp, url_prefix="/api/chat-service")
+    app.register_blueprint(metrics_bp, url_prefix="/api/chat-service")
 
     return app
 
