@@ -1,14 +1,23 @@
-FROM node:20.19-alpine
+FROM node:20
+
 WORKDIR /app
 
-COPY package*.json ./
-RUN npm ci
+# Install openssl for cert generation
+RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
 
-COPY . .
-RUN npm run build
+# Add the script
+COPY scripts/generate-certs.sh /generate-certs.sh
+RUN chmod +x /generate-certs.sh
 
-ENV NODE_ENV=production
+# Now copy the frontend code
+COPY frontend/package.json ./
+RUN npm cache clean --force
+RUN npm install -g pnpm && pnpm install
 
-EXPOSE 3000
+COPY frontend ./
 
-CMD ["npm", "run", "start", "--", "-H", "0.0.0.0", "-p", "3000"]
+# Run next.js without turbopack to avoid optional rust dependencies issues on build
+ENV TURBOPACK=0
+
+# Start the application using a custom server server.js
+CMD ["/bin/sh", "-c", "/generate-certs.sh frontend && npm run build && node server.js"]

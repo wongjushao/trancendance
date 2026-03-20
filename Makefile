@@ -21,12 +21,14 @@ down:
 	@docker compose down
 
 fclean:
-	@echo "Stopping all containers..."
-	@docker stop $$(docker ps -aq) || true
-	@docker rm $$(docker ps -aq) || true
-	@docker compose down --rmi all --volumes --remove-orphans
-	@docker network prune -f
-	@docker system prune -a -f --volumes
+	@echo "Stopping current compose project..."
+	@docker compose down --rmi all --volumes --remove-orphans || true
+	@echo "Removing stopped containers..."
+	@docker container prune -f || true
+	@echo "Removing unused networks..."
+	@docker network prune -f || true
+	@echo "Removing unused images/cache..."
+	@docker system prune -a -f || true
 
 logs:
 	@docker compose logs --follow

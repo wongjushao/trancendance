@@ -6,10 +6,10 @@ services:
       dockerfile: backend/services/auth_service/Dockerfile
     ports:
       - "5001:5001"
-    environment:
-      - SUPABASE_URL=${SUPABASE_URL}
-      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
-      - DATABASE_URL=${SUPABASE_DB_URL}
+    env_file:
+      - ./.env
+    networks:
+      - backend-network
 
   chat-service:
     image: trancendance-chat-service:latest
@@ -18,8 +18,10 @@ services:
       dockerfile: backend/services/chat_service/Dockerfile
     ports:
       - "5002:5002"
-    environment:
-      - DATABASE_URL=${SUPABASE_DB_URL}
+    env_file:
+      - ./.env
+    networks:
+      - backend-network
 
   org-service:
     image: trancendance-org-service:latest
@@ -28,19 +30,18 @@ services:
       dockerfile: backend/services/org_service/Dockerfile
     ports:
       - "5003:5003"
-    environment:
-      - DATABASE_URL=${SUPABASE_DB_URL}
+    env_file:
+      - ./.env
+    networks:
+      - backend-network
 
   frontend:
-    image: node:20.19-alpine
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
     working_dir: /app
-    command: sh -c "npm install && npm run dev -- -H 0.0.0.0 -p 3000"
     ports:
       - "3000:3000"
-    environment:
-      - CHOKIDAR_USEPOLLING=true
-      - NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL}
-      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
     volumes:
       - ./frontend:/app
       - /app/node_modules
@@ -50,15 +51,17 @@ services:
       - org-service
     env_file:
       - ./.env
+    networks:
+      - backend-network
   
   node-exporter:
     image: prom/node-exporter:latest
     ports:
       - "9101:9100"
     volumes:
-      - /:/host:ro,rslave
-    command:
-      - '--path.rootfs=/host'
+      - /:/host:ro
+    networks:
+      - backend-network
 
 
   prometheus:
@@ -67,27 +70,23 @@ services:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports:
       - "9090:9090"
-    command:
-      - --config.file=/etc/prometheus/prometheus.yml
+    networks:
+      - backend-network
 
   grafana:
     image: grafana/grafana:latest
     ports:
       - "3001:3000"
-    environment:
-      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
-      - GF_SMTP_ENABLED=${GF_SMTP_ENABLED}
-      - GF_SMTP_HOST=${GF_SMTP_HOST}
-      - GF_SMTP_USER=${GF_SMTP_USER}
-      - GF_SMTP_PASSWORD=${GF_SMTP_PASSWORD}
-      - GF_SMTP_FROM_ADDRESS=${GF_SMTP_FROM_ADDRESS}
-      - GF_SMTP_FROM_NAME=${GF_SMTP_FROM_NAME}
-      - GF_SMTP_SKIP_VERIFY=${GF_SMTP_SKIP_VERIFY}
-      - GF_SMTP_STARTTLS_POLICY=${GF_SMTP_STARTTLS_POLICY}
-      - GF_SMTP_EHLO_IDENTITY=${GF_SMTP_EHLO_IDENTITY}
+    env_file:
+      - ./.env
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning
       - ./grafana/dashboards:/var/lib/grafana/dashboards
     depends_on:
       - prometheus
+    networks:
+      - backend-network
+
+networks:
+  backend-network:
+    driver: bridge
