@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import EmailPasswordForm from "./components/EmailPasswordForm";
-import GoogleAuthButton from "./components/GoogleAuthButton";
+import EmailPasswordForm from "@/components/EmailPasswordForm";
+import GoogleAuthButton from "@/components/GoogleAuthButton";
 import { 
   CheckCircle2, Building2, GraduationCap, Users, ArrowRight, 
   PlayCircle, Star, Globe, ShieldCheck, Zap, BarChart3, ShieldEllipsis 

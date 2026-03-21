@@ -12,8 +12,6 @@ start-server-fg:
 	@echo "Starting stack in foreground (attach)..."
 	@docker compose up --build
 
-
-
 build:
 	@docker compose build
 
