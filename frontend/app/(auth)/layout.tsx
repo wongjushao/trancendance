@@ -10,7 +10,7 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
       {/* Container for Login/Register forms. 
           The 'z-10' ensures the form stays above the blur effects.
       */}
-      <div className="relative z-10 w-full max-w-md">
+      <div className="relative z-10 w-full max-w-5xl">
         {children}
       </div>
     </div>
