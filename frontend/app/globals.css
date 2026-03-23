@@ -1,26 +1,184 @@
 @import "tailwindcss";
 
+/* --- 1. CONFIGURATION & SOURCES --- */
+@source "../**/*.{js,ts,jsx,tsx}";
+/*@import "tw-animate-css";*/
+
+/* --- 2. CUSTOM VARIANTS --- */
+@custom-variant dark (&:is(.dark *));
+
+/* --- 3. DESIGN TOKENS (CSS Variables) --- */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --font-size: 16px;
+  
+  /* Dark LMS Theme - Purple Gradient Accents */
+  --background: #0B0B0F;
+  --foreground: #FFFFFF;
+  --card: #16161F;
+  --card-foreground: #FFFFFF;
+  --popover: #16161F;
+  --popover-foreground: #FFFFFF;
+  --primary: #6A5CFF;
+  --primary-foreground: #FFFFFF;
+  --secondary: #12121A;
+  --secondary-foreground: #FFFFFF;
+  --muted: #12121A;
+  --muted-foreground: #6B6B80;
+  --accent: #6A5CFF;
+  --accent-foreground: #FFFFFF;
+  --destructive: #FF5C5C;
+  --destructive-foreground: #FFFFFF;
+  --border: rgba(106, 92, 255, 0.1);
+  --input: rgba(106, 92, 255, 0.1);
+  --input-background: #12121A;
+  --switch-background: #6B6B80;
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
+  --ring: #6A5CFF;
+  
+  /* Chart Colors */
+  --chart-1: #6A5CFF;
+  --chart-2: #9B6CFF;
+  --chart-3: #FF5C5C;
+  --chart-4: #5CFF9B;
+  --chart-5: #FFD75C;
+  
+  --radius: 1rem;
+  
+  /* Sidebar Colors */
+  --sidebar: #0B0B0F;
+  --sidebar-foreground: #FFFFFF;
+  --sidebar-primary: #6A5CFF;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #16161F;
+  --sidebar-accent-foreground: #FFFFFF;
+  --sidebar-border: rgba(106, 92, 255, 0.1);
+  --sidebar-ring: #6A5CFF;
+  
+  /* Text Colors */
+  --text-primary: #FFFFFF;
+  --text-secondary: #A0A0B5;
+  --text-muted: #6B6B80;
+  
+  /* Purple Gradient */
+  --gradient-purple: linear-gradient(135deg, #6A5CFF 0%, #9B6CFF 100%);
 }
 
+/* OKLCH Overrides for modern displays */
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.145 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.145 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.985 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.396 0.141 25.723);
+  --destructive-foreground: oklch(0.637 0.237 25.331);
+  --border: oklch(0.269 0 0);
+  --input: oklch(0.269 0 0);
+  --ring: oklch(0.439 0 0);
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(0.269 0 0);
+  --sidebar-ring: oklch(0.439 0 0);
+}
+
+/* --- 4. TAILWIND THEME EXTENSION --- */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-input-background: var(--input-background);
+  --color-switch-background: var(--switch-background);
+  --color-ring: var(--ring);
+  
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Add custom utilities like your gradient */
+  --background-image-purple-gradient: var(--gradient-purple);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* --- 5. BASE STYLES & TYPOGRAPHY --- */
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
   }
-}
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  body {
+    @apply bg-background text-foreground antialiased selection:bg-purple-500/30;
+  }
+
+  html {
+    font-size: var(--font-size);
+  }
+
+  h1 { @apply text-2xl font-medium leading-relaxed; }
+  h2 { @apply text-xl font-medium leading-relaxed; }
+  h3 { @apply text-lg font-medium leading-relaxed; }
+  h4 { @apply text-base font-medium leading-relaxed; }
+  
+  label { @apply text-base font-medium leading-relaxed; }
+  button { @apply text-base font-medium leading-relaxed; }
+  input { @apply text-base font-normal leading-relaxed; }
+
+  /* Custom Scrollbar for your Dark Theme */
+  ::-webkit-scrollbar {
+    width: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-background;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-white/5 rounded-full hover:bg-white/10 transition-colors;
+  }
 }

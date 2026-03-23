@@ -1,16 +1,41 @@
-import { createSupabaseServerClient } from "@/lib/supabase/server-client";
-import Navbar from "./components/Navbar";
+import type { Metadata } from "next";
 import "./globals.css";
+import { NotificationToast } from "@/components/lms/NotificationToast";
 
-export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const supabase = await createSupabaseServerClient();
-  const { data: { user } } = await supabase.auth.getUser();
+export const metadata: Metadata = {
+  title: "Educatorio",
+  description: "Learning Platform",
+};
 
+/**
+ * Root layout — wraps every page in the app.
+ *
+ * Sidebar and TopNav are intentionally NOT here. They live in
+ * app/(main)/layout.tsx which only wraps authenticated pages.
+ * Auth pages (login, register, forgot-password) and the landing
+ * page render without any sidebar/nav chrome.
+ */
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="en">
-      <body className="bg-[#02050b] antialiased">
-        <Navbar user={user} />
-        {children}
+      <body>
+        <div className="min-h-screen bg-[#0B0B0F] relative selection:bg-purple-500/30">
+          {/* Global background gradient blobs */}
+          <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
+            <div className="absolute top-[-10%] left-[-10%] w-[600px] h-[600px] bg-purple-600/10 rounded-full blur-[120px]" />
+            <div className="absolute bottom-[-10%] right-[-10%] w-[600px] h-[600px] bg-violet-600/10 rounded-full blur-[120px]" />
+          </div>
+
+          <div className="relative z-10">
+            {children}
+          </div>
+
+          <NotificationToast />
+        </div>
       </body>
     </html>
   );
