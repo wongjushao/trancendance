@@ -9,6 +9,7 @@ services:
     environment:
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - SUPABSE_JWT_SECRET=${SUPABASE_JWT_SECRET}
       - DATABASE_URL=${SUPABASE_DB_URL}
 
   chat-service:
@@ -60,7 +61,6 @@ services:
       - /:/host:ro,rslave
     command:
       - '--path.rootfs=/host'
-
 
   prometheus:
     image: prom/prometheus:latest

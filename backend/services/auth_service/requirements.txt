@@ -4,3 +4,4 @@ gunicorn
 supabase
 SQLAlchemy
 psycopg2-binary
+PyJWT

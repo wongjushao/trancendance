@@ -28,12 +28,15 @@ def create_app():
 
     app.config["DB_SESSION"] = db_session
 
-    register_bearer_auth_middleware(app, protected_endpoints={"register.register_profile"})
+    # The register endpoint no longer uses the api_keys bearer middleware.
+    # It verifies Supabase JWTs directly using SUPABASE_JWT_SECRET.
+    # Pass an empty set so the old middleware runs on nothing.
+    register_bearer_auth_middleware(app, protected_endpoints=set())
 
-    app.register_blueprint(docs_bp, url_prefix="/api/auth-service")
-    app.register_blueprint(health_bp, url_prefix="/api/auth-service")
-    app.register_blueprint(metrics_bp, url_prefix="/api/auth-service")
-    app.register_blueprint(register_bp, url_prefix="/api/auth-service")
+    app.register_blueprint(docs_bp,      url_prefix="/api/auth-service")
+    app.register_blueprint(health_bp,    url_prefix="/api/auth-service")
+    app.register_blueprint(metrics_bp,   url_prefix="/api/auth-service")
+    app.register_blueprint(register_bp,  url_prefix="/api/auth-service")
 
     @app.teardown_appcontext
     def shutdown_session(_exception=None):

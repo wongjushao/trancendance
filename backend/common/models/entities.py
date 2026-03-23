@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import BigInteger, Date, ForeignKey, Integer, PrimaryKeyConstraint, Text, UniqueConstraint, text
+from sqlalchemy import Boolean, BigInteger, Date, ForeignKey, Integer, PrimaryKeyConstraint, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -28,6 +28,7 @@ class Profile(Base):
     language: Mapped[str | None] = mapped_column(Text)
     social_links: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(server_default=text("now()"), nullable=False)
+    onboarded: Mapped[bool] = mapped_column(Boolean, server_default=text("false"), default=False)
 
 
 class ApiKey(Base):
