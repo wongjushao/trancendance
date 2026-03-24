@@ -35,7 +35,7 @@ def create_app():
 
     app.register_blueprint(docs_bp,      url_prefix="/api/auth-service")
     app.register_blueprint(health_bp,    url_prefix="/api/auth-service")
-    app.register_blueprint(metrics_bp,   url_prefix="/api/auth-service")
+    app.register_blueprint(metrics_bp)
     app.register_blueprint(register_bp,  url_prefix="/api/auth-service")
 
     @app.teardown_appcontext

@@ -9,7 +9,7 @@ import requests
 from flask import Blueprint, current_app, jsonify, request
 from sqlalchemy.exc import SQLAlchemyError
 
-from backend.common.models import Profile
+from backend.common.models import Profile, Organization, OrganizationMember, OrganizationDomain
 
 
 register_bp = Blueprint("register", __name__)
@@ -27,11 +27,12 @@ register_bp = Blueprint("register", __name__)
 # The token payload contains:
 #   sub  → the user's UUID (this is what we use as the profile ID)
 #   role → "authenticated" for logged-in users
+#   email → the user's email address (if available)
 #   exp  → expiry timestamp (PyJWT validates this automatically)
 
-def _verify_supabase_jwt(token: str) -> uuid.UUID:
+def _verify_supabase_jwt(token: str) -> tuple[uuid.UUID, str | None]:
     """
-    Verifies the Supabase JWT and returns the user UUID from the `sub` claim.
+    Verifies the Supabase JWT and returns a tuple: (user_uuid, email).
     Raises ValueError with a descriptive message on any failure.
     """
     try:
@@ -79,9 +80,11 @@ def _verify_supabase_jwt(token: str) -> uuid.UUID:
     sub = payload.get("sub")
     if not sub:
         raise ValueError("Token is missing 'sub' claim")
+    
+    email = payload.get("email")
 
     try:
-        return uuid.UUID(str(sub))
+        return uuid.UUID(str(sub)), email
     except (TypeError, ValueError):
         raise ValueError(f"Token 'sub' is not a valid UUID: {sub!r}")
 
@@ -114,15 +117,20 @@ def serialize_profile(profile: Profile) -> dict:
     return {
         "id":           str(profile.id),
         "username":     profile.username,
+        "first_name":   profile.first_name,
+        "last_name":    profile.last_name,
         "phone_number": profile.phone_number,
         "birthday":     profile.birthday.isoformat() if profile.birthday else None,
         "invite_code":  profile.invite_code,
         "invited_by":   str(profile.invited_by) if profile.invited_by else None,
         "avatar_url":   profile.avatar_url,
         "bio":          profile.bio,
+        "job_title":    profile.job_title,
+        "interests":    profile.interests,
         "timezone":     profile.timezone,
         "language":     profile.language,
         "social_links": profile.social_links,
+        "onboarded":    profile.onboarded,
         "created_at":   profile.created_at.isoformat() if profile.created_at else None,
     }
 
@@ -141,7 +149,7 @@ def register_profile():
         return jsonify({"error": "Missing or invalid Authorization header. Expected: Bearer <token>"}), 401
 
     try:
-        user_id = _verify_supabase_jwt(token)
+        user_id, email = _verify_supabase_jwt(token)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 401
 
@@ -179,17 +187,48 @@ def register_profile():
             session.add(profile)
 
         profile.username     = payload.get("username")       or profile.username
+        profile.first_name   = payload.get("first_name")     or profile.first_name
+        profile.last_name    = payload.get("last_name")      or profile.last_name
         profile.phone_number = payload.get("phone_number")   or profile.phone_number
         profile.birthday     = birthday                       or profile.birthday
         profile.invited_by   = invited_by                    or profile.invited_by
         profile.bio          = payload.get("bio")            or profile.bio
+        profile.job_title    = payload.get("role")           or profile.job_title # Mapped from 'role'
+        profile.interests    = payload.get("interests")      or profile.interests
         profile.timezone     = payload.get("timezone")       or profile.timezone
         profile.language     = _validate_language(payload.get("language")) or profile.language
+        
+        # Mark as onboarded since this is the completion of the onboarding flow
+        profile.onboarded = True
 
-        # These are managed elsewhere — never overwrite from this endpoint
-        # profile.avatar_url   — set via a dedicated avatar upload endpoint
-        # profile.invite_code  — generated server-side, not user-submitted
-        # profile.social_links — set via profile settings
+        # ── Auto-join organization based on email domain ──────────────────────
+        if email:
+            domain = email.split("@")[-1].lower()
+            
+            # Find organization associated with this domain
+            org_domain = (
+                session.query(OrganizationDomain)
+                .filter(OrganizationDomain.domain == domain)
+                .first()
+            )
+            
+            if org_domain:
+                # Check if already a member
+                member = (
+                    session.query(OrganizationMember)
+                    .filter(
+                        OrganizationMember.organization_id == org_domain.organization_id,
+                        OrganizationMember.user_id == user_id
+                    )
+                    .first()
+                )
+                if not member:
+                    member = OrganizationMember(
+                        organization_id=org_domain.organization_id,
+                        user_id=user_id,
+                        member_role="member"
+                    )
+                    session.add(member)
 
         session.commit()
         session.refresh(profile)
