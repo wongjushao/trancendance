@@ -4,7 +4,8 @@ import os
 import uuid
 from datetime import date
 
-import jwt                          # pip install PyJWT
+import jwt
+import requests
 from flask import Blueprint, current_app, jsonify, request
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -33,19 +34,41 @@ def _verify_supabase_jwt(token: str) -> uuid.UUID:
     Verifies the Supabase JWT and returns the user UUID from the `sub` claim.
     Raises ValueError with a descriptive message on any failure.
     """
-    secret = os.environ.get("SUPABASE_JWT_SECRET", "")
-    if not secret:
-        raise ValueError("SUPABASE_JWT_SECRET env var is not set")
-
     try:
+        header = jwt.get_unverified_header(token)
+        alg = header.get("alg")
+        
+        algorithms = []
+        key = None
+
+        if alg == "HS256":
+            secret = os.environ.get("SUPABASE_JWT_SECRET")
+            if not secret:
+                raise ValueError("SUPABASE_JWT_SECRET env var is not set")
+            key = secret
+            algorithms = ["HS256"]
+        elif alg in ("RS256", "ES256"):
+            supabase_url = os.environ.get("SUPABASE_URL")
+            if not supabase_url:
+                raise ValueError("SUPABASE_URL env var is not set")
+            
+            jwks_url = f"{supabase_url}/auth/v1/.well-known/jwks.json"
+            jwks_client = jwt.PyJWKClient(jwks_url)
+            signing_key = jwks_client.get_signing_key_from_jwt(token)
+            key = signing_key.key
+            algorithms = [alg]
+        else:
+            raise ValueError(f"Unsupported algorithm: {alg}")
+        
         payload = jwt.decode(
             token,
-            secret,
-            algorithms=["HS256"],
-            # Supabase sets audience to "authenticated" for logged-in users
+            key,
+            algorithms=algorithms,
             audience="authenticated",
             options={"verify_exp": True},
         )
+    except jwt.PyJWKClientError as exc:
+        raise ValueError(f"Could not fetch JWKS: {exc}")
     except jwt.ExpiredSignatureError:
         raise ValueError("Token has expired — please log in again")
     except jwt.InvalidAudienceError:
@@ -130,9 +153,6 @@ def register_profile():
     except (TypeError, ValueError):
         return jsonify({"error": "Field 'birthday' must be YYYY-MM-DD"}), 400
 
-    # ── Resolve invite_code_input → invited_by UUID ───────────────────────────
-    # The frontend sends the human-readable invite code string ("invite_code_input").
-    # We look up the profile that owns that code to get the UUID for `invited_by`.
     invited_by: uuid.UUID | None = None
     invite_code_input = payload.get("invite_code_input", "").strip()
 

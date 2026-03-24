@@ -40,7 +40,10 @@ def register_bearer_auth_middleware(app: Flask, protected_endpoints: set[str] | 
 
     @app.before_request
     def authorize_bearer_key():
-        if endpoints and request.endpoint not in endpoints:
+        if not endpoints:
+             return None
+
+        if request.endpoint not in endpoints:
             return None
 
         db_session = app.config.get("DB_SESSION")

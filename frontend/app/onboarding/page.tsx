@@ -228,6 +228,8 @@ export default function OnboardingPage() {
     if (formData.phone.trim())      payload.phone_number      = formData.phone.trim();
     if (formData.inviteCode.trim()) payload.invite_code_input = formData.inviteCode.trim();
 
+    console.log('[onboarding] Submitting payload to backend:', payload);
+
     let backendOk = false;
     let backendErrorMessage: string | null = null;
 
@@ -237,11 +239,10 @@ export default function OnboardingPage() {
         headers: {
           "Content-Type":  "application/json",
           // The backend extracts the user UUID from this JWT — no API key needed
-          "Authorization": `Bearer ${session.access_token}`,
+          "Authorization": `Bearer ${session?.access_token}`,
         },
         body: JSON.stringify(payload),
       });
-
       if (res.ok) {
         backendOk = true;
       } else {
@@ -250,16 +251,6 @@ export default function OnboardingPage() {
           body?.error ??
           `Server responded with status ${res.status}. Please try again.`;
         console.error("[onboarding] Backend error:", res.status, backendErrorMessage);
-        //getting error here, need to fix this part for backend
-        await supabase.auth.updateUser({
-          data: {
-            full_name: `${formData.firstName} ${formData.lastName}`.trim(),
-            role:      formData.role,
-            interests: formData.interests,
-            onboarded: true,
-          },
-        });
-        router.push("/dashboard");
       }
     } catch (err) {
       backendErrorMessage =
