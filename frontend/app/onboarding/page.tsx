@@ -5,19 +5,19 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import {
   Camera, User, Building2, BookOpen, ArrowRight, ArrowLeft,
-  Check, Phone, Calendar, Hash, Globe, FileText, AlertCircle,
+  Check, Calendar, Globe, FileText, AlertCircle,
+  Briefcase, Sparkles, Mail, Users as UsersIcon,
 } from "lucide-react";
 import { GlowButton } from "@/components/lms/GlowButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { motion, AnimatePresence } from "framer-motion";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
-import { isProfileComplete, type ProfileRow } from "@/lib/profile";
 import { clearOnboardingCache } from "@/lib/onboarding";
 
-// ── Constants ──────────────────────────────────────────────────────────────
+// ── Constants ────────────────────────────────────────────────────────────────
 
-const TOTAL_STEPS = 5;
+const TOTAL_STEPS = 4;
 
 const LANGUAGES = [
   { code: "EN", label: "English" },
@@ -25,51 +25,64 @@ const LANGUAGES = [
   { code: "BM", label: "Bahasa Melayu" },
 ] as const;
 
-const TIMEZONES = [
-  "Asia/Kuala_Lumpur",
-  "Asia/Singapore",
-  "Asia/Bangkok",
-  "Asia/Jakarta",
-  "Asia/Manila",
-  "Asia/Tokyo",
-  "Asia/Shanghai",
-  "Asia/Kolkata",
-  "Asia/Dubai",
-  "Europe/London",
-  "Europe/Paris",
-  "America/New_York",
-  "America/Los_Angeles",
-  "Australia/Sydney",
-  "Pacific/Auckland",
+const JOB_TITLES = [
+  "Student",
+  "Software Engineer",
+  "Data Scientist",
+  "Product Manager",
+  "UI/UX Designer",
+  "DevOps Engineer",
+  "Marketing Specialist",
+  "Teacher/Instructor",
+  "Researcher",
+  "Entrepreneur",
+  "Other",
 ];
 
 const INTERESTS = [
-  "Web Development", "Mobile Development", "Data Science", "Machine Learning",
-  "UI/UX Design", "DevOps", "Cloud Computing", "Cybersecurity",
-  "Blockchain", "Game Development", "AI Research", "Product Management",
+  "Web Development",
+  "Mobile Development",
+  "Data Science",
+  "Machine Learning",
+  "Artificial Intelligence",
+  "UI/UX Design",
+  "DevOps",
+  "Cloud Computing",
+  "Cybersecurity",
+  "Blockchain",
+  "Game Development",
+  "Product Management",
+  "Digital Marketing",
+  "Business Strategy",
+  "Leadership",
 ];
 
-const STEP_LABELS = ["Photo", "Personal", "Profile", "Campus", "Interests"];
+const STEP_LABELS = ["Profile", "Personal", "Career", "Interests"];
 
-// ── Types ───────────────────────────────────────────────────────────────────
+// ── Types ────────────────────────────────────────────────────────────────────
 
 type FormData = {
-  photo:        File | null;
-  photoPreview: string;
-  firstName:    string;
-  lastName:     string;
-  username:     string;
-  birthday:     string;
-  inviteCode:   string;
-  role:         string;
-  bio:          string;
-  timezone:     string;
-  language:     string;
-  organization: string;
-  interests:    string[];
+  // Profile Info
+  avatar: File | null;
+  avatarPreview: string;
+  username: string;
+  firstName: string;
+  lastName: string;
+  bio: string;
+  
+  // Personal Info
+  birthday: string;
+  timezone: string;
+  language: string;
+  
+  // Career Info
+  jobTitle: string;
+  
+  // Interests
+  interests: string[];
 };
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
 function detectTimezone(): string {
   try {
@@ -79,17 +92,21 @@ function detectTimezone(): string {
   }
 }
 
-// Shared className for ALL <select> elements on this page.
-// [color-scheme:dark] tells the browser to render the native <option>
-// popup in dark mode so options don't appear on a white background.
+function detectLanguage(): string {
+  try {
+    const lang = navigator.language || "en";
+    if (lang.startsWith("zh")) return "CN";
+    if (lang.startsWith("ms")) return "BM";
+    return "EN";
+  } catch {
+    return "EN";
+  }
+}
+
+// Shared className for ALL <select> elements
 const SELECT_CLASS =
   "w-full bg-[#12121A] border border-white/10 text-white rounded-xl h-12 px-4 " +
   "focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500/50 " +
-  "transition-all outline-none appearance-none cursor-pointer [color-scheme:dark]";
-
-const SELECT_ERROR_CLASS =
-  "w-full bg-[#12121A] border border-red-500/60 text-white rounded-xl h-12 px-4 " +
-  "focus:ring-2 focus:ring-red-500/20 focus:border-red-500/50 " +
   "transition-all outline-none appearance-none cursor-pointer [color-scheme:dark]";
 
 // ── Component ────────────────────────────────────────────────────────────────
@@ -98,85 +115,91 @@ export default function OnboardingPage() {
   const router = useRouter();
 
   const [currentStep, setCurrentStep] = useState(1);
-  const [isSaving,    setIsSaving]    = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [stepError,   setStepError]   = useState<string | null>(null);
+  const [stepError, setStepError] = useState<string | null>(null);
+  const [isLoadingUser, setIsLoadingUser] = useState(true);
 
   const [formData, setFormData] = useState<FormData>({
-    photo:        null,
-    photoPreview: "",
-    firstName:    "",
-    lastName:     "",
-    username:     "",
-    birthday:     "",
-    inviteCode:   "",
-    role:         "",
-    bio:          "",
-    timezone:     detectTimezone(),
-    language:     "EN",
-    organization: "",
-    interests:    [],
+    avatar: null,
+    avatarPreview: "",
+    username: "",
+    firstName: "",
+    lastName: "",
+    bio: "",
+    birthday: "",
+    timezone: detectTimezone(),
+    language: detectLanguage(),
+    jobTitle: "",
+    interests: [],
   });
 
-  // ── Guard: skip onboarding if already complete ──────────────────────────
+  // ── Load user data from Google OAuth if available (but NOT avatar) ──────────
   useEffect(() => {
-    const check = async () => {
+    const loadUserData = async () => {
+      setIsLoadingUser(true);
       const supabase = getSupabaseBrowserClient();
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { router.replace("/"); return; }
+      
+      if (!user) {
+        router.replace("/");
+        return;
+      }
 
-      // Fast path: onboarded flag already stamped in user_metadata
+      // Fast path: check if already onboarded
       if (user.user_metadata?.onboarded === true) {
         router.replace("/dashboard");
         return;
       }
 
-      // Slow path: check profiles table directly (read-only; backend owns writes)
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("username, bio, timezone, language, birthday")
-        .eq("id", user.id)
-        .single();
-
-      if (isProfileComplete(profile as ProfileRow | null)) {
-        router.replace("/dashboard");
-        return;
-      }
-
-      // Pre-fill from auth metadata
-      const fullName: string =
-        user.user_metadata?.full_name || user.user_metadata?.name || "";
-      const [first = "", ...rest] = fullName.trim().split(" ");
-
+      // Pre-fill from Google OAuth data if available (name only, no avatar)
+      const userMetadata = user.user_metadata || {};
+      const userEmail = user.email || "";
+      
+      // Extract Google name data
+      const googleName = userMetadata.full_name || userMetadata.name || "";
+      const googleFirstName = userMetadata.given_name || "";
+      const googleLastName = userMetadata.family_name || "";
+      
+      // Auto-generate username from email or name
+      const suggestedUsername = googleName
+        ? googleName.toLowerCase().replace(/\s+/g, ".")
+        : userEmail.split("@")[0];
+      
       setFormData((prev) => ({
         ...prev,
-        firstName: prev.firstName || first,
-        lastName:  prev.lastName  || rest.join(" "),
-        username:  prev.username  || user.email?.split("@")[0] || "",
+        firstName: prev.firstName || googleFirstName || (googleName.split(" ")[0] || ""),
+        lastName: prev.lastName || googleLastName || (googleName.split(" ").slice(1).join(" ") || ""),
+        username: prev.username || suggestedUsername,
+        // Do NOT set avatarPreview from Google
       }));
+
+      setIsLoadingUser(false);
     };
-    check();
+    
+    loadUserData();
   }, [router]);
 
-  // ── Per-step validation ──────────────────────────────────────────────────
-
+  // ── Per-step validation ────────────────────────────────────────────────────
   function validateStep(step: number): string | null {
+    if (step === 1) {
+      if (!formData.firstName.trim()) return "First name is required.";
+      if (!formData.lastName.trim()) return "Last name is required.";
+      if (!formData.username.trim()) return "Username is required.";
+      if (formData.username.includes(" ")) return "Username cannot contain spaces.";
+      if (formData.username.length < 3) return "Username must be at least 3 characters.";
+      if (!formData.bio.trim()) return "Bio is required — tell us a little about yourself.";
+    }
     if (step === 2) {
-      if (!formData.firstName.trim())       return "First name is required.";
-      if (!formData.username.trim())        return "Username is required.";
-      if (formData.username.includes(" "))  return "Username cannot contain spaces.";
-      if (!formData.birthday)               return "Birthday is required.";
+      if (!formData.birthday) return "Birthday is required.";
     }
     if (step === 3) {
-      if (!formData.role)                   return "Please select your professional role to continue.";
-      if (!formData.bio.trim())             return "Bio is required — tell us a little about yourself.";
-      if (!formData.timezone)               return "Please select your timezone.";
+      if (!formData.jobTitle) return "Please select your job title to continue.";
     }
     return null;
   }
 
-  // ── Navigation ───────────────────────────────────────────────────────────
-
+  // ── Navigation ─────────────────────────────────────────────────────────────
   const handleBack = () => {
     setStepError(null);
     if (currentStep > 1) setCurrentStep((s) => s - 1);
@@ -185,7 +208,10 @@ export default function OnboardingPage() {
   const handleNext = async () => {
     setSubmitError(null);
     const err = validateStep(currentStep);
-    if (err) { setStepError(err); return; }
+    if (err) {
+      setStepError(err);
+      return;
+    }
     setStepError(null);
 
     if (currentStep < TOTAL_STEPS) {
@@ -193,16 +219,12 @@ export default function OnboardingPage() {
       return;
     }
 
-    // ── Final submit ──────────────────────────────────────────────────────────
+    // ── Final submit ─────────────────────────────────────────────────────────
     setIsSaving(true);
 
     const supabase = getSupabaseBrowserClient();
-
-    // Fetch both user and session in parallel
-    const [{ data: { user } }, { data: { session } }] = await Promise.all([
-      supabase.auth.getUser(),
-      supabase.auth.getSession(),
-    ]);
+    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
 
     if (!user || !session) {
       setSubmitError("Your session has expired. Please log in again.");
@@ -212,14 +234,17 @@ export default function OnboardingPage() {
     }
 
     // ── POST to backend: /api/auth-service/register ──────────────────────────
-    const payload: Record<string, string> = {
-      username:  formData.username.trim(),
-      bio:       formData.bio.trim(),
-      timezone:  formData.timezone,
-      language:  formData.language,
-      birthday:  formData.birthday,
+    const payload: Record<string, any> = {
+      username: formData.username.trim(),
+      first_name: formData.firstName.trim(),
+      last_name: formData.lastName.trim(),
+      bio: formData.bio.trim(),
+      timezone: formData.timezone,
+      language: formData.language,
+      birthday: formData.birthday,
+      job_title: formData.jobTitle,
+      interests: formData.interests,
     };
-    if (formData.inviteCode.trim()) payload.invite_code_input = formData.inviteCode.trim();
 
     console.log('[onboarding] Submitting payload to backend:', payload);
 
@@ -228,10 +253,10 @@ export default function OnboardingPage() {
 
     try {
       const res = await fetch("/api/auth-service/register", {
-        method:  "POST",
+        method: "POST",
         headers: {
-          "Content-Type":  "application/json",
-          "Authorization": `Bearer ${session?.access_token}`,
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${session.access_token}`,
         },
         body: JSON.stringify(payload),
       });
@@ -245,29 +270,26 @@ export default function OnboardingPage() {
         console.log('[onboarding] Backend success');
       } else {
         const body = await res.json().catch(() => ({}));
-        backendErrorMessage =
-          body?.error ??
-          `Server responded with status ${res.status}. Please try again.`;
+        backendErrorMessage = body?.error || `Server responded with status ${res.status}.`;
         console.error("[onboarding] Backend error:", res.status, backendErrorMessage);
       }
     } catch (err) {
-      backendErrorMessage =
-        "Could not reach the server. Please check your connection and try again.";
+      backendErrorMessage = "Could not reach the server. Please check your connection.";
       console.error("[onboarding] Backend unreachable:", err);
     }
 
     if (!backendOk) {
-      setSubmitError(backendErrorMessage ?? "An unexpected error occurred. Please try again.");
+      setSubmitError(backendErrorMessage ?? "An unexpected error occurred.");
       setIsSaving(false);
       return;
     }
 
-    // ── Upload avatar if one was selected ─────────────────────────────────────
-    if (formData.photo) {
+    // ── Upload avatar if one was selected ────────────────────────────────────
+    if (formData.avatar) {
       console.log('[onboarding] Uploading avatar...');
       try {
         const avatarFormData = new FormData();
-        avatarFormData.append('avatar', formData.photo);
+        avatarFormData.append('avatar', formData.avatar);
         
         const uploadRes = await fetch('/api/auth-service/upload-avatar', {
           method: 'POST',
@@ -280,25 +302,20 @@ export default function OnboardingPage() {
         if (uploadRes.ok) {
           const uploadData = await uploadRes.json();
           console.log('[onboarding] Avatar uploaded successfully:', uploadData.avatar_url);
-          // Store in localStorage to prevent flash of missing avatar
           localStorage.setItem('avatar_url', uploadData.avatar_url);
           
-          // Dispatch event for immediate update
           if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent('avatar-updated', { 
               detail: { avatarUrl: uploadData.avatar_url } 
             }));
           }
         } else {
-          const errorText = await uploadRes.text();
-          console.error('[onboarding] Avatar upload failed:', uploadRes.status, errorText);
-          // Show a toast notification but don't block onboarding
-          setSubmitError("Profile created but avatar upload failed. You can upload it later.");
+          console.error('[onboarding] Avatar upload failed');
+          // Don't show error for avatar upload failure - it's optional
         }
       } catch (err) {
         console.error('[onboarding] Avatar upload error:', err);
         // Don't fail onboarding if avatar upload fails
-        setSubmitError("Profile created but avatar upload failed. You can upload it later.");
       }
     }
 
@@ -306,15 +323,16 @@ export default function OnboardingPage() {
     router.push("/dashboard");
   };
 
-  // ── Helpers ──────────────────────────────────────────────────────────────
-
-  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // ── Form helpers ───────────────────────────────────────────────────────────
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] || null;
     if (file) {
+      // Create local preview
+      const previewUrl = URL.createObjectURL(file);
       setFormData((prev) => ({
         ...prev,
-        photo:        file,
-        photoPreview: URL.createObjectURL(file),
+        avatar: file,
+        avatarPreview: previewUrl,
       }));
     }
   };
@@ -334,8 +352,22 @@ export default function OnboardingPage() {
       setFormData((prev) => ({ ...prev, [field]: e.target.value }));
     };
 
-  // ── Render ───────────────────────────────────────────────────────────────
+  if (isLoadingUser) {
+    return (
+      <div className="min-h-screen bg-[#0B0B0F] flex items-center justify-center">
+        <div className="text-white">Loading...</div>
+      </div>
+    );
+  }
 
+  // Generate initials for avatar fallback
+  const getInitials = () => {
+    const first = formData.firstName?.[0] || "";
+    const last = formData.lastName?.[0] || "";
+    return (first + last).toUpperCase() || "U";
+  };
+
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-[#0B0B0F] relative overflow-hidden flex flex-col">
       <div className="absolute top-20 -left-20 w-96 h-96 bg-purple-600/10 rounded-full blur-[120px] pointer-events-none" />
@@ -344,7 +376,7 @@ export default function OnboardingPage() {
       <div className="relative z-10 flex-1 flex items-center justify-center p-4 py-12">
         <div className="w-full max-w-2xl">
 
-          {/* ── Progress bar ─────────────────────────────────────────────── */}
+          {/* Progress bar */}
           <div className="mb-10">
             <div className="flex items-center justify-between mb-3">
               {Array.from({ length: TOTAL_STEPS }, (_, i) => i + 1).map((step) => (
@@ -383,8 +415,8 @@ export default function OnboardingPage() {
             </div>
           </div>
 
-          {/* ── Content card ─────────────────────────────────────────────── */}
-          <div className="bg-[#16161F]/80 backdrop-blur-xl border border-white/10 rounded-3xl p-6 sm:p-10 shadow-2xl shadow-purple-500/5 min-h-[500px] flex flex-col">
+          {/* Content card */}
+          <div className="bg-[#16161F]/80 backdrop-blur-xl border border-white/10 rounded-3xl p-6 sm:p-10 shadow-2xl shadow-purple-500/5 min-h-[550px] flex flex-col">
             <div className="flex-1">
               <AnimatePresence mode="wait">
                 <motion.div
@@ -395,139 +427,82 @@ export default function OnboardingPage() {
                   transition={{ duration: 0.35, ease: "easeOut" }}
                 >
 
-                  {/* ── Step 1: Photo ────────────────────────────────────── */}
+                  {/* Step 1: Profile (Photo + Basic Info) */}
                   {currentStep === 1 && (
-                    <div className="text-center space-y-8 py-4">
-                      <div className="space-y-2">
-                        <h2 className="text-3xl font-bold text-white">Create your profile</h2>
-                        <p className="text-[#A0A0B5]">First, let&apos;s put a face to the name</p>
-                        <p className="text-xs text-[#6B6B80]">Optional — you can add a photo later in settings.</p>
+                    <div className="space-y-6 py-4">
+                      <div className="text-center">
+                        <h2 className="text-3xl font-bold text-white mb-2">Your Profile</h2>
+                        <p className="text-[#A0A0B5]">Let's get to know you</p>
                       </div>
+                      
+                      {/* Avatar Upload - no Google avatar prefill */}
                       <div className="flex flex-col items-center gap-4">
                         <div className="relative group">
-                          <div className="w-36 h-36 rounded-full bg-[#12121A] border-2 border-dashed border-white/20 flex items-center justify-center overflow-hidden transition-all group-hover:border-purple-500/50">
-                            {formData.photoPreview ? (
-                              <Image src={formData.photoPreview} alt="Profile Preview" fill className="object-cover" />
+                          <div className="w-32 h-32 rounded-full bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center overflow-hidden shadow-xl shadow-purple-500/20">
+                            {formData.avatarPreview ? (
+                              <img 
+                                src={formData.avatarPreview} 
+                                alt="Profile Preview" 
+                                className="w-full h-full object-cover"
+                              />
                             ) : (
-                              <User className="w-12 h-12 text-[#6B6B80]" />
+                              <span className="text-white font-black text-4xl tracking-tighter">
+                                {getInitials()}
+                              </span>
                             )}
                           </div>
                           <label
-                            htmlFor="photo-upload"
+                            htmlFor="avatar-upload"
                             className="absolute bottom-1 right-1 p-2 bg-purple-600 rounded-full text-white cursor-pointer shadow-lg hover:bg-purple-500 transition-colors"
                           >
                             <Camera className="w-5 h-5" />
                           </label>
                         </div>
-                        <input type="file" accept="image/*" onChange={handlePhotoChange} className="hidden" id="photo-upload" />
-                        <p className="text-xs text-[#6B6B80]">Supports JPG, PNG or GIF · Max 5 MB</p>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* ── Step 2: Personal Details ─────────────────────────── */}
-                  {currentStep === 2 && (
-                    <div className="space-y-6 py-4">
-                      <div className="text-center">
-                        <h2 className="text-3xl font-bold text-white mb-2">Personal Details</h2>
-                        <p className="text-[#A0A0B5]">Tell us a bit about yourself</p>
+                        <input type="file" accept="image/*" onChange={handleAvatarChange} className="hidden" id="avatar-upload" />
+                        <p className="text-xs text-[#6B6B80]">Optional — add a photo to personalize your profile</p>
                       </div>
 
+                      {/* Name Fields */}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div className="space-y-2">
                           <Label className="text-sm font-medium text-[#A0A0B5]">
                             First Name <span className="text-red-400">*</span>
                           </Label>
-                          <div className="relative">
-                            <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6B6B80]" />
-                            <Input value={formData.firstName} onChange={set("firstName")} placeholder="Alex"
-                              className="pl-10 bg-[#12121A] border-white/10 text-white rounded-xl h-12" />
-                          </div>
+                          <Input 
+                            value={formData.firstName} 
+                            onChange={set("firstName")} 
+                            placeholder="Alex"
+                            className="bg-[#12121A] border-white/10 text-white rounded-xl h-12" 
+                          />
                         </div>
                         <div className="space-y-2">
-                          <Label className="text-sm font-medium text-[#A0A0B5]">Last Name</Label>
-                          <Input value={formData.lastName} onChange={set("lastName")} placeholder="Smith"
-                            className="bg-[#12121A] border-white/10 text-white rounded-xl h-12" />
+                          <Label className="text-sm font-medium text-[#A0A0B5]">
+                            Last Name <span className="text-red-400">*</span>
+                          </Label>
+                          <Input 
+                            value={formData.lastName} 
+                            onChange={set("lastName")} 
+                            placeholder="Smith"
+                            className="bg-[#12121A] border-white/10 text-white rounded-xl h-12" 
+                          />
                         </div>
                       </div>
 
+                      {/* Username */}
                       <div className="space-y-2">
                         <Label className="text-sm font-medium text-[#A0A0B5]">
                           Username <span className="text-red-400">*</span>
                         </Label>
                         <div className="relative">
                           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B6B80] text-sm font-medium">@</span>
-                          <Input value={formData.username} onChange={set("username")} placeholder="alex_smith"
-                            className="pl-8 bg-[#12121A] border-white/10 text-white rounded-xl h-12" />
+                          <Input 
+                            value={formData.username} 
+                            onChange={set("username")} 
+                            placeholder="alex_smith"
+                            className="pl-8 bg-[#12121A] border-white/10 text-white rounded-xl h-12" 
+                          />
                         </div>
-                        <p className="text-xs text-[#6B6B80]">No spaces. This is your unique identifier.</p>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label className="text-sm font-medium text-[#A0A0B5]">
-                            Birthday <span className="text-red-400">*</span>
-                          </Label>
-                          <div className="relative">
-                            <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6B6B80] z-10" />
-                            <Input
-                              type="date"
-                              value={formData.birthday}
-                              onChange={set("birthday")}
-                              max={new Date().toISOString().split("T")[0]}
-                              className="pl-10 bg-[#12121A] border-white/10 text-white rounded-xl h-12 [color-scheme:dark]"
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label className="text-sm font-medium text-[#A0A0B5]">Invite Code</Label>
-                        <div className="relative">
-                          <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6B6B80]" />
-                          <Input value={formData.inviteCode} onChange={set("inviteCode")}
-                            placeholder="Enter invite code (optional)"
-                            className="pl-10 bg-[#12121A] border-white/10 text-white rounded-xl h-12 font-mono tracking-wider" />
-                        </div>
-                        <p className="text-xs text-[#6B6B80]">If a friend invited you, enter their code here.</p>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* ── Step 3: Profile / Role ───────────────────────────── */}
-                  {currentStep === 3 && (
-                    <div className="space-y-6 py-4">
-                      <div className="text-center">
-                        <h2 className="text-3xl font-bold text-white mb-2">Your Profile</h2>
-                        <p className="text-[#A0A0B5]">Help others know who you are</p>
-                      </div>
-
-                      {/* Professional Role */}
-                      <div className="space-y-2">
-                        <Label className="text-sm font-medium text-[#A0A0B5]">
-                          Professional Role <span className="text-red-400">*</span>
-                        </Label>
-                        <select
-                          value={formData.role}
-                          onChange={(e) => {
-                            setStepError(null);
-                            setFormData((prev) => ({ ...prev, role: e.target.value }));
-                          }}
-                          className={stepError && !formData.role ? SELECT_ERROR_CLASS : SELECT_CLASS}
-                        >
-                          <option value="">Select your current role</option>
-                          <option value="student">Student</option>
-                          <option value="teacher">Teacher / Instructor</option>
-                          <option value="admin">Administrator</option>
-                          <option value="professional">Working Professional</option>
-                          <option value="other">Other</option>
-                        </select>
-                        {stepError && !formData.role && (
-                          <div className="flex items-center gap-2 mt-1 p-3 bg-red-500/10 border border-red-500/30 rounded-xl">
-                            <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-                            <p className="text-red-400 text-sm">{stepError}</p>
-                          </div>
-                        )}
+                        <p className="text-xs text-[#6B6B80]">No spaces. 3+ characters. This is your unique identifier.</p>
                       </div>
 
                       {/* Bio */}
@@ -540,7 +515,7 @@ export default function OnboardingPage() {
                           <textarea
                             value={formData.bio}
                             onChange={set("bio")}
-                            placeholder="Tell us about yourself — your background, what you're learning..."
+                            placeholder="Tell us about yourself — your background, what you're passionate about..."
                             rows={3}
                             maxLength={300}
                             className="w-full pl-10 pr-4 py-3 bg-[#12121A] border border-white/10 text-white rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500/50 transition-all placeholder:text-[#6B6B80] text-sm"
@@ -548,111 +523,108 @@ export default function OnboardingPage() {
                         </div>
                         <p className="text-xs text-[#6B6B80] text-right">{formData.bio.length}/300</p>
                       </div>
+                    </div>
+                  )}
 
-                      {/* Timezone + Language */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label className="text-sm font-medium text-[#A0A0B5]">
-                            Timezone <span className="text-red-400">*</span>
-                          </Label>
-                          <div className="relative">
-                            <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6B6B80] pointer-events-none z-10" />
-                            <select
-                              value={formData.timezone}
-                              onChange={(e) => {
-                                setStepError(null);
-                                setFormData((prev) => ({ ...prev, timezone: e.target.value }));
-                              }}
-                              className={`${SELECT_CLASS} pl-10`}
-                            >
-                              <option value="">Select timezone</option>
-                              {TIMEZONES.map((tz) => (
-                                <option key={tz} value={tz}>{tz.replace(/_/g, " ")}</option>
-                              ))}
-                            </select>
-                          </div>
+                  {/* Step 2: Personal Details (Birthday + Language) */}
+                  {currentStep === 2 && (
+                    <div className="space-y-6 py-4">
+                      <div className="text-center">
+                        <h2 className="text-3xl font-bold text-white mb-2">Personal Details</h2>
+                        <p className="text-[#A0A0B5]">Tell us a bit about yourself</p>
+                      </div>
+
+                      {/* Birthday */}
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium text-[#A0A0B5]">
+                          Birthday <span className="text-red-400">*</span>
+                        </Label>
+                        <div className="relative">
+                          <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6B6B80] z-10" />
+                          <Input
+                            type="date"
+                            value={formData.birthday}
+                            onChange={set("birthday")}
+                            max={new Date().toISOString().split("T")[0]}
+                            className="pl-10 bg-[#12121A] border-white/10 text-white rounded-xl h-12 [color-scheme:dark]"
+                          />
                         </div>
+                      </div>
 
-                        <div className="space-y-2">
-                          <Label className="text-sm font-medium text-[#A0A0B5]">
-                            Language <span className="text-red-400">*</span>
-                          </Label>
+                      {/* Language - User selectable */}
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium text-[#A0A0B5]">
+                          Language <span className="text-red-400">*</span>
+                        </Label>
+                        <select
+                          value={formData.language}
+                          onChange={set("language")}
+                          className={SELECT_CLASS}
+                        >
+                          {LANGUAGES.map(({ code, label }) => (
+                            <option key={code} value={code}>{label}</option>
+                          ))}
+                        </select>
+                        <p className="text-xs text-[#6B6B80]">
+                          Your timezone has been automatically detected as: <span className="text-purple-400">{formData.timezone}</span>
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Step 3: Career */}
+                  {currentStep === 3 && (
+                    <div className="space-y-8 py-4">
+                      <div className="text-center">
+                        <h2 className="text-3xl font-bold text-white mb-2">Your Career</h2>
+                        <p className="text-[#A0A0B5]">Help us personalize your learning experience</p>
+                      </div>
+
+                      {/* Job Title */}
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium text-[#A0A0B5]">
+                          Job Title <span className="text-red-400">*</span>
+                        </Label>
+                        <div className="relative">
+                          <Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6B6B80] pointer-events-none z-10" />
                           <select
-                            value={formData.language}
-                            onChange={(e) => {
-                              setStepError(null);
-                              setFormData((prev) => ({ ...prev, language: e.target.value }));
-                            }}
-                            className={SELECT_CLASS}
+                            value={formData.jobTitle}
+                            onChange={set("jobTitle")}
+                            className={`${SELECT_CLASS} pl-10`}
                           >
-                            {LANGUAGES.map(({ code, label }) => (
-                              <option key={code} value={code}>{label}</option>
+                            <option value="">Select your job title</option>
+                            {JOB_TITLES.map((title) => (
+                              <option key={title} value={title}>{title}</option>
                             ))}
                           </select>
                         </div>
                       </div>
-
-                      {/* Step error for bio/timezone (role is already shown inline above) */}
-                      {stepError && formData.role && (
-                        <div className="flex items-center gap-2 p-3 bg-red-500/10 border border-red-500/30 rounded-xl">
-                          <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-                          <p className="text-red-400 text-sm">{stepError}</p>
-                        </div>
-                      )}
                     </div>
                   )}
 
-                  {/* ── Step 4: Campus ───────────────────────────────────── */}
+                  {/* Step 4: Interests */}
                   {currentStep === 4 && (
                     <div className="space-y-8 py-4">
                       <div className="text-center">
-                        <h2 className="text-3xl font-bold text-white mb-2">Connect to a Campus</h2>
-                        <p className="text-[#A0A0B5]">Collaborate with your school or organization</p>
-                        <p className="text-xs text-[#6B6B80] mt-1">Optional — you can do this later.</p>
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-sm font-medium text-[#A0A0B5]">School or Organization</Label>
-                        <Input value={formData.organization} onChange={set("organization")}
-                          placeholder="Search for your school or enter a join code"
-                          className="bg-[#12121A] border-white/10 text-white rounded-xl h-12" />
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <button type="button"
-                          className="p-5 bg-[#12121A] border border-white/5 rounded-2xl hover:border-purple-500/40 hover:bg-purple-500/5 transition-all text-left group">
-                          <div className="flex items-center gap-3 mb-2">
-                            <Building2 className="w-5 h-5 text-purple-400" />
-                            <p className="text-white font-semibold group-hover:text-purple-400">Join Existing</p>
-                          </div>
-                          <p className="text-[#6B6B80] text-xs leading-relaxed">Enter a unique code provided by your institution.</p>
-                        </button>
-                        <button type="button"
-                          className="p-5 bg-[#12121A] border border-white/5 rounded-2xl hover:border-purple-500/40 hover:bg-purple-500/5 transition-all text-left group">
-                          <div className="flex items-center gap-3 mb-2">
-                            <BookOpen className="w-5 h-5 text-purple-400" />
-                            <p className="text-white font-semibold group-hover:text-purple-400">Create New</p>
-                          </div>
-                          <p className="text-[#6B6B80] text-xs leading-relaxed">Register your school or study group on the platform.</p>
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* ── Step 5: Interests ────────────────────────────────── */}
-                  {currentStep === 5 && (
-                    <div className="space-y-8 py-4">
-                      <div className="text-center">
                         <h2 className="text-3xl font-bold text-white mb-2">Your Interests</h2>
-                        <p className="text-[#A0A0B5]">We&apos;ll personalise your learning feed based on these.</p>
-                        <p className="text-xs text-[#6B6B80] mt-1">Select as many as you like — optional.</p>
+                        <p className="text-[#A0A0B5]">We'll personalize your learning feed based on these</p>
+                        <p className="text-xs text-[#6B6B80] mt-1">Select as many as you like</p>
                       </div>
+                      
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                         {INTERESTS.map((interest) => (
-                          <button key={interest} type="button" onClick={() => toggleInterest(interest)}
-                            className={`p-3 rounded-xl border text-sm font-medium transition-all text-center ${
-                              formData.interests.includes(interest)
+                          <button
+                            key={interest}
+                            type="button"
+                            onClick={() => toggleInterest(interest)}
+                            className={`
+                              p-3 rounded-xl border text-sm font-medium transition-all text-center
+                              ${formData.interests.includes(interest)
                                 ? "bg-purple-500/10 border-purple-500 text-purple-400 shadow-[0_0_15px_rgba(168,85,247,0.1)]"
                                 : "bg-[#12121A] border-white/5 text-[#6B6B80] hover:border-white/20 hover:text-white"
-                            }`}>
+                              }
+                            `}
+                          >
                             {interest}
                           </button>
                         ))}
@@ -671,11 +643,11 @@ export default function OnboardingPage() {
               </AnimatePresence>
             </div>
 
-            {/* ── Footer ───────────────────────────────────────────────── */}
+            {/* Footer */}
             <div className="mt-10 pt-6 border-t border-white/5 space-y-4">
 
-              {/* Step error shown in footer for steps 2 and 4 (step 3 shows inline) */}
-              {stepError && currentStep !== 3 && (
+              {/* Step error shown in footer */}
+              {stepError && (
                 <div className="flex items-center gap-2 p-3 bg-red-500/10 border border-red-500/30 rounded-xl">
                   <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
                   <p className="text-red-400 text-sm">{stepError}</p>
@@ -694,7 +666,7 @@ export default function OnboardingPage() {
                     Step {currentStep} of {TOTAL_STEPS}
                   </span>
                   <GlowButton variant="primary" onClick={handleNext} isLoading={isSaving} className="px-8">
-                    {currentStep === TOTAL_STEPS ? "Finish Setup" : "Next Step"}
+                    {currentStep === TOTAL_STEPS ? "Complete Setup" : "Continue"}
                     <ArrowRight className="w-4 h-4 ml-2" />
                   </GlowButton>
                 </div>

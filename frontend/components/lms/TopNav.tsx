@@ -1,21 +1,46 @@
+// frontend/components/lms/TopNav.tsx
+
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { Bell, Search, User, ChevronDown, Settings, CreditCard } from "lucide-react";
 import { Input } from "../ui/input";
 import SignOutButton from "../SignOutButton";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 import { useAvatar } from "@/lib/useAvatar";
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 
 interface TopNavProps {
   user: SupabaseUser;
 }
 
-export function TopNav({ user }: TopNavProps) {
+const PROFILE_UPDATED_EVENT = 'profile-updated';
+
+export function TopNav({ user: initialUser }: TopNavProps) {
   const [profileOpen, setProfileOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [user, setUser] = useState(initialUser);
   const { avatarUrl, isLoading } = useAvatar();
+
+  // Listen for profile updates
+  useEffect(() => {
+    const handleProfileUpdate = async (event: CustomEvent) => {
+      // Refresh user data from Supabase
+      const supabase = getSupabaseBrowserClient();
+      const { data: { user: updatedUser } } = await supabase.auth.getUser();
+      if (updatedUser) {
+        setUser(updatedUser);
+      }
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener(PROFILE_UPDATED_EVENT, handleProfileUpdate as EventListener);
+      return () => {
+        window.removeEventListener(PROFILE_UPDATED_EVENT, handleProfileUpdate as EventListener);
+      };
+    }
+  }, []);
 
   // Derive display values from the real Supabase user
   const fullName: string =

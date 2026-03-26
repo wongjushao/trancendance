@@ -1,5 +1,8 @@
+// frontend/app/_landing/LandingAuthed.tsx
+
 "use client";
 
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import {
   ArrowRight, BookOpen, LayoutDashboard, GraduationCap,
@@ -8,6 +11,7 @@ import {
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 import SignOutButton from "@/components/SignOutButton";
 import { useAvatar } from "@/lib/useAvatar";
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 
 const quickLinks = [
   { href: "/dashboard",     icon: LayoutDashboard, label: "Dashboard",    desc: "Your learning overview" },
@@ -20,8 +24,30 @@ interface LandingAuthedProps {
   user: SupabaseUser;
 }
 
-export default function LandingAuthed({ user }: LandingAuthedProps) {
+const PROFILE_UPDATED_EVENT = 'profile-updated';
+
+export default function LandingAuthed({ user: initialUser }: LandingAuthedProps) {
   const { avatarUrl } = useAvatar();
+  const [user, setUser] = useState(initialUser);
+
+  // Listen for profile updates
+  useEffect(() => {
+    const handleProfileUpdate = async (event: CustomEvent) => {
+      // Refresh user data from Supabase
+      const supabase = getSupabaseBrowserClient();
+      const { data: { user: updatedUser } } = await supabase.auth.getUser();
+      if (updatedUser) {
+        setUser(updatedUser);
+      }
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener(PROFILE_UPDATED_EVENT, handleProfileUpdate as EventListener);
+      return () => {
+        window.removeEventListener(PROFILE_UPDATED_EVENT, handleProfileUpdate as EventListener);
+      };
+    }
+  }, []);
 
   const fullName: string =
     user.user_metadata?.full_name ||

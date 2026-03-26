@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import uuid
 from datetime import date
+from typing import List, Optional
 
 import jwt
 import requests
@@ -16,18 +17,6 @@ register_bp = Blueprint("register", __name__)
 
 
 # ── JWT verification ──────────────────────────────────────────────────────────
-#
-# The frontend sends the Supabase session access_token as a Bearer token.
-# Supabase signs its JWTs with a project-level secret available at:
-#   Supabase Dashboard → Project Settings → API → JWT Secret
-#
-# Add to your .env / docker-compose:
-#   SUPABASE_JWT_SECRET=your-secret-here
-#
-# The token payload contains:
-#   sub  → the user's UUID (this is what we use as the profile ID)
-#   role → "authenticated" for logged-in users
-#   exp  → expiry timestamp (PyJWT validates this automatically)
 
 def _verify_supabase_jwt(token: str) -> uuid.UUID:
     """
@@ -108,21 +97,32 @@ def _validate_language(value: str | None) -> str | None:
     return None
 
 
+def _parse_interests(value: list | None) -> list | None:
+    """Parse interests list, ensure it's a proper JSON array"""
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return [str(item) for item in value if item]
+    return None
+
+
 # ── Serialiser ────────────────────────────────────────────────────────────────
 
 def serialize_profile(profile: Profile) -> dict:
     return {
-        "id":           str(profile.id),
-        "username":     profile.username,
-        "birthday":     profile.birthday.isoformat() if profile.birthday else None,
-        "invite_code":  profile.invite_code,
-        "invited_by":   str(profile.invited_by) if profile.invited_by else None,
-        "avatar_url":   profile.avatar_url,
-        "bio":          profile.bio,
-        "timezone":     profile.timezone,
-        "language":     profile.language,
+        "id": str(profile.id),
+        "username": profile.username,
+        "first_name": profile.first_name,
+        "last_name": profile.last_name,
+        "job_title": profile.job_title,
+        "birthday": profile.birthday.isoformat() if profile.birthday else None,
+        "avatar_url": profile.avatar_url,
+        "bio": profile.bio,
+        "timezone": profile.timezone,
+        "language": profile.language,
+        "interests": profile.interests,
         "social_links": profile.social_links,
-        "created_at":   profile.created_at.isoformat() if profile.created_at else None,
+        "created_at": profile.created_at.isoformat() if profile.created_at else None,
     }
 
 
@@ -134,7 +134,7 @@ def register_profile():
     if db_session is None:
         return jsonify({"error": "Database is not configured. Set valid DATABASE_URL"}), 503
 
-    # ── Auth: verify the Supabase JWT from the Authorization header ───────────
+    # ── Auth: verify the Supabase JWT from the Authorization header ─────────────
     token = _extract_bearer_token()
     if token is None:
         return jsonify({"error": "Missing or invalid Authorization header. Expected: Bearer <token>"}), 401
@@ -144,7 +144,7 @@ def register_profile():
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 401
 
-    # ── Parse request body ────────────────────────────────────────────────────
+    # ── Parse request body ──────────────────────────────────────────────────────
     payload = request.get_json(silent=True) or {}
 
     try:
@@ -152,24 +152,10 @@ def register_profile():
     except (TypeError, ValueError):
         return jsonify({"error": "Field 'birthday' must be YYYY-MM-DD"}), 400
 
-    invited_by: uuid.UUID | None = None
-    invite_code_input = payload.get("invite_code_input", "").strip()
+    # Parse interests
+    interests = _parse_interests(payload.get("interests"))
 
-    if invite_code_input:
-        session = db_session()
-        try:
-            referrer = (
-                session.query(Profile)
-                .filter(Profile.invite_code == invite_code_input)
-                .first()
-            )
-            if referrer:
-                invited_by = referrer.id
-            # If no matching code found, silently ignore — don't error the user
-        finally:
-            session.close()
-
-    # ── Upsert the profile row ────────────────────────────────────────────────
+    # ── Upsert the profile row ──────────────────────────────────────────────────
     session = db_session()
     try:
         profile = session.query(Profile).filter(Profile.id == user_id).first()
@@ -177,17 +163,16 @@ def register_profile():
             profile = Profile(id=user_id)
             session.add(profile)
 
-        profile.username     = payload.get("username")       or profile.username
-        profile.birthday     = birthday                       or profile.birthday
-        profile.invited_by   = invited_by                    or profile.invited_by
-        profile.bio          = payload.get("bio")            or profile.bio
-        profile.timezone     = payload.get("timezone")       or profile.timezone
-        profile.language     = _validate_language(payload.get("language")) or profile.language
-
-        # These are managed elsewhere — never overwrite from this endpoint
-        # profile.avatar_url   — set via a dedicated avatar upload endpoint
-        # profile.invite_code  — generated server-side, not user-submitted
-        # profile.social_links — set via profile settings
+        # Update all fields
+        profile.username = payload.get("username") or profile.username
+        profile.first_name = payload.get("first_name") or profile.first_name
+        profile.last_name = payload.get("last_name") or profile.last_name
+        profile.job_title = payload.get("job_title") or profile.job_title
+        profile.birthday = birthday or profile.birthday
+        profile.bio = payload.get("bio") or profile.bio
+        profile.timezone = payload.get("timezone") or profile.timezone
+        profile.language = _validate_language(payload.get("language")) or profile.language
+        profile.interests = interests or profile.interests
 
         session.commit()
         session.refresh(profile)

@@ -1,3 +1,5 @@
+# backend/services/auth_service/auth_service/routes/profile.py
+
 from __future__ import annotations
 
 import os
@@ -80,6 +82,9 @@ def serialize_profile(profile: Profile) -> dict:
     return {
         "id": str(profile.id),
         "username": profile.username,
+        "first_name": profile.first_name,
+        "last_name": profile.last_name,
+        "job_title": profile.job_title,
         "birthday": profile.birthday.isoformat() if profile.birthday else None,
         "invite_code": profile.invite_code,
         "invited_by": str(profile.invited_by) if profile.invited_by else None,
@@ -88,6 +93,7 @@ def serialize_profile(profile: Profile) -> dict:
         "timezone": profile.timezone,
         "language": profile.language,
         "social_links": profile.social_links,
+        "interests": profile.interests,
         "created_at": profile.created_at.isoformat() if profile.created_at else None,
     }
 
@@ -99,10 +105,12 @@ def _is_profile_complete(profile: Profile) -> bool:
     
     required_fields = [
         profile.username,
+        profile.first_name,
+        profile.last_name,
         profile.bio,
-        profile.timezone,
         profile.language,
         profile.birthday,
+        profile.job_title,
     ]
     
     return all(field is not None and field != "" for field in required_fields)
@@ -155,11 +163,11 @@ def update_profile():
 
     data = request.get_json(silent=True) or {}
     
-    # Fields that can be updated
-    # REMOVED "avatar_url" from allowed fields - avatar should only be updated via /upload-avatar endpoint
+    # All fields that can be updated
     allowed_fields = [
         "username", "bio", "timezone", 
-        "language", "social_links"
+        "language", "social_links", "first_name", 
+        "last_name", "job_title", "birthday"
     ]
     
     session = db_session()

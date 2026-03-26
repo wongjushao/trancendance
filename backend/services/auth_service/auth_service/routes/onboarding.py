@@ -13,7 +13,10 @@ onboarding_bp = Blueprint("onboarding", __name__)
 
 
 def _verify_supabase_jwt(token: str) -> uuid.UUID:
-    """Verify Supabase JWT and return user UUID."""
+    """
+    Verifies the Supabase JWT and returns the user UUID from the `sub` claim.
+    Raises ValueError with a descriptive message on any failure.
+    """
     try:
         header = jwt.get_unverified_header(token)
         alg = header.get("alg")
@@ -78,26 +81,29 @@ def _extract_bearer_token() -> str | None:
 def _is_profile_complete(profile: Profile | None) -> bool:
     """
     Check if a profile has all required fields filled.
-    No separate 'onboarded' column needed - derive from field completeness.
+    Required: username, first_name, last_name, bio, language, birthday, job_title
     """
     if not profile:
         return False
     
-    # These are the fields collected during onboarding
     required_fields = [
         profile.username,
+        profile.first_name,
+        profile.last_name,
         profile.bio,
-        profile.timezone,
         profile.language,
         profile.birthday,
+        profile.job_title,
     ]
 
-    print(f"[DEBUG] Checking fields:")
+    print(f"[DEBUG] Checking required fields:")
     print(f"  username: {profile.username}")
+    print(f"  first_name: {profile.first_name}")
+    print(f"  last_name: {profile.last_name}")
     print(f"  bio: {profile.bio}")
-    print(f"  timezone: {profile.timezone}")
     print(f"  language: {profile.language}")
     print(f"  birthday: {profile.birthday}")
+    print(f"  job_title: {profile.job_title}")
     
     return all(field is not None and field != "" for field in required_fields)
 
@@ -109,7 +115,6 @@ def get_onboarding_status():
     if db_session is None:
         return jsonify({"error": "Database is not configured"}), 503
 
-    # Extract and verify token
     token = _extract_bearer_token()
     if token is None:
         return jsonify({"error": "Missing or invalid Authorization header"}), 401
@@ -119,22 +124,12 @@ def get_onboarding_status():
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 401
 
-    # Query profile
     session = db_session()
     try:
         profile = session.query(Profile).filter(Profile.id == user_id).first()
         is_complete = _is_profile_complete(profile)
 
-        # Add debug logging DEBUDGEBUG
         print(f"[DEBUG] Onboarding check for user {user_id}")
-        if profile:
-            print(f"[DEBUG] Username: {profile.username}")
-            print(f"[DEBUG] Bio: {profile.bio}")
-            print(f"[DEBUG] Timezone: {profile.timezone}")
-            print(f"[DEBUG] Language: {profile.language}")
-            print(f"[DEBUG] Birthday: {profile.birthday}")
-        else:
-            print(f"[DEBUG] No profile found for user {user_id}")
         print(f"[DEBUG] Onboarding complete: {is_complete}")
         
         return jsonify({

@@ -21,11 +21,15 @@ class Profile(Base):
     invite_code: Mapped[str | None] = mapped_column(Text, unique=True)
     invited_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"))
     username: Mapped[str | None] = mapped_column(Text)
+    first_name: Mapped[str | None] = mapped_column(Text)  # NEW
+    last_name: Mapped[str | None] = mapped_column(Text)   # NEW
+    job_title: Mapped[str | None] = mapped_column(Text)   # NEW
     avatar_url: Mapped[str | None] = mapped_column(Text)
     bio: Mapped[str | None] = mapped_column(Text)
     timezone: Mapped[str | None] = mapped_column(Text)
     language: Mapped[str | None] = mapped_column(Text)
     social_links: Mapped[dict | None] = mapped_column(JSONB)
+    interests: Mapped[list | None] = mapped_column(JSONB)  # NEW - store as JSON  array
     created_at: Mapped[datetime] = mapped_column(server_default=text("now()"), nullable=False)
 
 class ApiKey(Base):
