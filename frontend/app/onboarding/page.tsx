@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { motion, AnimatePresence } from "framer-motion";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 import { isProfileComplete, type ProfileRow } from "@/lib/profile";
+import { clearOnboardingCache } from "@/lib/onboarding";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -243,8 +244,15 @@ export default function OnboardingPage() {
         },
         body: JSON.stringify(payload),
       });
+
+      const responseText = await res.text();
+      console.log('[onboarding] Backend response status:', res.status);
+      console.log('[onboarding] Backend response body:', responseText);
+
+
       if (res.ok) {
         backendOk = true;
+        console.log('[onboarding] Backend success');
       } else {
         const body = await res.json().catch(() => ({}));
         backendErrorMessage =
@@ -273,10 +281,10 @@ export default function OnboardingPage() {
         full_name: `${formData.firstName} ${formData.lastName}`.trim(),
         role:      formData.role,
         interests: formData.interests,
-        onboarded: true,
       },
     });
 
+    clearOnboardingCache();
     router.push("/dashboard");
   };
 

@@ -1,15 +1,14 @@
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server-client";
-import { isProfileComplete, type ProfileRow } from "@/lib/profile";
 import { Sidebar } from "@/components/lms/Sidebar";
 import { TopNav } from "@/components/lms/TopNav";
 import { NotificationToast } from "@/components/lms/NotificationToast";
 
 /**
  * Server component layout for all (main) pages.
- *
- * Checks both auth AND profile completeness. Proxy handles most cases
- * but this is a belt-and-suspenders guard for direct server renders.
+ * 
+ * Checks both auth AND profile completeness by calling the backend API.
+ * The backend determines completeness by checking if required profile fields are filled.
  */
 export default async function AppLayout({
   children,
@@ -23,19 +22,40 @@ export default async function AppLayout({
 
   if (!user) redirect("/");
 
-  // Check profile completeness (fast path via metadata flag)
-  const alreadyOnboarded = user.user_metadata?.onboarded === true;
+  // Get the session to make an authenticated request to the backend
+  const { data: { session } } = await supabase.auth.getSession();
+  
+  if (!session) {
+    redirect("/");
+  }
 
-  if (!alreadyOnboarded) {
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("username, bio, timezone, language, birthday")
-      .eq("id", user.id)
-      .single();
+  // Call the backend to check onboarding status
+  try {
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://auth-service:5001';
+    const response = await fetch(
+      `${backendUrl}/api/auth-service/onboarding-status`,
+      {
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        cache: 'no-store', // Don't cache this check
+      }
+    );
 
-    if (!isProfileComplete(profile as ProfileRow | null)) {
+    if (!response.ok) {
+      console.error('Failed to check onboarding status');
       redirect("/onboarding");
     }
+
+    const data = await response.json();
+    
+    if (!data.onboarded) {
+      redirect("/onboarding");
+    }
+  } catch (error) {
+    console.error('Error checking onboarding status:', error);
+    // On error, redirect to onboarding as a safe fallback
+    redirect("/onboarding");
   }
 
   return (

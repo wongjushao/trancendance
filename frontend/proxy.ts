@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server-client";
-import { isProfileComplete, type ProfileRow } from "@/lib/profile";
 
 // Pages that require login AND a completed profile
 const PROTECTED_PREFIXES = [
@@ -23,6 +22,37 @@ const AUTH_ONLY_PREFIXES = ["/onboarding"];
 // Pages that logged-in users should not see (they're already in)
 const AUTH_PREFIXES = ["/login", "/register", "/forgot-password"];
 
+async function checkOnboardingStatus(token: string): Promise<boolean> {
+  try {
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://auth-service:5001';
+    
+    console.log('[proxy] Checking onboarding status for token');
+
+    const response = await fetch(
+      `${backendUrl}/api/auth-service/onboarding-status`,
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      }
+    );
+    
+    console.log('[proxy] Onboarding status response:', response.status);
+
+    if (!response.ok) {
+      console.log('[proxy] Failed to check onboarding status');
+      return false;
+    }
+    
+    const data = await response.json();
+    console.log('[proxy] Onboarding status:', data.onboarded);
+    return data.onboarded;
+  } catch (error) {
+    console.error('Error checking onboarding status in proxy:', error);
+    return false;
+  }
+}
+
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -35,43 +65,35 @@ export async function proxy(request: NextRequest) {
   const isAuthOnly     = AUTH_ONLY_PREFIXES.some((p) => pathname.startsWith(p));
   const isAuthRoute    = AUTH_PREFIXES.some((p) => pathname.startsWith(p));
 
-  // ── Unauthenticated users ─────────────────────────────────────────────────
-
+  // Unauthenticated users
   if (!user && (isProtected || isAuthOnly)) {
     return NextResponse.redirect(new URL("/", request.url));
   }
 
-  // ── Authenticated users ───────────────────────────────────────────────────
-
+  // Authenticated users
   if (user) {
+    console.log('[proxy] User authenticated:', user.id);
     // Don't re-show login/register to signed-in users
     if (isAuthRoute) {
       return NextResponse.redirect(new URL("/dashboard", request.url));
     }
 
-    // For protected pages and onboarding, check profile completeness.
-    // We only do the DB query when we're on a route that cares — skips
-    // static assets, API routes, etc.
+    // For protected pages and onboarding, check profile completeness via backend
     if (isProtected || isAuthOnly) {
-
-      // Fast path: user_metadata.onboarded flag set during final onboarding submit.
-      // This avoids a DB round-trip on every navigation once onboarding is done.
-      const alreadyOnboarded = user.user_metadata?.onboarded === true;
-
-      let profileComplete = alreadyOnboarded;
-
-      if (!alreadyOnboarded) {
-        // Slow path: query the profiles table directly
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("username, bio, timezone, language, birthday")
-          .eq("id", user.id)
-          .single();
-
-        profileComplete = isProfileComplete(profile as ProfileRow | null);
+      console.log('[proxy] Protected or auth-only page, checking onboarding');
+      // Get the session token
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session?.access_token) {
+        console.log('[proxy] No session token')
+        return NextResponse.redirect(new URL("/", request.url));
       }
 
-      if (!profileComplete) {
+      // Check onboarding status via backend
+      const onboarded = await checkOnboardingStatus(session.access_token);
+      console.log('[proxy] Onboarding status result:', onboarded);
+      if (!onboarded) {
+        console.log('[proxy] Not onboarded, redirecting to onboarding');
         // Incomplete profile → force onboarding, unless already there
         if (!isAuthOnly) {
           return NextResponse.redirect(new URL("/onboarding", request.url));
@@ -81,6 +103,7 @@ export async function proxy(request: NextRequest) {
       }
 
       // Profile IS complete
+      console.log('[proxy] Onboarded user, allowing access');
       if (isAuthOnly) {
         // Block re-entry to onboarding for completed users
         return NextResponse.redirect(new URL("/dashboard", request.url));

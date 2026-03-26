@@ -4,7 +4,7 @@ start-server:
 	@echo "Starting stack in background..."
 	@docker compose up --build -d
 
-start-server-wsl2: fclean
+start-server-wsl2: down
 	@echo "Starting stack in background for WSL2..."
 	@docker compose up --build -d --scale node-exporter=0
 
