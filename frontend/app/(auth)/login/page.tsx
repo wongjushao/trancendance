@@ -87,6 +87,12 @@ export default function LoginPage() {
       provider: "google",
       options: {
         redirectTo: `${getSiteUrl()}/auth/callback`,
+        queryParams: {
+          // Pass a hint about where the sign-in originated from
+          // This helps with redirect logic if needed
+          access_type: 'offline',
+          prompt: 'consent',
+        }
       },
     });
 
@@ -101,6 +107,7 @@ export default function LoginPage() {
       setStatus({ type: "error", message });
       setIsGoogleLoading(false);
     }
+    // No need to handle redirect here - Supabase handles it
   };
 
   return (

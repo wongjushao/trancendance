@@ -134,7 +134,6 @@ def register_profile():
     if db_session is None:
         return jsonify({"error": "Database is not configured. Set valid DATABASE_URL"}), 503
 
-    # ── Auth: verify the Supabase JWT from the Authorization header ─────────────
     token = _extract_bearer_token()
     if token is None:
         return jsonify({"error": "Missing or invalid Authorization header. Expected: Bearer <token>"}), 401
@@ -144,7 +143,6 @@ def register_profile():
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 401
 
-    # ── Parse request body ──────────────────────────────────────────────────────
     payload = request.get_json(silent=True) or {}
 
     try:
@@ -152,10 +150,8 @@ def register_profile():
     except (TypeError, ValueError):
         return jsonify({"error": "Field 'birthday' must be YYYY-MM-DD"}), 400
 
-    # Parse interests
     interests = _parse_interests(payload.get("interests"))
 
-    # ── Upsert the profile row ──────────────────────────────────────────────────
     session = db_session()
     try:
         profile = session.query(Profile).filter(Profile.id == user_id).first()
@@ -173,6 +169,7 @@ def register_profile():
         profile.timezone = payload.get("timezone") or profile.timezone
         profile.language = _validate_language(payload.get("language")) or profile.language
         profile.interests = interests or profile.interests
+        profile.onboarded = True  # Mark as onboarded after successful registration
 
         session.commit()
         session.refresh(profile)

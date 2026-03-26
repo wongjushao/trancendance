@@ -119,6 +119,10 @@ export default function RegisterPage() {
       provider: "google",
       options: {
         redirectTo: `${getSiteUrl()}/auth/callback`,
+        queryParams: {
+          access_type: 'offline',
+          prompt: 'consent',
+        }
       },
     });
 
@@ -131,6 +135,7 @@ export default function RegisterPage() {
       setStatus({ type: "error", message, action: { label: "Log in", href: "/login" } });
       setIsGoogleLoading(false);
     }
+    // No need to handle redirect here - Supabase handles it
   };
 
   return (

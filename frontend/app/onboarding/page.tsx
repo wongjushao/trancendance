@@ -135,7 +135,7 @@ export default function OnboardingPage() {
   });
 
   // ── Load user data from Google OAuth if available (but NOT avatar) ──────────
-  useEffect(() => {
+useEffect(() => {
     const loadUserData = async () => {
       setIsLoadingUser(true);
       const supabase = getSupabaseBrowserClient();
@@ -146,13 +146,28 @@ export default function OnboardingPage() {
         return;
       }
 
-      // Fast path: check if already onboarded
-      if (user.user_metadata?.onboarded === true) {
-        router.replace("/dashboard");
-        return;
+      // Fast path: check if already onboarded via the backend
+      const session = await supabase.auth.getSession();
+      if (session.data.session?.access_token) {
+        try {
+          const response = await fetch('/api/auth-service/onboarding-status', {
+            headers: {
+              'Authorization': `Bearer ${session.data.session.access_token}`,
+            },
+          });
+          if (response.ok) {
+            const status = await response.json();
+            if (status.onboarded) {
+              router.replace("/dashboard");
+              return;
+            }
+          }
+        } catch (e) {
+          console.error('Error checking onboarding status:', e);
+        }
       }
 
-      // Pre-fill from Google OAuth data if available (name only, no avatar)
+      // Pre-fill from Google OAuth data if available
       const userMetadata = user.user_metadata || {};
       const userEmail = user.email || "";
       
@@ -166,12 +181,13 @@ export default function OnboardingPage() {
         ? googleName.toLowerCase().replace(/\s+/g, ".")
         : userEmail.split("@")[0];
       
+      // For Google OAuth users, we can pre-fill from Google data
       setFormData((prev) => ({
         ...prev,
         firstName: prev.firstName || googleFirstName || (googleName.split(" ")[0] || ""),
         lastName: prev.lastName || googleLastName || (googleName.split(" ").slice(1).join(" ") || ""),
         username: prev.username || suggestedUsername,
-        // Do NOT set avatarPreview from Google
+        // Don't pre-fill bio - let user write it
       }));
 
       setIsLoadingUser(false);

@@ -176,13 +176,23 @@ def update_profile():
         if not profile:
             return jsonify({"error": "Profile not found"}), 404
         
+        # Track if any fields were updated
+        updated = False
+        
         # Update allowed fields
         for field in allowed_fields:
             if field in data and data[field] is not None:
                 setattr(profile, field, data[field])
+                updated = True
         
-        session.commit()
-        session.refresh(profile)
+        # If this is the first profile update, mark as onboarded
+        if not profile.onboarded:
+            profile.onboarded = True
+            updated = True
+        
+        if updated:
+            session.commit()
+            session.refresh(profile)
         
         return jsonify(serialize_profile(profile)), 200
     except SQLAlchemyError as exc:
