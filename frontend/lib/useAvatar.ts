@@ -28,16 +28,22 @@ export function useAvatar() {
     }
     
     try {
-      const response = await fetch('/api/auth-service/profile', {
+      // Add cache-busting timestamp
+      const timestamp = Date.now();
+      const response = await fetch(`/api/auth-service/profile?t=${timestamp}`, {
         headers: {
           'Authorization': `Bearer ${session.access_token}`,
         },
-        cache: 'no-store', // Don't cache the response
+        cache: 'no-store',
       });
       
       if (response.ok) {
         const data: ProfileData = await response.json();
         setAvatarUrl(data.avatar_url);
+        // Store in localStorage for quick access
+        if (data.avatar_url) {
+          localStorage.setItem('avatar_url', data.avatar_url);
+        }
       } else {
         setError('Failed to fetch profile');
       }
@@ -77,6 +83,11 @@ export function useAvatar() {
     // Update local state immediately
     setAvatarUrl(data.avatar_url);
     
+    // Store in localStorage
+    if (data.avatar_url) {
+      localStorage.setItem('avatar_url', data.avatar_url);
+    }
+    
     // Dispatch a global event so other components can refresh
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent(AVATAR_UPDATED_EVENT, { 
@@ -92,12 +103,19 @@ export function useAvatar() {
   }, [fetchAvatar]);
 
   useEffect(() => {
+    // Try to get from localStorage first for instant display
+    const storedAvatar = localStorage.getItem('avatar_url');
+    if (storedAvatar) {
+      setAvatarUrl(storedAvatar);
+    }
+    
     fetchAvatar();
 
     // Listen for avatar update events from other components
     const handleAvatarUpdate = (event: CustomEvent) => {
       if (event.detail?.avatarUrl) {
         setAvatarUrl(event.detail.avatarUrl);
+        localStorage.setItem('avatar_url', event.detail.avatarUrl);
       } else {
         // If no URL provided, refresh from server
         fetchAvatar();

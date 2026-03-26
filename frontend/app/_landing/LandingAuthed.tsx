@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect } from "react";
 import {
   ArrowRight, BookOpen, LayoutDashboard, GraduationCap,
   FileText, BarChart3, ChevronRight,
@@ -9,7 +8,6 @@ import {
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 import SignOutButton from "@/components/SignOutButton";
 import { useAvatar } from "@/lib/useAvatar";
-
 
 const quickLinks = [
   { href: "/dashboard",     icon: LayoutDashboard, label: "Dashboard",    desc: "Your learning overview" },
@@ -23,7 +21,7 @@ interface LandingAuthedProps {
 }
 
 export default function LandingAuthed({ user }: LandingAuthedProps) {
-  const { avatarUrl, isLoading } = useAvatar();
+  const { avatarUrl } = useAvatar();
 
   const fullName: string =
     user.user_metadata?.full_name ||

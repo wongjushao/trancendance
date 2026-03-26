@@ -156,9 +156,10 @@ def update_profile():
     data = request.get_json(silent=True) or {}
     
     # Fields that can be updated
+    # REMOVED "avatar_url" from allowed fields - avatar should only be updated via /upload-avatar endpoint
     allowed_fields = [
         "username", "bio", "timezone", 
-        "language", "avatar_url", "social_links"
+        "language", "social_links"
     ]
     
     session = db_session()

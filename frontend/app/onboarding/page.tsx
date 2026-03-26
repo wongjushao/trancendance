@@ -193,7 +193,7 @@ export default function OnboardingPage() {
       return;
     }
 
-    // ── Final submit ─────────────────────────────────────────────────────
+    // ── Final submit ──────────────────────────────────────────────────────────
     setIsSaving(true);
 
     const supabase = getSupabaseBrowserClient();
@@ -211,12 +211,7 @@ export default function OnboardingPage() {
       return;
     }
 
-    // ── POST to backend: /api/auth-service/register ───────────────────────
-    // The backend verifies the Supabase JWT from the Authorization header,
-    // then upserts the profile row into Supabase directly.
-    // Fields accepted by the backend:
-    //   username, bio, timezone, language, birthday,
-    //   phone_number (optional), invite_code_input (optional)
+    // ── POST to backend: /api/auth-service/register ──────────────────────────
     const payload: Record<string, string> = {
       username:  formData.username.trim(),
       bio:       formData.bio.trim(),
@@ -236,7 +231,6 @@ export default function OnboardingPage() {
         method:  "POST",
         headers: {
           "Content-Type":  "application/json",
-          // The backend extracts the user UUID from this JWT — no API key needed
           "Authorization": `Bearer ${session?.access_token}`,
         },
         body: JSON.stringify(payload),
@@ -268,7 +262,7 @@ export default function OnboardingPage() {
       return;
     }
 
-    // ── NEW: Upload avatar if one was selected ────────────────────────────────
+    // ── Upload avatar if one was selected ─────────────────────────────────────
     if (formData.photo) {
       console.log('[onboarding] Uploading avatar...');
       try {
@@ -286,14 +280,25 @@ export default function OnboardingPage() {
         if (uploadRes.ok) {
           const uploadData = await uploadRes.json();
           console.log('[onboarding] Avatar uploaded successfully:', uploadData.avatar_url);
+          // Store in localStorage to prevent flash of missing avatar
+          localStorage.setItem('avatar_url', uploadData.avatar_url);
+          
+          // Dispatch event for immediate update
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('avatar-updated', { 
+              detail: { avatarUrl: uploadData.avatar_url } 
+            }));
+          }
         } else {
           const errorText = await uploadRes.text();
           console.error('[onboarding] Avatar upload failed:', uploadRes.status, errorText);
-          // Don't fail onboarding if avatar upload fails - just log it
+          // Show a toast notification but don't block onboarding
+          setSubmitError("Profile created but avatar upload failed. You can upload it later.");
         }
       } catch (err) {
         console.error('[onboarding] Avatar upload error:', err);
         // Don't fail onboarding if avatar upload fails
+        setSubmitError("Profile created but avatar upload failed. You can upload it later.");
       }
     }
 
