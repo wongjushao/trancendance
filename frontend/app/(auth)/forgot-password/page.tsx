@@ -26,7 +26,6 @@ function SendResetForm() {
 
     const supabase = getSupabaseBrowserClient();
     const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
-      // Use getSiteUrl() — never window.location.origin in Docker
       redirectTo: `${getSiteUrl()}/auth/confirm?type=recovery`,
     });
 
@@ -154,16 +153,37 @@ function SetNewPasswordForm() {
 
     setIsLoading(true);
     const supabase = getSupabaseBrowserClient();
-    const { error: updateError } = await supabase.auth.updateUser({ password });
-    setIsLoading(false);
+    const { data: { session } } = await supabase.auth.getSession();
 
-    if (updateError) {
-      setError(updateError.message);
+    if (!session?.access_token) {
+      setError("Session expired. Please request a new reset link.");
+      setIsLoading(false);
       return;
     }
 
-    setIsDone(true);
-    setTimeout(() => router.push("/dashboard"), 2000);
+    // ✅ GOOD - Call backend to update password
+    try {
+      const response = await fetch('/api/auth-service/update-password', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ password }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || 'Failed to update password');
+      }
+
+      setIsDone(true);
+      setTimeout(() => router.push("/login"), 2000);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   if (isDone) {
@@ -175,7 +195,7 @@ function SetNewPasswordForm() {
         <div>
           <h1 className="text-3xl font-bold text-white mb-2">Password Updated</h1>
           <p className="text-[#A0A0B5] text-sm">
-            Your password has been changed successfully. Redirecting you to your dashboard…
+            Your password has been changed successfully. Redirecting you to the login page…
           </p>
         </div>
       </div>

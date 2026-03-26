@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Camera, Mail, MapPin, Link as LinkIcon, Calendar, Edit, Award, CheckCircle } from "lucide-react";
 import { GlowCard, StatCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
@@ -10,8 +10,7 @@ import { motion } from "framer-motion";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 
-// ── Static mock data (replace with real DB queries when ready) ────────────────
-
+// Static mock data (replace with real DB queries when ready)
 const recentActivity = [
   { id: 1, type: "completed",  text: "Completed Advanced React Development", date: "Mar 1, 2026",  icon: CheckCircle },
   { id: 2, type: "enrolled",   text: "Enrolled in Python for Data Science",  date: "Feb 28, 2026", icon: LinkIcon },
@@ -25,69 +24,172 @@ const certificates = [
   { id: 3, course: "Backend with Node.js",        issueDate: "Jan 28, 2026", instructor: "Michael Chen" },
 ];
 
-// ── Props ─────────────────────────────────────────────────────────────────────
-
 interface ProfileClientProps {
   user: SupabaseUser;
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
+interface ProfileData {
+  id: string;
+  username: string | null;
+  birthday: string | null;
+  avatar_url: string | null;
+  bio: string | null;
+  timezone: string | null;
+  language: string | null;
+  social_links: any;
+  created_at: string | null;
+  onboarded: boolean;
+}
 
 export default function ProfileClient({ user }: ProfileClientProps) {
-  // Derive display values from the real Supabase user.
-  // All of these can be overwritten by the user in the Settings tab.
-  const initialName     = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split("@")[0] || "";
-  const initialEmail    = user.email ?? "";
-  const initialLocation = user.user_metadata?.location ?? "";
-  const initialWebsite  = user.user_metadata?.website  ?? "";
-  const initialBio      = user.user_metadata?.bio      ?? "";
+  const [profileData, setProfileData] = useState<ProfileData | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  
+  // Form state
+  const [settingsForm, setSettingsForm] = useState({
+    name: "",
+    email: "",
+    location: "",
+    website: "",
+    bio: "",
+    username: "",
+    timezone: "",
+    language: "",
+  });
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+
+  // Fetch profile from backend
+  useEffect(() => {
+    const fetchProfile = async () => {
+      setIsLoading(true);
+      const supabase = getSupabaseBrowserClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session?.access_token) {
+        setIsLoading(false);
+        return;
+      }
+      
+      try {
+        const response = await fetch('/api/auth-service/profile', {
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          setProfileData(data);
+          
+          // Initialize form with profile data
+          const fullName = user.user_metadata?.full_name || user.user_metadata?.name || "";
+          setSettingsForm({
+            name: fullName,
+            email: user.email ?? "",
+            location: user.user_metadata?.location ?? "",
+            website: user.user_metadata?.website ?? "",
+            bio: data.bio || "",
+            username: data.username || "",
+            timezone: data.timezone || "",
+            language: data.language || "",
+          });
+        }
+      } catch (error) {
+        console.error('Failed to fetch profile:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    fetchProfile();
+  }, [user]);
 
   // Generate initials for the avatar
-  const initials = initialName
+  const initials = settingsForm.name
     .split(" ")
     .map((p: string) => p[0])
     .join("")
     .slice(0, 2)
-    .toUpperCase() || initialEmail[0]?.toUpperCase() || "U";
+    .toUpperCase() || settingsForm.email[0]?.toUpperCase() || "U";
 
   // Format the join date from the Supabase created_at timestamp
   const joinDate = user.created_at
     ? new Date(user.created_at).toLocaleDateString("en-US", { month: "long", year: "numeric" })
     : "Unknown";
 
-  // ── Settings form state ──
-  const [settingsForm, setSettingsForm] = useState({
-    name:     initialName,
-    email:    initialEmail,
-    location: initialLocation,
-    website:  initialWebsite,
-    bio:      initialBio,
-  });
-  const [isSaving, setIsSaving] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
-
   const handleSaveProfile = async () => {
     setIsSaving(true);
     setSaveStatus(null);
-
+    
     const supabase = getSupabaseBrowserClient();
-    const { error } = await supabase.auth.updateUser({
-      data: {
-        full_name: settingsForm.name,
-        location:  settingsForm.location,
-        website:   settingsForm.website,
-        bio:       settingsForm.bio,
-      },
-    });
-
-    setIsSaving(false);
-
-    if (error) {
-      setSaveStatus({ type: "error", message: error.message });
-    } else {
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    if (!session?.access_token) {
+      setSaveStatus({ type: "error", message: "No active session" });
+      setIsSaving(false);
+      return;
+    }
+    
+    try {
+      // Update user metadata via backend
+      const metadataResponse = await fetch('/api/auth-service/user-metadata', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          full_name: settingsForm.name,
+          location: settingsForm.location,
+          website: settingsForm.website,
+          bio: settingsForm.bio,
+        }),
+      });
+      
+      if (!metadataResponse.ok) {
+        throw new Error('Failed to update metadata');
+      }
+      
+      // Update profile via backend
+      const profileResponse = await fetch('/api/auth-service/profile', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          username: settingsForm.username,
+          bio: settingsForm.bio,
+          timezone: settingsForm.timezone,
+          language: settingsForm.language,
+        }),
+      });
+      
+      if (!profileResponse.ok) {
+        throw new Error('Failed to update profile');
+      }
+      
       setSaveStatus({ type: "success", message: "Profile updated successfully." });
+      
+      // Refresh profile data
+      const refreshedProfile = await profileResponse.json();
+      setProfileData(refreshedProfile);
+      
+    } catch (error: any) {
+      setSaveStatus({ type: "error", message: error.message });
+    } finally {
+      setIsSaving(false);
     }
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-white">Loading profile...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 pb-12">
@@ -166,7 +268,7 @@ export default function ProfileClient({ user }: ProfileClientProps) {
           <TabsTrigger value="settings"     className="rounded-xl px-8 py-2.5 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-500 data-[state=active]:to-violet-600 data-[state=active]:text-white transition-all">Settings</TabsTrigger>
         </TabsList>
 
-        {/* Activity Tab */}
+        {/* Activity Tab - unchanged */}
         <TabsContent value="activity" className="mt-0 outline-none">
           <GlowCard className="border-white/5">
             <h2 className="text-2xl font-bold text-white mb-8 tracking-tight">Recent Learning Activity</h2>
@@ -192,7 +294,7 @@ export default function ProfileClient({ user }: ProfileClientProps) {
           </GlowCard>
         </TabsContent>
 
-        {/* Certificates Tab */}
+        {/* Certificates Tab - unchanged */}
         <TabsContent value="certificates" className="mt-0 outline-none">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {certificates.map((cert) => (
@@ -217,7 +319,7 @@ export default function ProfileClient({ user }: ProfileClientProps) {
           </div>
         </TabsContent>
 
-        {/* Settings Tab — saves to Supabase user_metadata */}
+        {/* Settings Tab - modified to use backend */}
         <TabsContent value="settings" className="mt-0 outline-none">
           <GlowCard className="border-white/5">
             <h2 className="text-2xl font-bold text-white mb-8 tracking-tight">Public Presence</h2>
@@ -232,13 +334,43 @@ export default function ProfileClient({ user }: ProfileClientProps) {
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-[#A0A0B5] ml-1">Email Address</label>
-                {/* Email is read-only — changing it requires a Supabase email-change flow */}
                 <Input
                   value={settingsForm.email}
                   disabled
                   className="h-12 bg-[#12121A] border-white/10 text-white rounded-xl opacity-60 cursor-not-allowed"
                 />
                 <p className="text-xs text-[#6B6B80] ml-1">Email changes require re-verification.</p>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-[#A0A0B5] ml-1">Username</label>
+                <Input
+                  value={settingsForm.username}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, username: e.target.value })}
+                  placeholder="username"
+                  className="h-12 bg-[#12121A] border-white/10 text-white rounded-xl"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-[#A0A0B5] ml-1">Timezone</label>
+                <Input
+                  value={settingsForm.timezone}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, timezone: e.target.value })}
+                  placeholder="Asia/Kuala_Lumpur"
+                  className="h-12 bg-[#12121A] border-white/10 text-white rounded-xl"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-[#A0A0B5] ml-1">Language</label>
+                <select
+                  value={settingsForm.language}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, language: e.target.value })}
+                  className="w-full h-12 bg-[#12121A] border border-white/10 text-white rounded-xl px-4 focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500/50 transition-all outline-none [color-scheme:dark]"
+                >
+                  <option value="">Select language</option>
+                  <option value="EN">English</option>
+                  <option value="CN">中文 (Chinese)</option>
+                  <option value="BM">Bahasa Melayu</option>
+                </select>
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-[#A0A0B5] ml-1">Geographic Location</label>
@@ -295,11 +427,14 @@ export default function ProfileClient({ user }: ProfileClientProps) {
                 className="px-8 h-12 text-[#6B6B80]"
                 onClick={() => {
                   setSettingsForm({
-                    name:     initialName,
-                    email:    initialEmail,
-                    location: initialLocation,
-                    website:  initialWebsite,
-                    bio:      initialBio,
+                    name: user.user_metadata?.full_name || user.user_metadata?.name || "",
+                    email: user.email ?? "",
+                    location: user.user_metadata?.location ?? "",
+                    website: user.user_metadata?.website ?? "",
+                    bio: profileData?.bio || "",
+                    username: profileData?.username || "",
+                    timezone: profileData?.timezone || "",
+                    language: profileData?.language || "",
                   });
                   setSaveStatus(null);
                 }}

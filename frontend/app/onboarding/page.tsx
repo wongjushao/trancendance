@@ -59,7 +59,6 @@ type FormData = {
   firstName:    string;
   lastName:     string;
   username:     string;
-  phone:        string;
   birthday:     string;
   inviteCode:   string;
   role:         string;
@@ -109,7 +108,6 @@ export default function OnboardingPage() {
     firstName:    "",
     lastName:     "",
     username:     "",
-    phone:        "",
     birthday:     "",
     inviteCode:   "",
     role:         "",
@@ -226,7 +224,6 @@ export default function OnboardingPage() {
       language:  formData.language,
       birthday:  formData.birthday,
     };
-    if (formData.phone.trim())      payload.phone_number      = formData.phone.trim();
     if (formData.inviteCode.trim()) payload.invite_code_input = formData.inviteCode.trim();
 
     console.log('[onboarding] Submitting payload to backend:', payload);
@@ -276,13 +273,6 @@ export default function OnboardingPage() {
     // This is a lightweight Supabase Auth metadata update (not a DB table write).
     // The proxy.ts reads user.user_metadata.onboarded to avoid a DB round-trip
     // on every navigation after onboarding is complete.
-    await supabase.auth.updateUser({
-      data: {
-        full_name: `${formData.firstName} ${formData.lastName}`.trim(),
-        role:      formData.role,
-        interests: formData.interests,
-      },
-    });
 
     clearOnboardingCache();
     router.push("/dashboard");
@@ -446,15 +436,6 @@ export default function OnboardingPage() {
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label className="text-sm font-medium text-[#A0A0B5]">Phone Number</Label>
-                          <div className="relative">
-                            <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6B6B80]" />
-                            <Input type="tel" value={formData.phone} onChange={set("phone")}
-                              placeholder="+60 12 345 6789"
-                              className="pl-10 bg-[#12121A] border-white/10 text-white rounded-xl h-12" />
-                          </div>
-                        </div>
                         <div className="space-y-2">
                           <Label className="text-sm font-medium text-[#A0A0B5]">
                             Birthday <span className="text-red-400">*</span>

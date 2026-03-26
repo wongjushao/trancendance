@@ -6,7 +6,9 @@ from backend.common.db import create_engine_and_session
 from backend.services.auth_service.auth_service.middleware import register_bearer_auth_middleware
 from backend.services.auth_service.auth_service.routes import docs_bp, health_bp, metrics_bp, register_bp
 from backend.services.auth_service.auth_service.routes.onboarding import onboarding_bp
-
+from backend.services.auth_service.auth_service.routes.profile import profile_bp
+from backend.services.auth_service.auth_service.routes.metadata import metadata_bp
+from backend.services.auth_service.auth_service.routes.auth import auth_bp
 
 def is_valid_database_url(database_url: str) -> bool:
     if not database_url:
@@ -39,6 +41,9 @@ def create_app():
     app.register_blueprint(metrics_bp,   url_prefix="/api/auth-service")
     app.register_blueprint(register_bp,  url_prefix="/api/auth-service")
     app.register_blueprint(onboarding_bp, url_prefix="/api/auth-service")
+    app.register_blueprint(profile_bp,   url_prefix="/api/auth-service")
+    app.register_blueprint(metadata_bp,  url_prefix="/api/auth-service")
+    app.register_blueprint(auth_bp, url_prefix="/api/auth-service")
 
     @app.teardown_appcontext
     def shutdown_session(_exception=None):

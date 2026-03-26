@@ -114,7 +114,6 @@ def serialize_profile(profile: Profile) -> dict:
     return {
         "id":           str(profile.id),
         "username":     profile.username,
-        "phone_number": profile.phone_number,
         "birthday":     profile.birthday.isoformat() if profile.birthday else None,
         "invite_code":  profile.invite_code,
         "invited_by":   str(profile.invited_by) if profile.invited_by else None,
@@ -179,7 +178,6 @@ def register_profile():
             session.add(profile)
 
         profile.username     = payload.get("username")       or profile.username
-        profile.phone_number = payload.get("phone_number")   or profile.phone_number
         profile.birthday     = birthday                       or profile.birthday
         profile.invited_by   = invited_by                    or profile.invited_by
         profile.bio          = payload.get("bio")            or profile.bio

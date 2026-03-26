@@ -20,7 +20,6 @@ class Profile(Base):
     birthday: Mapped[date | None] = mapped_column(Date)
     invite_code: Mapped[str | None] = mapped_column(Text, unique=True)
     invited_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"))
-    phone_number: Mapped[str | None] = mapped_column(Text)
     username: Mapped[str | None] = mapped_column(Text)
     avatar_url: Mapped[str | None] = mapped_column(Text)
     bio: Mapped[str | None] = mapped_column(Text)
@@ -28,8 +27,6 @@ class Profile(Base):
     language: Mapped[str | None] = mapped_column(Text)
     social_links: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(server_default=text("now()"), nullable=False)
-    onboarded: Mapped[bool] = mapped_column(Boolean, server_default=text("false"), default=False)
-
 
 class ApiKey(Base):
     __tablename__ = "api_keys"
