@@ -246,7 +246,6 @@ export default function OnboardingPage() {
       console.log('[onboarding] Backend response status:', res.status);
       console.log('[onboarding] Backend response body:', responseText);
 
-
       if (res.ok) {
         backendOk = true;
         console.log('[onboarding] Backend success');
@@ -269,10 +268,34 @@ export default function OnboardingPage() {
       return;
     }
 
-    // ── Stamp user_metadata so proxy fast-path works ──────────────────────
-    // This is a lightweight Supabase Auth metadata update (not a DB table write).
-    // The proxy.ts reads user.user_metadata.onboarded to avoid a DB round-trip
-    // on every navigation after onboarding is complete.
+    // ── NEW: Upload avatar if one was selected ────────────────────────────────
+    if (formData.photo) {
+      console.log('[onboarding] Uploading avatar...');
+      try {
+        const avatarFormData = new FormData();
+        avatarFormData.append('avatar', formData.photo);
+        
+        const uploadRes = await fetch('/api/auth-service/upload-avatar', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: avatarFormData,
+        });
+        
+        if (uploadRes.ok) {
+          const uploadData = await uploadRes.json();
+          console.log('[onboarding] Avatar uploaded successfully:', uploadData.avatar_url);
+        } else {
+          const errorText = await uploadRes.text();
+          console.error('[onboarding] Avatar upload failed:', uploadRes.status, errorText);
+          // Don't fail onboarding if avatar upload fails - just log it
+        }
+      } catch (err) {
+        console.error('[onboarding] Avatar upload error:', err);
+        // Don't fail onboarding if avatar upload fails
+      }
+    }
 
     clearOnboardingCache();
     router.push("/dashboard");

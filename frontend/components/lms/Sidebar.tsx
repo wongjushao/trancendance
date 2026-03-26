@@ -14,6 +14,7 @@ import {
   Settings,
 } from "lucide-react";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
+import { useAvatar } from "@/lib/useAvatar";
 
 const navItems = [
   { path: "/dashboard",      label: "Dashboard",     icon: LayoutDashboard },
@@ -33,9 +34,9 @@ interface SidebarProps {
 
 export function Sidebar({ user }: SidebarProps) {
   const pathname = usePathname();
+  const { avatarUrl, isLoading } = useAvatar();
 
-  // Derive display values from the real Supabase user.
-  // `full_name` is stored in user_metadata when set during sign-up or onboarding.
+  // Derive display values from the real Supabase user
   const fullName: string =
     user.user_metadata?.full_name ||
     user.user_metadata?.name ||
@@ -44,7 +45,7 @@ export function Sidebar({ user }: SidebarProps) {
 
   const email: string = user.email ?? "";
 
-  // Generate initials for the avatar (up to 2 characters)
+  // Generate initials for fallback avatar
   const initials = fullName
     .split(" ")
     .map((part) => part[0])
@@ -93,15 +94,27 @@ export function Sidebar({ user }: SidebarProps) {
         })}
       </nav>
 
-      {/* User card — real Supabase user data */}
+      {/* User card with avatar */}
       <div className="p-4 border-t border-white/5">
         <Link
           href="/profile"
           className="flex items-center gap-3 p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
         >
-          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center shrink-0">
-            <span className="text-white font-semibold text-sm">{initials}</span>
+          {/* Avatar - shows image if exists, otherwise initials */}
+          <div className="w-10 h-10 rounded-full overflow-hidden shrink-0 bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center">
+            {avatarUrl ? (
+              <img 
+                src={avatarUrl} 
+                alt={fullName}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <span className="text-white font-semibold text-sm">
+                {initials}
+              </span>
+            )}
           </div>
+          
           <div className="flex-1 min-w-0">
             <p className="text-white font-medium truncate text-sm">{fullName}</p>
             <p className="text-xs text-[#6B6B80] truncate">{email}</p>

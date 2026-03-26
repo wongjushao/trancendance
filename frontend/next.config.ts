@@ -23,6 +23,12 @@ const nextConfig: NextConfig = {
       },
     ]
   },
+  // Increase body parser limit for file uploads
+  api: {
+    bodyParser: {
+      sizeLimit: '10mb',
+    },
+  },
 }
 
 export default nextConfig

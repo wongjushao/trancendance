@@ -6,6 +6,7 @@ import { Bell, Search, User, ChevronDown, Settings, CreditCard } from "lucide-re
 import { Input } from "../ui/input";
 import SignOutButton from "../SignOutButton";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
+import { useAvatar } from "@/lib/useAvatar";
 
 interface TopNavProps {
   user: SupabaseUser;
@@ -14,6 +15,7 @@ interface TopNavProps {
 export function TopNav({ user }: TopNavProps) {
   const [profileOpen, setProfileOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
+  const { avatarUrl, isLoading } = useAvatar();
 
   // Derive display values from the real Supabase user
   const fullName: string =
@@ -100,9 +102,17 @@ export function TopNav({ user }: TopNavProps) {
               }}
               className="flex items-center gap-2 pl-1 pr-3 py-1 rounded-xl hover:bg-white/5 transition-colors"
             >
-              {/* Avatar */}
-              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center shadow-lg shadow-purple-500/20">
-                <span className="text-white font-semibold text-sm">{initials}</span>
+              {/* Avatar with image support */}
+              <div className="w-9 h-9 rounded-full overflow-hidden bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center shadow-lg shadow-purple-500/20">
+                {avatarUrl ? (
+                  <img 
+                    src={avatarUrl} 
+                    alt={fullName}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <span className="text-white font-semibold text-sm">{initials}</span>
+                )}
               </div>
               <ChevronDown
                 className={`w-4 h-4 text-[#6B6B80] transition-transform ${profileOpen ? "rotate-180" : ""}`}

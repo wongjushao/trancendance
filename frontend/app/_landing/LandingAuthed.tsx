@@ -1,20 +1,30 @@
+"use client";
+
 import Link from "next/link";
+import { useEffect } from "react";
 import {
   ArrowRight, BookOpen, LayoutDashboard, GraduationCap,
   FileText, BarChart3, ChevronRight,
 } from "lucide-react";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 import SignOutButton from "@/components/SignOutButton";
+import { useAvatar } from "@/lib/useAvatar";
+
+
+const quickLinks = [
+  { href: "/dashboard",     icon: LayoutDashboard, label: "Dashboard",    desc: "Your learning overview" },
+  { href: "/courses",       icon: BookOpen,        label: "Courses",      desc: "Browse & continue learning" },
+  { href: "/assignments",   icon: FileText,        label: "Assignments",  desc: "Pending & upcoming work" },
+  { href: "/analytics",     icon: BarChart3,       label: "Analytics",    desc: "Track your progress" },
+];
 
 interface LandingAuthedProps {
   user: SupabaseUser;
 }
 
-/**
- * Landing page variant shown to users who are already signed in.
- * Replaces the marketing page with a personalised welcome-back experience.
- */
 export default function LandingAuthed({ user }: LandingAuthedProps) {
+  const { avatarUrl, isLoading } = useAvatar();
+
   const fullName: string =
     user.user_metadata?.full_name ||
     user.user_metadata?.name ||
@@ -29,13 +39,6 @@ export default function LandingAuthed({ user }: LandingAuthedProps) {
     .join("")
     .slice(0, 2)
     .toUpperCase();
-
-  const quickLinks = [
-    { href: "/dashboard",     icon: LayoutDashboard, label: "Dashboard",    desc: "Your learning overview" },
-    { href: "/courses",       icon: BookOpen,        label: "Courses",      desc: "Browse & continue learning" },
-    { href: "/assignments",   icon: FileText,        label: "Assignments",  desc: "Pending & upcoming work" },
-    { href: "/analytics",     icon: BarChart3,       label: "Analytics",    desc: "Track your progress" },
-  ];
 
   return (
     <div className="min-h-screen bg-[#0B0B0F] text-white selection:bg-purple-500/30">
@@ -66,9 +69,17 @@ export default function LandingAuthed({ user }: LandingAuthedProps) {
 
         {/* Welcome hero */}
         <div className="flex flex-col items-center text-center mb-16">
-          {/* Avatar */}
-          <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center shadow-2xl shadow-purple-500/30 mb-6">
-            <span className="text-white font-black text-3xl tracking-tighter">{initials}</span>
+          {/* Avatar with image support */}
+          <div className="w-20 h-20 rounded-2xl overflow-hidden bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center shadow-2xl shadow-purple-500/30 mb-6">
+            {avatarUrl ? (
+              <img 
+                src={avatarUrl} 
+                alt={fullName}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <span className="text-white font-black text-3xl tracking-tighter">{initials}</span>
+            )}
           </div>
 
           <div className="inline-flex items-center gap-2 rounded-full border border-purple-500/20 bg-purple-500/10 px-4 py-1.5 text-[10px] font-black uppercase tracking-[0.2em] text-purple-400 mb-4">

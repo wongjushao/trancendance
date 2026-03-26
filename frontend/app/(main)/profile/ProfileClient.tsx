@@ -1,14 +1,18 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Camera, Mail, MapPin, Link as LinkIcon, Calendar, Edit, Award, CheckCircle } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Camera, Mail, MapPin, Link as LinkIcon, Calendar, Edit, Award, CheckCircle, Upload, X } from "lucide-react";
 import { GlowCard, StatCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { motion } from "framer-motion";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
+import { useAvatar } from "@/lib/useAvatar";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
+
+// Event name for avatar updates
+const AVATAR_UPDATED_EVENT = 'avatar-updated';
 
 // Static mock data (replace with real DB queries when ready)
 const recentActivity = [
@@ -44,6 +48,11 @@ interface ProfileData {
 export default function ProfileClient({ user }: ProfileClientProps) {
   const [profileData, setProfileData] = useState<ProfileData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Use the avatar hook for fetching and uploading
+  const { avatarUrl, uploadAvatar, refreshAvatar } = useAvatar();
   
   // Form state
   const [settingsForm, setSettingsForm] = useState({
@@ -105,7 +114,55 @@ export default function ProfileClient({ user }: ProfileClientProps) {
     fetchProfile();
   }, [user]);
 
-  // Generate initials for the avatar
+  // Handle avatar upload using the hook
+  const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      setSaveStatus({ type: "error", message: "Only JPEG, PNG, GIF, and WebP images are allowed." });
+      return;
+    }
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      setSaveStatus({ type: "error", message: "File size must be less than 5MB." });
+      return;
+    }
+
+    setIsUploadingAvatar(true);
+    setSaveStatus(null);
+
+    try {
+      // Use the hook's upload function
+      const uploadedUrl = await uploadAvatar(file);
+      
+      // Update profile data with new avatar URL
+      setProfileData(prev => prev ? { ...prev, avatar_url: uploadedUrl } : null);
+      setSaveStatus({ type: "success", message: "Avatar updated successfully!" });
+      
+      // Dispatch a global event to notify all components
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent(AVATAR_UPDATED_EVENT, { 
+          detail: { avatarUrl: uploadedUrl } 
+        }));
+      }
+      
+      // Clear the file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    } catch (error: any) {
+      console.error('Avatar upload error:', error);
+      setSaveStatus({ type: "error", message: error.message || "Failed to upload avatar" });
+    } finally {
+      setIsUploadingAvatar(false);
+    }
+  };
+
+  // Generate initials for the avatar fallback
   const initials = settingsForm.name
     .split(" ")
     .map((p: string) => p[0])
@@ -176,6 +233,9 @@ export default function ProfileClient({ user }: ProfileClientProps) {
       const refreshedProfile = await profileResponse.json();
       setProfileData(refreshedProfile);
       
+      // Refresh avatar in case it changed
+      refreshAvatar();
+      
     } catch (error: any) {
       setSaveStatus({ type: "error", message: error.message });
     } finally {
@@ -199,14 +259,39 @@ export default function ProfileClient({ user }: ProfileClientProps) {
         <GlowCard className="overflow-hidden border-white/5 bg-white/[0.02]">
           <div className="flex flex-col md:flex-row items-center md:items-start gap-8">
 
-            {/* Avatar */}
+            {/* Avatar with upload functionality */}
             <div className="relative group">
-              <div className="w-32 h-32 rounded-3xl bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center shadow-2xl shadow-purple-500/30 transition-transform duration-500 group-hover:scale-105">
-                <span className="text-white font-black text-4xl tracking-tighter">{initials}</span>
+              <div className="w-32 h-32 rounded-3xl bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center shadow-2xl shadow-purple-500/30 transition-transform duration-500 group-hover:scale-105 overflow-hidden">
+                {avatarUrl ? (
+                  <img 
+                    src={avatarUrl} 
+                    alt="Profile" 
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <span className="text-white font-black text-4xl tracking-tighter">{initials}</span>
+                )}
               </div>
-              <button className="absolute -bottom-2 -right-2 w-11 h-11 bg-[#1A1A24] border border-white/10 text-purple-400 rounded-2xl flex items-center justify-center shadow-xl hover:bg-purple-500 hover:text-white transition-all duration-300">
-                <Camera className="w-5 h-5" />
-              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/gif,image/webp"
+                onChange={handleAvatarUpload}
+                className="hidden"
+                id="avatar-upload"
+              />
+              <label
+                htmlFor="avatar-upload"
+                className={`absolute -bottom-2 -right-2 w-11 h-11 bg-[#1A1A24] border border-white/10 text-purple-400 rounded-2xl flex items-center justify-center shadow-xl transition-all duration-300 cursor-pointer ${
+                  isUploadingAvatar ? 'opacity-50 cursor-wait' : 'hover:bg-purple-500 hover:text-white'
+                }`}
+              >
+                {isUploadingAvatar ? (
+                  <div className="w-5 h-5 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Camera className="w-5 h-5" />
+                )}
+              </label>
             </div>
 
             {/* Info */}
@@ -268,7 +353,7 @@ export default function ProfileClient({ user }: ProfileClientProps) {
           <TabsTrigger value="settings"     className="rounded-xl px-8 py-2.5 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-500 data-[state=active]:to-violet-600 data-[state=active]:text-white transition-all">Settings</TabsTrigger>
         </TabsList>
 
-        {/* Activity Tab - unchanged */}
+        {/* Activity Tab */}
         <TabsContent value="activity" className="mt-0 outline-none">
           <GlowCard className="border-white/5">
             <h2 className="text-2xl font-bold text-white mb-8 tracking-tight">Recent Learning Activity</h2>
@@ -294,7 +379,7 @@ export default function ProfileClient({ user }: ProfileClientProps) {
           </GlowCard>
         </TabsContent>
 
-        {/* Certificates Tab - unchanged */}
+        {/* Certificates Tab */}
         <TabsContent value="certificates" className="mt-0 outline-none">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {certificates.map((cert) => (
@@ -319,10 +404,22 @@ export default function ProfileClient({ user }: ProfileClientProps) {
           </div>
         </TabsContent>
 
-        {/* Settings Tab - modified to use backend */}
+        {/* Settings Tab */}
         <TabsContent value="settings" className="mt-0 outline-none">
           <GlowCard className="border-white/5">
             <h2 className="text-2xl font-bold text-white mb-8 tracking-tight">Public Presence</h2>
+            
+            {/* Save status message */}
+            {saveStatus && (
+              <div className={`mb-6 rounded-xl border p-3 text-sm font-medium ${
+                saveStatus.type === "success"
+                  ? "border-green-500/20 bg-green-500/10 text-green-400"
+                  : "border-red-500/20 bg-red-500/10 text-red-400"
+              }`}>
+                {saveStatus.message}
+              </div>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-2">
                 <label className="text-sm font-medium text-[#A0A0B5] ml-1">Full Name</label>
@@ -401,17 +498,6 @@ export default function ProfileClient({ user }: ProfileClientProps) {
                 />
               </div>
             </div>
-
-            {/* Save status message */}
-            {saveStatus && (
-              <div className={`mt-6 rounded-xl border p-3 text-sm font-medium ${
-                saveStatus.type === "success"
-                  ? "border-green-500/20 bg-green-500/10 text-green-400"
-                  : "border-red-500/20 bg-red-500/10 text-red-400"
-              }`}>
-                {saveStatus.message}
-              </div>
-            )}
 
             <div className="flex gap-4 mt-10">
               <GlowButton

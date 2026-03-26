@@ -9,6 +9,7 @@ from backend.services.auth_service.auth_service.routes.onboarding import onboard
 from backend.services.auth_service.auth_service.routes.profile import profile_bp
 from backend.services.auth_service.auth_service.routes.metadata import metadata_bp
 from backend.services.auth_service.auth_service.routes.auth import auth_bp
+from backend.services.auth_service.auth_service.routes.avatar import avatar_bp  # Add this import
 
 def is_valid_database_url(database_url: str) -> bool:
     if not database_url:
@@ -43,7 +44,8 @@ def create_app():
     app.register_blueprint(onboarding_bp, url_prefix="/api/auth-service")
     app.register_blueprint(profile_bp,   url_prefix="/api/auth-service")
     app.register_blueprint(metadata_bp,  url_prefix="/api/auth-service")
-    app.register_blueprint(auth_bp, url_prefix="/api/auth-service")
+    app.register_blueprint(auth_bp,      url_prefix="/api/auth-service")
+    app.register_blueprint(avatar_bp,    url_prefix="/api/auth-service")  # Add this line
 
     @app.teardown_appcontext
     def shutdown_session(_exception=None):
