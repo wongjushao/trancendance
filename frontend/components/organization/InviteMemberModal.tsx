@@ -7,14 +7,21 @@ import { GlowButton } from "@/components/lms/GlowButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Organization } from "@/lib/role";
+import { sendMockInvitation } from "@/lib/mock-email";
 
 interface InviteMemberModalProps {
   isOpen: boolean;
   onClose: () => void;
   organization: Organization;
+  invitedByName?: string;
 }
 
-export function InviteMemberModal({ isOpen, onClose, organization }: InviteMemberModalProps) {
+export function InviteMemberModal({ 
+  isOpen, 
+  onClose, 
+  organization,
+  invitedByName = "Organization Admin"
+}: InviteMemberModalProps) {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<"student" | "teacher" | "admin">("student");
   const [isSending, setIsSending] = useState(false);
@@ -27,21 +34,24 @@ export function InviteMemberModal({ isOpen, onClose, organization }: InviteMembe
     setIsSending(true);
     setStatus(null);
 
-    // Mock sending invitation
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    // Generate a mock token
+    const token = `invite-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
     
-    console.log("[Invite] Sending invitation:", {
+    // Send mock invitation email
+    sendMockInvitation(
       email,
+      organization.name,
       role,
-      organizationId: organization.id,
-      organizationName: organization.name,
-    });
+      token,
+      invitedByName
+    );
     
     setStatus({ type: "success", message: `Invitation sent to ${email}` });
     setEmail("");
+    
     setTimeout(() => {
       onClose();
-    }, 1500);
+    }, 2000);
     
     setIsSending(false);
   };
@@ -125,6 +135,12 @@ export function InviteMemberModal({ isOpen, onClose, organization }: InviteMembe
             </GlowButton>
           </div>
         </form>
+
+        <div className="p-4 border-t border-white/5 bg-[#12121A]/50">
+          <p className="text-xs text-[#6B6B80] text-center">
+            💡 Development Mode: Invitations appear in the Mock Inbox (bottom-left)
+          </p>
+        </div>
       </div>
     </div>
   );

@@ -17,6 +17,7 @@ import { clearOnboardingCache } from "@/lib/onboarding";
 import { useRole } from "@/components/providers/RoleProvider";
 import { UserRole, Organization, mockOrganizations } from "@/lib/role";
 import { OrganizationAutoDetect } from "@/components/onboarding/OrganizationAutoDetect";
+import { createRoleRequest } from "@/lib/role-requests";
 
 // Constants
 const TOTAL_STEPS = 4;
@@ -76,16 +77,16 @@ type FormData = {
   firstName: string;
   lastName: string;
   bio: string;
-  email: string; // Added for domain detection
+  email: string;
   
   // Personal & Career Info
   birthday: string;
   language: string;
   jobTitle: string;
-  customJobTitle: string; // For "Other" job title selection
+  customJobTitle: string;
   desiredRole: UserRole;
   
-  // Organization (for teacher role)
+  // Organization
   selectedOrganizationId: number | null;
   
   // Interests
@@ -148,13 +149,11 @@ export default function OnboardingPage() {
   const handleOrganizationDetected = (org: Organization | null) => {
     setDetectedOrg(org);
     if (org) {
-      // Auto-select the organization
       setFormData(prev => ({
         ...prev,
         selectedOrganizationId: org.id
       }));
     } else {
-      // Clear selection if no organization detected
       setFormData(prev => ({
         ...prev,
         selectedOrganizationId: null
@@ -365,6 +364,22 @@ export default function OnboardingPage() {
       pendingOrganizationName: selectedOrg?.name,
     });
 
+    // Create role request if teacher role was selected
+    if (formData.desiredRole === 'teacher' && formData.selectedOrganizationId) {
+      const selectedOrgForRequest = mockOrganizations.find(o => o.id === formData.selectedOrganizationId);
+      if (selectedOrgForRequest && user) {
+        createRoleRequest(
+          user.id,
+          `${formData.firstName} ${formData.lastName}`.trim(),
+          formData.email,
+          'teacher',
+          formData.selectedOrganizationId,
+          selectedOrgForRequest.name
+        );
+        console.log('[onboarding] Created teacher role request for organization:', selectedOrgForRequest.name);
+      }
+    }
+
     // Upload avatar if one was selected
     if (formData.avatar) {
       console.log('[onboarding] Uploading avatar...');
@@ -504,7 +519,7 @@ export default function OnboardingPage() {
                   transition={{ duration: 0.35, ease: "easeOut" }}
                 >
 
-                  {/* Step 1: Profile (Photo + Basic Info) */}
+                  {/* Step 1: Profile */}
                   {currentStep === 1 && (
                     <div className="space-y-6 py-4">
                       <div className="text-center">
@@ -565,7 +580,7 @@ export default function OnboardingPage() {
                         </div>
                       </div>
 
-                      {/* Email - Display only, not editable */}
+                      {/* Email - Display only */}
                       <div className="space-y-2">
                         <Label className="text-sm font-medium text-[#A0A0B5]">
                           Email Address
@@ -677,7 +692,7 @@ export default function OnboardingPage() {
                         </div>
                       </div>
 
-                      {/* Custom job title input - only shows when "Other" is selected */}
+                      {/* Custom job title input */}
                       {formData.jobTitle === "Other" && (
                         <div className="space-y-2">
                           <Label className="text-sm font-medium text-[#A0A0B5]">

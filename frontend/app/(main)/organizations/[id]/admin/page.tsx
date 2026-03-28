@@ -23,6 +23,12 @@ import { Label } from "@/components/ui/label";
 import { useRole } from "@/components/providers/RoleProvider";
 import { Organization, mockOrganizations } from "@/lib/role";
 import { InviteMemberModal } from "@/components/organization/InviteMemberModal";
+import { 
+  RoleRequest, 
+  getPendingRequestsForOrganization, 
+  approveRoleRequest, 
+  rejectRoleRequest 
+} from "@/lib/role-requests";
 
 // Mock data for members (in a real app, this would come from backend)
 const mockMembers = [
@@ -30,25 +36,6 @@ const mockMembers = [
   { id: "2", name: "Bob Smith", email: "bob@tech.edu", role: "teacher", joinedAt: "2024-02-20", courses: 8 },
   { id: "3", name: "Carol White", email: "carol@gmail.com", role: "student", joinedAt: "2024-03-10", courses: 5 },
   { id: "4", name: "David Brown", email: "david@devcorp.com", role: "student", joinedAt: "2024-03-15", courses: 3 },
-];
-
-const mockPendingRequests = [
-  {
-    id: "req-1",
-    userName: "Carol White",
-    userEmail: "carol@gmail.com",
-    requestedRole: "teacher",
-    requestedAt: "2024-03-20",
-    status: "pending",
-  },
-  {
-    id: "req-2",
-    userName: "Eve Adams",
-    userEmail: "eve@gmail.com",
-    requestedRole: "admin",
-    requestedAt: "2024-03-21",
-    status: "pending",
-  },
 ];
 
 interface PageProps {
@@ -61,13 +48,15 @@ export default function OrganizationAdminPage({ params }: PageProps) {
   const { roleData } = useRole();
   const [organization, setOrganization] = useState<Organization | null>(null);
   const [members, setMembers] = useState(mockMembers);
-  const [pendingRequests, setPendingRequests] = useState(mockPendingRequests);
+  const [pendingRequests, setPendingRequests] = useState<RoleRequest[]>([]);
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
 
   useEffect(() => {
     const org = mockOrganizations.find(o => o.id === parseInt(id));
     if (org) {
       setOrganization(org);
+      // Load real pending requests
+      setPendingRequests(getPendingRequestsForOrganization(parseInt(id)));
     } else {
       router.push("/organizations");
     }
@@ -89,13 +78,19 @@ export default function OrganizationAdminPage({ params }: PageProps) {
   }
 
   const handleApproveRequest = (requestId: string) => {
-    setPendingRequests(prev => prev.filter(req => req.id !== requestId));
-    // In a real app, this would update the user's role in the database
+    const approved = approveRoleRequest(requestId);
+    if (approved) {
+      setPendingRequests(prev => prev.filter(req => req.id !== requestId));
+      console.log('[Admin] Approved request:', approved);
+    }
   };
 
   const handleRejectRequest = (requestId: string) => {
-    setPendingRequests(prev => prev.filter(req => req.id !== requestId));
-    // In a real app, this would reject the request
+    const rejected = rejectRoleRequest(requestId);
+    if (rejected) {
+      setPendingRequests(prev => prev.filter(req => req.id !== requestId));
+      console.log('[Admin] Rejected request:', rejected);
+    }
   };
 
   const handleChangeMemberRole = (memberId: string, newRole: string) => {
@@ -104,7 +99,6 @@ export default function OrganizationAdminPage({ params }: PageProps) {
         member.id === memberId ? { ...member, role: newRole } : member
       )
     );
-    // In a real app, this would update the member's role in the database
   };
 
   return (
@@ -172,7 +166,7 @@ export default function OrganizationAdminPage({ params }: PageProps) {
                     <th className="text-left text-[#A0A0B5] font-medium py-3 px-4">Role</th>
                     <th className="text-left text-[#A0A0B5] font-medium py-3 px-4">Joined</th>
                     <th className="text-left text-[#A0A0B5] font-medium py-3 px-4">Actions</th>
-                  </tr>
+                   </tr>
                 </thead>
                 <tbody>
                   {members.map((member) => (
