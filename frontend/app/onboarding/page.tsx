@@ -2,11 +2,10 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import Image from "next/image";
 import {
-  Camera, User, Building2, BookOpen, ArrowRight, ArrowLeft,
-  Check, Calendar, Globe, FileText, AlertCircle,
-  Briefcase, Sparkles, Mail, Users as UsersIcon,
+  Camera, ArrowRight, ArrowLeft,
+  Check, Calendar, FileText, AlertCircle,
+  Briefcase, Search, Building2, Users,
 } from "lucide-react";
 import { GlowButton } from "@/components/lms/GlowButton";
 import { Input } from "@/components/ui/input";
@@ -14,9 +13,10 @@ import { Label } from "@/components/ui/label";
 import { motion, AnimatePresence } from "framer-motion";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 import { clearOnboardingCache } from "@/lib/onboarding";
+import { useRole } from "@/components/providers/RoleProvider";
+import { UserRole, mockOrganizations, Organization } from "@/lib/role";
 
-// ── Constants ────────────────────────────────────────────────────────────────
-
+// Constants
 const TOTAL_STEPS = 4;
 
 const LANGUAGES = [
@@ -57,10 +57,15 @@ const INTERESTS = [
   "Leadership",
 ];
 
-const STEP_LABELS = ["Profile", "Personal", "Career", "Interests"];
+const STEP_LABELS = ["Profile", "Personal & Career", "Organization", "Interests"];
 
-// ── Types ────────────────────────────────────────────────────────────────────
+const ROLES: { value: UserRole; label: string; description: string }[] = [
+  { value: 'student', label: 'Student', description: 'Learn at your own pace, take courses, and earn certificates.' },
+  { value: 'teacher', label: 'Teacher', description: 'Create courses, share knowledge, and mentor students.' },
+  { value: 'admin', label: 'Admin', description: 'Manage organizations, users, and platform settings.' },
+];
 
+// Types
 type FormData = {
   // Profile Info
   avatar: File | null;
@@ -70,28 +75,20 @@ type FormData = {
   lastName: string;
   bio: string;
   
-  // Personal Info
+  // Personal & Career Info
   birthday: string;
-  timezone: string;
   language: string;
-  
-  // Career Info
   jobTitle: string;
+  desiredRole: UserRole;
+  
+  // Organization (for teacher role)
+  selectedOrganizationId: number | null;
   
   // Interests
   interests: string[];
 };
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-function detectTimezone(): string {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Kuala_Lumpur";
-  } catch {
-    return "Asia/Kuala_Lumpur";
-  }
-}
-
+// Helpers
 function detectLanguage(): string {
   try {
     const lang = navigator.language || "en";
@@ -103,22 +100,21 @@ function detectLanguage(): string {
   }
 }
 
-// Shared className for ALL <select> elements
 const SELECT_CLASS =
   "w-full bg-[#12121A] border border-white/10 text-white rounded-xl h-12 px-4 " +
   "focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500/50 " +
   "transition-all outline-none appearance-none cursor-pointer [color-scheme:dark]";
 
-// ── Component ────────────────────────────────────────────────────────────────
-
 export default function OnboardingPage() {
   const router = useRouter();
+  const { setRole } = useRole();
 
   const [currentStep, setCurrentStep] = useState(1);
   const [isSaving, setIsSaving] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [stepError, setStepError] = useState<string | null>(null);
   const [isLoadingUser, setIsLoadingUser] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const [formData, setFormData] = useState<FormData>({
     avatar: null,
@@ -128,14 +124,21 @@ export default function OnboardingPage() {
     lastName: "",
     bio: "",
     birthday: "",
-    timezone: detectTimezone(),
     language: detectLanguage(),
     jobTitle: "",
+    desiredRole: "student",
+    selectedOrganizationId: null,
     interests: [],
   });
 
-  // ── Load user data from Google OAuth if available (but NOT avatar) ──────────
-useEffect(() => {
+  // Filter organizations based on search
+  const filteredOrganizations = mockOrganizations.filter(org =>
+    org.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    org.domain.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  // Load user data from Google OAuth if available
+  useEffect(() => {
     const loadUserData = async () => {
       setIsLoadingUser(true);
       const supabase = getSupabaseBrowserClient();
@@ -171,23 +174,19 @@ useEffect(() => {
       const userMetadata = user.user_metadata || {};
       const userEmail = user.email || "";
       
-      // Extract Google name data
       const googleName = userMetadata.full_name || userMetadata.name || "";
       const googleFirstName = userMetadata.given_name || "";
       const googleLastName = userMetadata.family_name || "";
       
-      // Auto-generate username from email or name
       const suggestedUsername = googleName
         ? googleName.toLowerCase().replace(/\s+/g, ".")
         : userEmail.split("@")[0];
       
-      // For Google OAuth users, we can pre-fill from Google data
       setFormData((prev) => ({
         ...prev,
         firstName: prev.firstName || googleFirstName || (googleName.split(" ")[0] || ""),
         lastName: prev.lastName || googleLastName || (googleName.split(" ").slice(1).join(" ") || ""),
         username: prev.username || suggestedUsername,
-        // Don't pre-fill bio - let user write it
       }));
 
       setIsLoadingUser(false);
@@ -196,7 +195,7 @@ useEffect(() => {
     loadUserData();
   }, [router]);
 
-  // ── Per-step validation ────────────────────────────────────────────────────
+  // Per-step validation
   function validateStep(step: number): string | null {
     if (step === 1) {
       if (!formData.firstName.trim()) return "First name is required.";
@@ -208,14 +207,17 @@ useEffect(() => {
     }
     if (step === 2) {
       if (!formData.birthday) return "Birthday is required.";
+      if (!formData.jobTitle) return "Please select your job title to continue.";
     }
     if (step === 3) {
-      if (!formData.jobTitle) return "Please select your job title to continue.";
+      if (formData.desiredRole === "teacher" && !formData.selectedOrganizationId) {
+        return "Please select an organization to join as a teacher.";
+      }
     }
     return null;
   }
 
-  // ── Navigation ─────────────────────────────────────────────────────────────
+  // Navigation
   const handleBack = () => {
     setStepError(null);
     if (currentStep > 1) setCurrentStep((s) => s - 1);
@@ -235,7 +237,7 @@ useEffect(() => {
       return;
     }
 
-    // ── Final submit ─────────────────────────────────────────────────────────
+    // Final submit
     setIsSaving(true);
 
     const supabase = getSupabaseBrowserClient();
@@ -249,17 +251,20 @@ useEffect(() => {
       return;
     }
 
-    // ── POST to backend: /api/auth-service/register ──────────────────────────
+    // POST to backend: /api/auth-service/register
     const payload: Record<string, any> = {
       username: formData.username.trim(),
       first_name: formData.firstName.trim(),
       last_name: formData.lastName.trim(),
       bio: formData.bio.trim(),
-      timezone: formData.timezone,
       language: formData.language,
       birthday: formData.birthday,
       job_title: formData.jobTitle,
       interests: formData.interests,
+      desired_role: formData.desiredRole,
+      ...(formData.desiredRole === "teacher" && formData.selectedOrganizationId ? {
+        organization_id: formData.selectedOrganizationId,
+      } : {}),
     };
 
     console.log('[onboarding] Submitting payload to backend:', payload);
@@ -300,7 +305,35 @@ useEffect(() => {
       return;
     }
 
-    // ── Upload avatar if one was selected ────────────────────────────────────
+    // Set role data after successful registration
+    let role: UserRole;
+    let pendingRole: 'teacher' | 'admin' | null = null;
+    
+    if (formData.desiredRole === 'admin') {
+      role = 'pending_admin';
+      pendingRole = 'admin';
+    } else if (formData.desiredRole === 'teacher') {
+      role = 'pending_teacher';
+      pendingRole = 'teacher';
+    } else {
+      role = 'student';
+      pendingRole = null;
+    }
+    
+    const selectedOrg = formData.selectedOrganizationId 
+      ? mockOrganizations.find(o => o.id === formData.selectedOrganizationId)
+      : null;
+    
+    setRole({
+      role,
+      organizationId: formData.selectedOrganizationId || null,
+      organizationName: selectedOrg?.name || null,
+      pendingRole,
+      pendingOrganizationId: formData.selectedOrganizationId,
+      pendingOrganizationName: selectedOrg?.name,
+    });
+
+    // Upload avatar if one was selected
     if (formData.avatar) {
       console.log('[onboarding] Uploading avatar...');
       try {
@@ -327,11 +360,9 @@ useEffect(() => {
           }
         } else {
           console.error('[onboarding] Avatar upload failed');
-          // Don't show error for avatar upload failure - it's optional
         }
       } catch (err) {
         console.error('[onboarding] Avatar upload error:', err);
-        // Don't fail onboarding if avatar upload fails
       }
     }
 
@@ -339,11 +370,10 @@ useEffect(() => {
     router.push("/dashboard");
   };
 
-  // ── Form helpers ───────────────────────────────────────────────────────────
+  // Form helpers
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] || null;
     if (file) {
-      // Create local preview
       const previewUrl = URL.createObjectURL(file);
       setFormData((prev) => ({
         ...prev,
@@ -383,7 +413,6 @@ useEffect(() => {
     return (first + last).toUpperCase() || "U";
   };
 
-  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-[#0B0B0F] relative overflow-hidden flex flex-col">
       <div className="absolute top-20 -left-20 w-96 h-96 bg-purple-600/10 rounded-full blur-[120px] pointer-events-none" />
@@ -451,7 +480,7 @@ useEffect(() => {
                         <p className="text-[#A0A0B5]">Let's get to know you</p>
                       </div>
                       
-                      {/* Avatar Upload - no Google avatar prefill */}
+                      {/* Avatar Upload */}
                       <div className="flex flex-col items-center gap-4">
                         <div className="relative group">
                           <div className="w-32 h-32 rounded-full bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center overflow-hidden shadow-xl shadow-purple-500/20">
@@ -542,12 +571,12 @@ useEffect(() => {
                     </div>
                   )}
 
-                  {/* Step 2: Personal Details (Birthday + Language) */}
+                  {/* Step 2: Personal & Career */}
                   {currentStep === 2 && (
                     <div className="space-y-6 py-4">
                       <div className="text-center">
-                        <h2 className="text-3xl font-bold text-white mb-2">Personal Details</h2>
-                        <p className="text-[#A0A0B5]">Tell us a bit about yourself</p>
+                        <h2 className="text-3xl font-bold text-white mb-2">Tell Us About Yourself</h2>
+                        <p className="text-[#A0A0B5]">Personal details and career information</p>
                       </div>
 
                       {/* Birthday */}
@@ -567,7 +596,7 @@ useEffect(() => {
                         </div>
                       </div>
 
-                      {/* Language - User selectable */}
+                      {/* Language */}
                       <div className="space-y-2">
                         <Label className="text-sm font-medium text-[#A0A0B5]">
                           Language <span className="text-red-400">*</span>
@@ -581,19 +610,6 @@ useEffect(() => {
                             <option key={code} value={code}>{label}</option>
                           ))}
                         </select>
-                        <p className="text-xs text-[#6B6B80]">
-                          Your timezone has been automatically detected as: <span className="text-purple-400">{formData.timezone}</span>
-                        </p>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Step 3: Career */}
-                  {currentStep === 3 && (
-                    <div className="space-y-8 py-4">
-                      <div className="text-center">
-                        <h2 className="text-3xl font-bold text-white mb-2">Your Career</h2>
-                        <p className="text-[#A0A0B5]">Help us personalize your learning experience</p>
                       </div>
 
                       {/* Job Title */}
@@ -606,7 +622,7 @@ useEffect(() => {
                           <select
                             value={formData.jobTitle}
                             onChange={set("jobTitle")}
-                            className={`${SELECT_CLASS} pl-10`}
+                            className="w-full bg-[#12121A] border border-white/10 text-white rounded-xl h-12 pl-10 pr-4 focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500/50 transition-all outline-none appearance-none cursor-pointer [color-scheme:dark]"
                           >
                             <option value="">Select your job title</option>
                             {JOB_TITLES.map((title) => (
@@ -615,6 +631,171 @@ useEffect(() => {
                           </select>
                         </div>
                       </div>
+
+                      {/* Role Selection */}
+                      <div className="space-y-3 pt-2">
+                        <Label className="text-sm font-medium text-[#A0A0B5]">
+                          How would you like to use Educatorio?
+                        </Label>
+                        <p className="text-xs text-[#6B6B80] -mt-1">
+                          You'll start with student access. Role changes require approval from an organization admin.
+                        </p>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-2">
+                          {ROLES.map((role) => (
+                            <button
+                              key={role.value}
+                              type="button"
+                              onClick={() => setFormData(prev => ({ ...prev, desiredRole: role.value }))}
+                              className={`p-4 rounded-xl border transition-all text-left ${
+                                formData.desiredRole === role.value
+                                  ? "bg-purple-500/10 border-purple-500 shadow-[0_0_15px_rgba(168,85,247,0.1)]"
+                                  : "bg-[#12121A] border-white/10 hover:border-purple-500/30"
+                              }`}
+                            >
+                              <div className={`font-bold mb-1 ${
+                                formData.desiredRole === role.value ? "text-purple-400" : "text-white"
+                              }`}>
+                                {role.label}
+                              </div>
+                              <p className="text-xs text-[#6B6B80] leading-relaxed">
+                                {role.description}
+                              </p>
+                            </button>
+                          ))}
+                        </div>
+                        
+                        {formData.desiredRole === "admin" && (
+                          <div className="mt-3 p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl">
+                            <p className="text-xs text-blue-400">
+                              After completing onboarding, you'll be asked to set up your organization.
+                              Your admin privileges will be activated after verification.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Step 3: Organization Selection */}
+                  {currentStep === 3 && (
+                    <div className="space-y-6 py-4">
+                      <div className="text-center">
+                        <h2 className="text-3xl font-bold text-white mb-2">Join an Organization</h2>
+                        <p className="text-[#A0A0B5]">
+                          {formData.desiredRole === "teacher" 
+                            ? "Select the organization where you'd like to teach. Your request will be sent to the organization admin for approval."
+                            : formData.desiredRole === "admin"
+                            ? "You'll create a new organization after onboarding. Admin privileges will be activated after verification."
+                            : "You can join organizations later from your dashboard."}
+                        </p>
+                      </div>
+
+                      {formData.desiredRole === "teacher" ? (
+                        <div className="space-y-4">
+                          {/* Search Bar */}
+                          <div className="relative">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6B6B80]" />
+                            <Input
+                              type="text"
+                              placeholder="Search organizations by name or domain..."
+                              value={searchQuery}
+                              onChange={(e) => setSearchQuery(e.target.value)}
+                              className="pl-10 bg-[#12121A] border-white/10 text-white rounded-xl h-12"
+                            />
+                          </div>
+
+                          {/* Organization List */}
+                          <div className="space-y-2 max-h-96 overflow-y-auto">
+                            {filteredOrganizations.map((org) => (
+                              <button
+                                key={org.id}
+                                type="button"
+                                onClick={() => setFormData(prev => ({ ...prev, selectedOrganizationId: org.id }))}
+                                className={`w-full p-4 rounded-xl border transition-all text-left ${
+                                  formData.selectedOrganizationId === org.id
+                                    ? "bg-purple-500/10 border-purple-500 shadow-[0_0_15px_rgba(168,85,247,0.1)]"
+                                    : "bg-[#12121A] border-white/10 hover:border-purple-500/30"
+                                }`}
+                              >
+                                <div className="flex items-start gap-3">
+                                  <div className={`p-2 rounded-lg ${
+                                    formData.selectedOrganizationId === org.id
+                                      ? "bg-purple-500/20"
+                                      : "bg-[#1A1A24]"
+                                  }`}>
+                                    <Building2 className={`w-5 h-5 ${
+                                      formData.selectedOrganizationId === org.id
+                                        ? "text-purple-400"
+                                        : "text-[#A0A0B5]"
+                                    }`} />
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center justify-between mb-1">
+                                      <p className={`font-semibold ${
+                                        formData.selectedOrganizationId === org.id
+                                          ? "text-purple-400"
+                                          : "text-white"
+                                      }`}>
+                                        {org.name}
+                                      </p>
+                                      {org.verified && (
+                                        <span className="text-xs text-green-400 bg-green-500/10 px-2 py-0.5 rounded-full">
+                                          Verified
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="text-xs text-[#6B6B80] mb-1">{org.domain}</p>
+                                    <p className="text-xs text-[#6B6B80] line-clamp-1">{org.description}</p>
+                                    <div className="flex items-center gap-4 mt-2 text-xs text-[#6B6B80]">
+                                      <span className="flex items-center gap-1">
+                                        <Users className="w-3 h-3" />
+                                        {org.memberCount.toLocaleString()} members
+                                      </span>
+                                    </div>
+                                  </div>
+                                  {formData.selectedOrganizationId === org.id && (
+                                    <Check className="w-5 h-5 text-purple-400 shrink-0" />
+                                  )}
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+
+                          {filteredOrganizations.length === 0 && (
+                            <div className="text-center py-8">
+                              <Building2 className="w-12 h-12 text-[#6B6B80] mx-auto mb-3" />
+                              <p className="text-white font-medium mb-1">No organizations found</p>
+                              <p className="text-sm text-[#6B6B80]">Try a different search term</p>
+                            </div>
+                          )}
+
+                          {formData.selectedOrganizationId && (
+                            <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl">
+                              <p className="text-xs text-blue-400">
+                                A request will be sent to the organization admin to approve your teacher role.
+                                You'll have student access until your request is approved.
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      ) : formData.desiredRole === "admin" ? (
+                        <div className="p-6 bg-purple-500/5 border border-purple-500/20 rounded-xl text-center">
+                          <Building2 className="w-12 h-12 text-purple-400 mx-auto mb-3" />
+                          <p className="text-white font-medium mb-2">You'll create a new organization</p>
+                          <p className="text-sm text-[#A0A0B5]">
+                            After completing onboarding, you'll be guided to set up your organization.
+                            Your admin privileges will be activated after verification.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="p-6 bg-[#12121A] border border-white/5 rounded-xl text-center">
+                          <Building2 className="w-12 h-12 text-[#6B6B80] mx-auto mb-3" />
+                          <p className="text-white font-medium mb-2">Join organizations later</p>
+                          <p className="text-sm text-[#A0A0B5]">
+                            You can browse and join organizations from your dashboard after onboarding.
+                          </p>
+                        </div>
+                      )}
                     </div>
                   )}
 

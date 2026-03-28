@@ -10,26 +10,26 @@ import {
   Building2,
   BookOpen,
   FileText,
-  MessageSquare,
   BarChart3,
-  Bell,
-  User,
   Settings,
+  ChevronLeft,
+  Menu,
 } from "lucide-react";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 import { useAvatar } from "@/lib/useAvatar";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
+import { useRole } from "@/components/providers/RoleProvider";
 
 const navItems = [
-  { path: "/dashboard",      label: "Dashboard",     icon: LayoutDashboard },
-  { path: "/organizations",  label: "Organizations", icon: Building2 },
-  { path: "/courses",        label: "Courses",       icon: BookOpen },
-  { path: "/assignments",    label: "Assignments",   icon: FileText },
-  { path: "/messages",       label: "Messages",      icon: MessageSquare },
-  { path: "/analytics",      label: "Analytics",     icon: BarChart3 },
-  { path: "/notifications",  label: "Notifications", icon: Bell },
-  { path: "/profile",        label: "Profile",       icon: User },
-  { path: "/admin",          label: "Admin",         icon: Settings },
+  { path: "/dashboard",      label: "Dashboard",     icon: LayoutDashboard, roles: ['student', 'teacher', 'admin', 'pending_admin', 'pending_teacher'] },
+  { path: "/organizations",  label: "Organizations", icon: Building2, roles: ['student', 'teacher', 'admin', 'pending_admin', 'pending_teacher'] },
+  { path: "/courses",        label: "Courses",       icon: BookOpen, roles: ['student', 'teacher', 'admin', 'pending_admin', 'pending_teacher'] },
+  { path: "/assignments",    label: "Assignments",   icon: FileText, roles: ['student', 'teacher', 'admin', 'pending_admin', 'pending_teacher'] },
+  { path: "/analytics",      label: "Analytics",     icon: BarChart3, roles: ['student', 'teacher', 'admin', 'pending_admin', 'pending_teacher'] },
+  { path: "/admin",          label: "Admin",         icon: Settings, roles: ['admin'] },
+  // Special links for pending roles
+  { path: "/organization-setup", label: "Setup Organization", icon: Building2, roles: ['pending_admin'] },
+  { path: "/teacher-request", label: "Teacher Request", icon: Building2, roles: ['pending_teacher'] },
 ];
 
 interface SidebarProps {
@@ -37,16 +37,31 @@ interface SidebarProps {
 }
 
 const PROFILE_UPDATED_EVENT = 'profile-updated';
+const SIDEBAR_STATE_KEY = 'sidebar_collapsed';
 
 export function Sidebar({ user: initialUser }: SidebarProps) {
   const pathname = usePathname();
-  const { avatarUrl, isLoading } = useAvatar();
+  const { avatarUrl } = useAvatar();
   const [user, setUser] = useState(initialUser);
+  const [isCollapsed, setIsCollapsed] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem(SIDEBAR_STATE_KEY);
+      return stored === 'true';
+    }
+    return false;
+  });
+  const { roleData } = useRole();
+
+  // Save sidebar state
+  const toggleSidebar = () => {
+    const newState = !isCollapsed;
+    setIsCollapsed(newState);
+    localStorage.setItem(SIDEBAR_STATE_KEY, String(newState));
+  };
 
   // Listen for profile updates
   useEffect(() => {
     const handleProfileUpdate = async (event: CustomEvent) => {
-      // Refresh user data from Supabase
       const supabase = getSupabaseBrowserClient();
       const { data: { user: updatedUser } } = await supabase.auth.getUser();
       if (updatedUser) {
@@ -62,7 +77,6 @@ export function Sidebar({ user: initialUser }: SidebarProps) {
     }
   }, []);
 
-  // Derive display values from the real Supabase user
   const fullName: string =
     user.user_metadata?.full_name ||
     user.user_metadata?.name ||
@@ -71,7 +85,6 @@ export function Sidebar({ user: initialUser }: SidebarProps) {
 
   const email: string = user.email ?? "";
 
-  // Generate initials for fallback avatar
   const initials = fullName
     .split(" ")
     .map((part) => part[0])
@@ -79,24 +92,52 @@ export function Sidebar({ user: initialUser }: SidebarProps) {
     .slice(0, 2)
     .toUpperCase();
 
+  // Filter nav items based on role
+  const filteredNavItems = navItems.filter(item => 
+    item.roles.includes(roleData.role)
+  );
+
   return (
-    <aside className="fixed left-0 top-0 h-screen w-64 bg-[#0B0B0F] border-r border-white/5 flex flex-col z-20">
-      {/* Logo */}
-      <div className="p-6 border-b border-white/5">
-        <div className="flex items-center gap-3">
+    <aside 
+      className={`fixed left-0 top-0 h-screen bg-[#0B0B0F] border-r border-white/5 flex flex-col z-20 transition-all duration-300 ${
+        isCollapsed ? 'w-20' : 'w-64'
+      }`}
+    >
+      {/* Logo and Toggle Button */}
+      <div className={`p-4 border-b border-white/5 flex items-center ${isCollapsed ? 'justify-center' : 'justify-between'}`}>
+        {!isCollapsed && (
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center shadow-lg shadow-purple-500/30">
+              <BookOpen className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h1 className="text-xl font-semibold text-white">Educatorio</h1>
+              <p className="text-xs text-[#6B6B80]">Learning Platform</p>
+            </div>
+          </div>
+        )}
+        {isCollapsed && (
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center shadow-lg shadow-purple-500/30">
             <BookOpen className="w-5 h-5 text-white" />
           </div>
-          <div>
-            <h1 className="text-xl font-semibold text-white">Educatorio</h1>
-            <p className="text-xs text-[#6B6B80]">Learning Platform</p>
-          </div>
-        </div>
+        )}
+        <button
+          onClick={toggleSidebar}
+          className={`p-1.5 hover:bg-white/5 rounded-lg transition-colors ${
+            isCollapsed ? 'absolute -right-3 top-6 bg-[#0B0B0F] border border-white/10' : ''
+          }`}
+        >
+          {isCollapsed ? (
+            <Menu className="w-4 h-4 text-[#A0A0B5]" />
+          ) : (
+            <ChevronLeft className="w-4 h-4 text-[#A0A0B5]" />
+          )}
+        </button>
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-        {navItems.map((item) => {
+      <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
+        {filteredNavItems.map((item) => {
           const isActive = pathname === item.path;
           const Icon = item.icon;
 
@@ -106,47 +147,50 @@ export function Sidebar({ user: initialUser }: SidebarProps) {
               href={item.path}
               className={`
                 flex items-center gap-3 px-4 py-3 rounded-xl transition-all
+                ${isCollapsed ? 'justify-center' : ''}
                 ${
                   isActive
                     ? "bg-gradient-to-r from-purple-500/20 to-violet-600/20 text-white border border-purple-500/30 shadow-lg shadow-purple-500/20"
                     : "text-[#A0A0B5] hover:text-white hover:bg-white/5"
                 }
               `}
+              title={isCollapsed ? item.label : undefined}
             >
-              <Icon className="w-5 h-5" />
-              <span className="font-medium">{item.label}</span>
+              <Icon className="w-5 h-5 shrink-0" />
+              {!isCollapsed && <span className="font-medium">{item.label}</span>}
             </Link>
           );
         })}
       </nav>
 
-      {/* User card with avatar */}
-      <div className="p-4 border-t border-white/5">
-        <Link
-          href="/profile"
-          className="flex items-center gap-3 p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
-        >
-          {/* Avatar - shows image if exists, otherwise initials */}
-          <div className="w-10 h-10 rounded-full overflow-hidden shrink-0 bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center">
-            {avatarUrl ? (
-              <img 
-                src={avatarUrl} 
-                alt={fullName}
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              <span className="text-white font-semibold text-sm">
-                {initials}
-              </span>
-            )}
-          </div>
-          
-          <div className="flex-1 min-w-0">
-            <p className="text-white font-medium truncate text-sm">{fullName}</p>
-            <p className="text-xs text-[#6B6B80] truncate">{email}</p>
-          </div>
-        </Link>
-      </div>
+      {/* User card - Only show when not collapsed */}
+      {!isCollapsed && (
+        <div className="p-4 border-t border-white/5">
+          <Link
+            href="/profile"
+            className="flex items-center gap-3 p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
+          >
+            <div className="w-10 h-10 rounded-full overflow-hidden shrink-0 bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center">
+              {avatarUrl ? (
+                <img 
+                  src={avatarUrl} 
+                  alt={fullName}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <span className="text-white font-semibold text-sm">
+                  {initials}
+                </span>
+              )}
+            </div>
+            
+            <div className="flex-1 min-w-0">
+              <p className="text-white font-medium truncate text-sm">{fullName}</p>
+              <p className="text-xs text-[#6B6B80] truncate">{email}</p>
+            </div>
+          </Link>
+        </div>
+      )}
     </aside>
   );
 }

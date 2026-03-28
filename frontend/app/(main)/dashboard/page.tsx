@@ -1,15 +1,10 @@
 // frontend/app/(main)/dashboard/page.tsx
 
-import { BookOpen, Clock, Trophy, Target, Calendar, TrendingUp } from "lucide-react";
-import { GlowCard, StatCard } from "@/components/lms/Cards";
-import { GlowButton } from "@/components/lms/GlowButton";
-import Link from "next/link";
 import { createSupabaseServerClient } from "@/lib/supabase/server-client";
 import { redirect } from "next/navigation";
 import DashboardClient from "./DashboardClient";
 
-// ΓöÇΓöÇ Static mock data (replace with real DB queries when ready) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
-
+// Static mock data - kept for potential future use
 const upcomingAssignments = [
   { id: 1, title: "React Hooks Deep Dive",    course: "Advanced React",      dueDate: "2026-03-08", status: "pending" },
   { id: 2, title: "Database Design Project",  course: "Backend Development", dueDate: "2026-03-10", status: "pending" },
@@ -53,15 +48,18 @@ const activeCourses = [
   },
 ];
 
-// ΓöÇΓöÇ Page ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
-
 export default async function DashboardPage() {
-  // Fetch the real Supabase user server-side.
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  // Safety net ΓÇö should never be hit thanks to middleware + layout guard
   if (!user) redirect("/");
 
-  return <DashboardClient user={user} upcomingAssignments={upcomingAssignments} recentActivity={recentActivity} activeCourses={activeCourses} />;
+  return (
+    <DashboardClient 
+      user={user} 
+      upcomingAssignments={upcomingAssignments} 
+      recentActivity={recentActivity} 
+      activeCourses={activeCourses} 
+    />
+  );
 }

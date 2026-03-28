@@ -1,15 +1,14 @@
+// frontend/app/(main)/layout.tsx
+
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server-client";
 import { Sidebar } from "@/components/lms/Sidebar";
 import { TopNav } from "@/components/lms/TopNav";
 import { NotificationToast } from "@/components/lms/NotificationToast";
+import { ChatBubble } from "@/components/chat/ChatBubble";
 
-/**
- * Server component layout for all (main) pages.
- * 
- * Checks both auth AND profile completeness by calling the backend API.
- * The backend determines completeness by checking if required profile fields are filled.
- */
+// RoleProvider is now in root layout, no need to import here
+
 export default async function AppLayout({
   children,
 }: {
@@ -22,7 +21,6 @@ export default async function AppLayout({
 
   if (!user) redirect("/");
 
-  // Get the session to make an authenticated request to the backend
   const { data: { session } } = await supabase.auth.getSession();
   
   if (!session) {
@@ -38,7 +36,7 @@ export default async function AppLayout({
         headers: {
           'Authorization': `Bearer ${session.access_token}`,
         },
-        cache: 'no-store', // Don't cache this check
+        cache: 'no-store',
       }
     );
 
@@ -54,7 +52,6 @@ export default async function AppLayout({
     }
   } catch (error) {
     console.error('Error checking onboarding status:', error);
-    // On error, redirect to onboarding as a safe fallback
     redirect("/onboarding");
   }
 
@@ -75,6 +72,7 @@ export default async function AppLayout({
         </div>
       </div>
 
+      <ChatBubble />
       <NotificationToast />
     </div>
   );

@@ -1,6 +1,7 @@
 "use client";
 
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
+import { clearUserRoleData } from "@/lib/role";
 import { useRouter } from "next/navigation";
 
 export default function SignOutButton() {
@@ -8,6 +9,9 @@ export default function SignOutButton() {
   const router = useRouter();
 
   const handleSignOut = async () => {
+    // Clear role data from localStorage
+    clearUserRoleData();
+    // Sign out from Supabase
     await supabase.auth.signOut();
     // Refresh the page to trigger the server-side redirect in middleware
     router.refresh(); 
