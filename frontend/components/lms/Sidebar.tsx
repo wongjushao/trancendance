@@ -161,6 +161,25 @@ export function Sidebar({ user: initialUser }: SidebarProps) {
             </Link>
           );
         })}
+        
+        {/* Admin Dashboard Link - Shown only for admin users with an organization */}
+        {roleData.role === 'admin' && roleData.organizationId && (
+          <Link
+            href={`/organizations/${roleData.organizationId}/admin`}
+            className={`
+              flex items-center gap-3 px-4 py-3 rounded-xl transition-all mt-4 border-t border-white/10 pt-4
+              ${isCollapsed ? 'justify-center' : ''}
+              ${pathname === `/organizations/${roleData.organizationId}/admin`
+                ? "bg-gradient-to-r from-purple-500/20 to-violet-600/20 text-white border border-purple-500/30 shadow-lg shadow-purple-500/20"
+                : "text-[#A0A0B5] hover:text-white hover:bg-white/5"
+              }
+            `}
+            title={isCollapsed ? "Admin Dashboard" : undefined}
+          >
+            <Settings className="w-5 h-5 shrink-0" />
+            {!isCollapsed && <span className="font-medium">Admin Dashboard</span>}
+          </Link>
+        )}
       </nav>
 
       {/* User card - Only show when not collapsed */}

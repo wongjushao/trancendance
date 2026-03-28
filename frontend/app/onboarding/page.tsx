@@ -1,3 +1,4 @@
+// frontend/app/onboarding/page.tsx
 "use client";
 
 import { useState, useEffect } from "react";
@@ -14,7 +15,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 import { clearOnboardingCache } from "@/lib/onboarding";
 import { useRole } from "@/components/providers/RoleProvider";
-import { UserRole, mockOrganizations, Organization } from "@/lib/role";
+import { UserRole, Organization, mockOrganizations } from "@/lib/role";
+import { OrganizationAutoDetect } from "@/components/onboarding/OrganizationAutoDetect";
 
 // Constants
 const TOTAL_STEPS = 4;
@@ -74,11 +76,13 @@ type FormData = {
   firstName: string;
   lastName: string;
   bio: string;
+  email: string; // Added for domain detection
   
   // Personal & Career Info
   birthday: string;
   language: string;
   jobTitle: string;
+  customJobTitle: string; // For "Other" job title selection
   desiredRole: UserRole;
   
   // Organization (for teacher role)
@@ -115,6 +119,7 @@ export default function OnboardingPage() {
   const [stepError, setStepError] = useState<string | null>(null);
   const [isLoadingUser, setIsLoadingUser] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [detectedOrg, setDetectedOrg] = useState<Organization | null>(null);
 
   const [formData, setFormData] = useState<FormData>({
     avatar: null,
@@ -123,9 +128,11 @@ export default function OnboardingPage() {
     firstName: "",
     lastName: "",
     bio: "",
+    email: "",
     birthday: "",
     language: detectLanguage(),
     jobTitle: "",
+    customJobTitle: "",
     desiredRole: "student",
     selectedOrganizationId: null,
     interests: [],
@@ -136,6 +143,24 @@ export default function OnboardingPage() {
     org.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     org.domain.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  // Handle organization detection from email domain
+  const handleOrganizationDetected = (org: Organization | null) => {
+    setDetectedOrg(org);
+    if (org) {
+      // Auto-select the organization
+      setFormData(prev => ({
+        ...prev,
+        selectedOrganizationId: org.id
+      }));
+    } else {
+      // Clear selection if no organization detected
+      setFormData(prev => ({
+        ...prev,
+        selectedOrganizationId: null
+      }));
+    }
+  };
 
   // Load user data from Google OAuth if available
   useEffect(() => {
@@ -184,6 +209,7 @@ export default function OnboardingPage() {
       
       setFormData((prev) => ({
         ...prev,
+        email: userEmail,
         firstName: prev.firstName || googleFirstName || (googleName.split(" ")[0] || ""),
         lastName: prev.lastName || googleLastName || (googleName.split(" ").slice(1).join(" ") || ""),
         username: prev.username || suggestedUsername,
@@ -251,6 +277,12 @@ export default function OnboardingPage() {
       return;
     }
 
+    // Determine final job title (use custom if "Other" was selected)
+    let finalJobTitle = formData.jobTitle;
+    if (formData.jobTitle === "Other" && formData.customJobTitle.trim()) {
+      finalJobTitle = formData.customJobTitle.trim();
+    }
+
     // POST to backend: /api/auth-service/register
     const payload: Record<string, any> = {
       username: formData.username.trim(),
@@ -259,7 +291,7 @@ export default function OnboardingPage() {
       bio: formData.bio.trim(),
       language: formData.language,
       birthday: formData.birthday,
-      job_title: formData.jobTitle,
+      job_title: finalJobTitle,
       interests: formData.interests,
       desired_role: formData.desiredRole,
       ...(formData.desiredRole === "teacher" && formData.selectedOrganizationId ? {
@@ -392,7 +424,7 @@ export default function OnboardingPage() {
     }));
   };
 
-  const set = (field: keyof FormData) =>
+  const setField = (field: keyof FormData) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
       setStepError(null);
       setFormData((prev) => ({ ...prev, [field]: e.target.value }));
@@ -515,7 +547,7 @@ export default function OnboardingPage() {
                           </Label>
                           <Input 
                             value={formData.firstName} 
-                            onChange={set("firstName")} 
+                            onChange={setField("firstName")} 
                             placeholder="Alex"
                             className="bg-[#12121A] border-white/10 text-white rounded-xl h-12" 
                           />
@@ -526,11 +558,24 @@ export default function OnboardingPage() {
                           </Label>
                           <Input 
                             value={formData.lastName} 
-                            onChange={set("lastName")} 
+                            onChange={setField("lastName")} 
                             placeholder="Smith"
                             className="bg-[#12121A] border-white/10 text-white rounded-xl h-12" 
                           />
                         </div>
+                      </div>
+
+                      {/* Email - Display only, not editable */}
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium text-[#A0A0B5]">
+                          Email Address
+                        </Label>
+                        <Input 
+                          value={formData.email} 
+                          disabled
+                          className="bg-[#12121A] border-white/10 text-white rounded-xl h-12 opacity-60 cursor-not-allowed" 
+                        />
+                        <p className="text-xs text-[#6B6B80]">Your email cannot be changed</p>
                       </div>
 
                       {/* Username */}
@@ -542,7 +587,7 @@ export default function OnboardingPage() {
                           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B6B80] text-sm font-medium">@</span>
                           <Input 
                             value={formData.username} 
-                            onChange={set("username")} 
+                            onChange={setField("username")} 
                             placeholder="alex_smith"
                             className="pl-8 bg-[#12121A] border-white/10 text-white rounded-xl h-12" 
                           />
@@ -559,7 +604,7 @@ export default function OnboardingPage() {
                           <FileText className="absolute left-3 top-3.5 w-4 h-4 text-[#6B6B80]" />
                           <textarea
                             value={formData.bio}
-                            onChange={set("bio")}
+                            onChange={setField("bio")}
                             placeholder="Tell us about yourself — your background, what you're passionate about..."
                             rows={3}
                             maxLength={300}
@@ -589,7 +634,7 @@ export default function OnboardingPage() {
                           <Input
                             type="date"
                             value={formData.birthday}
-                            onChange={set("birthday")}
+                            onChange={setField("birthday")}
                             max={new Date().toISOString().split("T")[0]}
                             className="pl-10 bg-[#12121A] border-white/10 text-white rounded-xl h-12 [color-scheme:dark]"
                           />
@@ -603,7 +648,7 @@ export default function OnboardingPage() {
                         </Label>
                         <select
                           value={formData.language}
-                          onChange={set("language")}
+                          onChange={setField("language")}
                           className={SELECT_CLASS}
                         >
                           {LANGUAGES.map(({ code, label }) => (
@@ -621,7 +666,7 @@ export default function OnboardingPage() {
                           <Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6B6B80] pointer-events-none z-10" />
                           <select
                             value={formData.jobTitle}
-                            onChange={set("jobTitle")}
+                            onChange={setField("jobTitle")}
                             className="w-full bg-[#12121A] border border-white/10 text-white rounded-xl h-12 pl-10 pr-4 focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500/50 transition-all outline-none appearance-none cursor-pointer [color-scheme:dark]"
                           >
                             <option value="">Select your job title</option>
@@ -631,6 +676,21 @@ export default function OnboardingPage() {
                           </select>
                         </div>
                       </div>
+
+                      {/* Custom job title input - only shows when "Other" is selected */}
+                      {formData.jobTitle === "Other" && (
+                        <div className="space-y-2">
+                          <Label className="text-sm font-medium text-[#A0A0B5]">
+                            Custom Job Title
+                          </Label>
+                          <Input
+                            value={formData.customJobTitle}
+                            onChange={setField("customJobTitle")}
+                            placeholder="e.g., Full Stack Developer, DevOps Engineer"
+                            className="bg-[#12121A] border-white/10 text-white rounded-xl h-12"
+                          />
+                        </div>
+                      )}
 
                       {/* Role Selection */}
                       <div className="space-y-3 pt-2">
@@ -689,6 +749,13 @@ export default function OnboardingPage() {
                             : "You can join organizations later from your dashboard."}
                         </p>
                       </div>
+
+                      {/* Organization Auto-Detect Component */}
+                      <OrganizationAutoDetect
+                        email={formData.email}
+                        organizations={mockOrganizations}
+                        onOrganizationDetected={handleOrganizationDetected}
+                      />
 
                       {formData.desiredRole === "teacher" ? (
                         <div className="space-y-4">
