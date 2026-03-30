@@ -85,6 +85,7 @@ export async function GET(request: NextRequest) {
       }
       
       // Always check the actual database profile status via backend
+      // The backend determines onboarding by checking if required fields are filled
       const onboarded = await checkOnboardingStatus(accessToken);
       console.log("[auth/confirm] Onboarding status from database:", onboarded);
       
@@ -95,10 +96,10 @@ export async function GET(request: NextRequest) {
         console.log("[auth/confirm] User needs onboarding, redirecting to:", redirectPath);
       } else {
         console.log("[auth/confirm] User already onboarded, redirecting to:", redirectPath);
-        // Update metadata to mark onboarding completed
+        // Update metadata to mark onboarding completed (optional - for UI state)
         try {
           const { error: updateError } = await supabase.auth.updateUser({
-            data: { profile_completed: true, onboarded: true }
+            data: { profile_completed: true }
           });
           if (updateError) {
             console.error("Failed to update user metadata:", updateError);

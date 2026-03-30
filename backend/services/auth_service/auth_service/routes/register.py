@@ -169,7 +169,6 @@ def register_profile():
         profile.timezone = payload.get("timezone") or profile.timezone
         profile.language = _validate_language(payload.get("language")) or profile.language
         profile.interests = interests or profile.interests
-        profile.onboarded = True  # Mark as onboarded after successful registration
 
         session.commit()
         session.refresh(profile)

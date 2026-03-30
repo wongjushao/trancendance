@@ -47,6 +47,7 @@ export default async function AppLayout({
 
     const data = await response.json();
     
+    // The backend now returns onboarded based on required fields being populated
     if (!data.onboarded) {
       redirect("/onboarding");
     }

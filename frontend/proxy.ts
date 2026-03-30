@@ -1,3 +1,5 @@
+// frontend/proxy.ts
+
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server-client";
 
@@ -89,9 +91,10 @@ export async function proxy(request: NextRequest) {
         return NextResponse.redirect(new URL("/", request.url));
       }
 
-      // Check onboarding status via backend
+      // Check onboarding status via backend (checks required fields)
       const onboarded = await checkOnboardingStatus(session.access_token);
       console.log('[proxy] Onboarding status result:', onboarded);
+      
       if (!onboarded) {
         console.log('[proxy] Not onboarded, redirecting to onboarding');
         // Incomplete profile → force onboarding, unless already there

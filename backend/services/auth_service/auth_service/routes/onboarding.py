@@ -78,45 +78,38 @@ def _extract_bearer_token() -> str | None:
     return None
 
 
-# backend/services/auth_service/auth_service/routes/onboarding.py
+# Required fields for onboarding completion
+REQUIRED_FIELDS = [
+    "username",
+    "first_name",
+    "last_name",
+    "bio",
+    "language",
+    "birthday",
+    "job_title",
+]
+
 
 def _is_profile_complete(profile: Profile | None) -> bool:
     """
     Check if a profile has all required fields filled.
     Required: username, first_name, last_name, bio, language, birthday, job_title
-    
-    For Google OAuth users, we should consider them onboarded if they have
-    at least the basics (username) and the profile exists, to prevent
-    being stuck in onboarding loop.
     """
     if not profile:
         return False
     
-    # If the profile has been marked as onboarded already, return true
-    if hasattr(profile, 'onboarded') and profile.onboarded:
-        return True
+    # Check if all required fields are present and not empty
+    for field in REQUIRED_FIELDS:
+        value = getattr(profile, field, None)
+        if value is None or value == "":
+            return False
     
-    # For existing users, check if they have a username and at least one identifier
-    # This prevents Google OAuth users from being stuck in onboarding
-    if profile.username and (profile.first_name or profile.last_name or profile.email):
-        return True
-    
-    # Strict check for new users
-    required_fields = [
-        profile.username,
-        profile.first_name,
-        profile.last_name,
-        profile.bio,
-        profile.language,
-        profile.birthday,
-        profile.job_title,
-    ]
-    
-    return all(field is not None and field != "" for field in required_fields)
+    return True
+
 
 @onboarding_bp.get("/onboarding-status")
 def get_onboarding_status():
-    """Check if the current user has completed onboarding."""
+    """Check if the current user has completed onboarding by verifying required fields."""
     db_session = current_app.config.get("DB_SESSION")
     if db_session is None:
         return jsonify({"error": "Database is not configured"}), 503
@@ -140,12 +133,19 @@ def get_onboarding_status():
             return jsonify({
                 "onboarded": False,
                 "user_id": str(user_id),
+                "missing_fields": REQUIRED_FIELDS,
             }), 200
         
-        # Check if the user has any Google OAuth data in Supabase
-        # We need to get this from the token or from a separate call
-        # For now, we'll check if they have basic info from Google
+        # Check if all required fields are filled
         is_complete = _is_profile_complete(profile)
+        
+        # If not complete, return which fields are missing
+        missing_fields = []
+        if not is_complete:
+            for field in REQUIRED_FIELDS:
+                value = getattr(profile, field, None)
+                if value is None or value == "":
+                    missing_fields.append(field)
 
         print(f"[DEBUG] Onboarding check for user {user_id}")
         print(f"[DEBUG] Profile exists: {profile is not None}")
@@ -158,10 +158,13 @@ def get_onboarding_status():
         print(f"  birthday: {profile.birthday}")
         print(f"  job_title: {profile.job_title}")
         print(f"[DEBUG] Onboarding complete: {is_complete}")
+        if missing_fields:
+            print(f"[DEBUG] Missing fields: {missing_fields}")
         
         return jsonify({
             "onboarded": is_complete,
             "user_id": str(user_id),
+            "missing_fields": missing_fields if not is_complete else None,
         }), 200
     except SQLAlchemyError as exc:
         return jsonify({"error": str(exc)}), 500

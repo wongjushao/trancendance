@@ -185,11 +185,6 @@ def update_profile():
                 setattr(profile, field, data[field])
                 updated = True
         
-        # If this is the first profile update, mark as onboarded
-        if not profile.onboarded:
-            profile.onboarded = True
-            updated = True
-        
         if updated:
             session.commit()
             session.refresh(profile)

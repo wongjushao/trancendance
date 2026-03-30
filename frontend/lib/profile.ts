@@ -1,7 +1,10 @@
+// frontend/lib/profile.ts
+
 /**
  * lib/profile.ts
  *
  * Shared helper for checking whether a user has completed onboarding.
+ * Used by the backend to determine onboarding status.
  */
 
 export const REQUIRED_PROFILE_FIELDS = [
@@ -26,10 +29,14 @@ export type ProfileRow = {
 
 /**
  * Returns true if all mandatory profile fields are non-null and non-empty.
+ * This is the same logic used by the backend to determine onboarding status.
  */
 export function isProfileComplete(profile: ProfileRow | null): boolean {
   if (!profile) return false;
   return REQUIRED_PROFILE_FIELDS.every(
-    (field) => profile[field] !== null && profile[field] !== ""
+    (field) => {
+      const value = profile[field];
+      return value !== null && value !== "";
+    }
   );
 }

@@ -1,8 +1,11 @@
+// frontend/lib/onboarding.ts
+
 import { getSupabaseBrowserClient } from './supabase/browser-client';
 
 interface OnboardingStatusResponse {
   onboarded: boolean;
   user_id: string;
+  missing_fields?: string[];
 }
 
 /**
