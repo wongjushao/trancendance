@@ -25,14 +25,18 @@ interface LandingAuthedProps {
 }
 
 const PROFILE_UPDATED_EVENT = 'profile-updated';
+const AVATAR_UPDATED_EVENT = 'avatar-updated';
 
 export default function LandingAuthed({ user: initialUser }: LandingAuthedProps) {
-  const { avatarUrl } = useAvatar();
+  const { avatarUrl, refreshAvatar } = useAvatar();
   const [user, setUser] = useState(initialUser);
 
   // Listen for profile updates
   useEffect(() => {
-    const handleProfileUpdate = async (event: CustomEvent) => {
+    const handleProfileUpdate = async () => {
+      // Refresh avatar
+      await refreshAvatar();
+      
       // Refresh user data from Supabase
       const supabase = getSupabaseBrowserClient();
       const { data: { user: updatedUser } } = await supabase.auth.getUser();
@@ -41,13 +45,20 @@ export default function LandingAuthed({ user: initialUser }: LandingAuthedProps)
       }
     };
 
+    // Listen for avatar updates specifically
+    const handleAvatarUpdate = async () => {
+      await refreshAvatar();
+    };
+
     if (typeof window !== 'undefined') {
       window.addEventListener(PROFILE_UPDATED_EVENT, handleProfileUpdate as EventListener);
+      window.addEventListener(AVATAR_UPDATED_EVENT, handleAvatarUpdate as EventListener);
       return () => {
         window.removeEventListener(PROFILE_UPDATED_EVENT, handleProfileUpdate as EventListener);
+        window.removeEventListener(AVATAR_UPDATED_EVENT, handleAvatarUpdate as EventListener);
       };
     }
-  }, []);
+  }, [refreshAvatar]);
 
   const fullName: string =
     user.user_metadata?.full_name ||

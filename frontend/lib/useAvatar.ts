@@ -1,3 +1,4 @@
+// frontend/lib/useAvatar.ts
 import { useState, useEffect, useCallback } from 'react';
 import { getSupabaseBrowserClient } from './supabase/browser-client';
 
@@ -5,10 +6,13 @@ interface ProfileData {
   id: string;
   avatar_url: string | null;
   username: string | null;
+  first_name: string | null;
+  last_name: string | null;
 }
 
 // Create a global event system for avatar updates
 const AVATAR_UPDATED_EVENT = 'avatar-updated';
+const PROFILE_UPDATED_EVENT = 'profile-updated';
 
 export function useAvatar() {
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
@@ -39,10 +43,13 @@ export function useAvatar() {
       
       if (response.ok) {
         const data: ProfileData = await response.json();
-        setAvatarUrl(data.avatar_url);
+        const newAvatarUrl = data.avatar_url;
+        setAvatarUrl(newAvatarUrl);
         // Store in localStorage for quick access
-        if (data.avatar_url) {
-          localStorage.setItem('avatar_url', data.avatar_url);
+        if (newAvatarUrl) {
+          localStorage.setItem('avatar_url', newAvatarUrl);
+        } else {
+          localStorage.removeItem('avatar_url');
         }
       } else {
         setError('Failed to fetch profile');
@@ -79,23 +86,24 @@ export function useAvatar() {
     }
     
     const data = await response.json();
+    const newAvatarUrl = data.avatar_url;
     
     // Update local state immediately
-    setAvatarUrl(data.avatar_url);
+    setAvatarUrl(newAvatarUrl);
     
     // Store in localStorage
-    if (data.avatar_url) {
-      localStorage.setItem('avatar_url', data.avatar_url);
+    if (newAvatarUrl) {
+      localStorage.setItem('avatar_url', newAvatarUrl);
     }
     
     // Dispatch a global event so other components can refresh
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent(AVATAR_UPDATED_EVENT, { 
-        detail: { avatarUrl: data.avatar_url } 
+        detail: { avatarUrl: newAvatarUrl } 
       }));
     }
     
-    return data.avatar_url;
+    return newAvatarUrl;
   }, []);
 
   const refreshAvatar = useCallback(async () => {
@@ -122,11 +130,18 @@ export function useAvatar() {
       }
     };
 
+    // Listen for profile updates (which might include avatar changes)
+    const handleProfileUpdate = () => {
+      fetchAvatar();
+    };
+
     if (typeof window !== 'undefined') {
       window.addEventListener(AVATAR_UPDATED_EVENT, handleAvatarUpdate as EventListener);
+      window.addEventListener(PROFILE_UPDATED_EVENT, handleProfileUpdate as EventListener);
       
       return () => {
         window.removeEventListener(AVATAR_UPDATED_EVENT, handleAvatarUpdate as EventListener);
+        window.removeEventListener(PROFILE_UPDATED_EVENT, handleProfileUpdate as EventListener);
       };
     }
   }, [fetchAvatar]);

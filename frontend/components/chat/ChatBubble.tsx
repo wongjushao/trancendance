@@ -26,7 +26,7 @@ const mockConversations: Conversation[] = [
   {
     id: "2",
     name: "Advanced React - Discussion",
-    avatar: "📚",
+    avatar: "≡ƒôÜ",
     lastMessage: "New lesson available",
     time: "1 hour ago",
     unread: 0,
@@ -34,7 +34,7 @@ const mockConversations: Conversation[] = [
   {
     id: "3",
     name: "Tech University",
-    avatar: "🏢",
+    avatar: "≡ƒÅó",
     lastMessage: "Welcome to the community!",
     time: "3 hours ago",
     unread: 1,
@@ -49,11 +49,16 @@ export function ChatBubble() {
     conv.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  // Toggle function - clicking the icon both opens and closes
+  const toggleChat = () => {
+    setIsOpen(!isOpen);
+  };
+
   return (
     <>
-      {/* Floating Button */}
+      {/* Floating Button - Now toggles open/close */}
       <button
-        onClick={() => setIsOpen(true)}
+        onClick={toggleChat}
         className="fixed bottom-6 right-6 z-50 w-14 h-14 rounded-full bg-gradient-to-r from-purple-500 to-violet-600 shadow-lg shadow-purple-500/30 hover:scale-105 transition-all duration-300 flex items-center justify-center group"
       >
         <MessageCircle className="w-6 h-6 text-white" />

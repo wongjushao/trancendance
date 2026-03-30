@@ -2,12 +2,12 @@
 
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { 
-  Camera, Mail, Calendar, Edit, Award, CheckCircle, Briefcase, 
+  Mail, Calendar, Edit, Award, CheckCircle, Briefcase, 
   User, Globe, MapPin, Link as LinkIcon, X, Save, Loader2,
-  BookOpen, Star, TrendingUp, CalendarDays, Trophy, Users
+  BookOpen, Star, TrendingUp, CalendarDays, Trophy, Users, Camera
 } from "lucide-react";
 import { GlowCard, StatCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
@@ -63,7 +63,6 @@ interface ProfileData {
   interests: string[] | null;
   social_links: any;
   created_at: string | null;
-  onboarded: boolean;
 }
 
 interface DisplayData {
@@ -98,11 +97,9 @@ export default function ProfileClient({ user: initialUser }: ProfileClientProps)
   const router = useRouter();
   const [profileData, setProfileData] = useState<ProfileData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [currentUser, setCurrentUser] = useState(initialUser);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   
-  const { avatarUrl, uploadAvatar, refreshAvatar } = useAvatar();
+  const { avatarUrl, refreshAvatar } = useAvatar();
   
   const [displayData, setDisplayData] = useState<DisplayData>({
     email: "",
@@ -169,45 +166,26 @@ export default function ProfileClient({ user: initialUser }: ProfileClientProps)
     fetchProfile();
   }, [currentUser]);
 
-  const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  // Listen for profile updates to refresh avatar
+  useEffect(() => {
+    const handleProfileUpdate = async () => {
+      await refreshAvatar();
+      await refreshUserData();
+    };
 
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-    if (!allowedTypes.includes(file.type)) {
-      toast.error("Only JPEG, PNG, GIF, and WebP images are allowed.");
-      return;
+    const handleAvatarUpdate = async () => {
+      await refreshAvatar();
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener(PROFILE_UPDATED_EVENT, handleProfileUpdate);
+      window.addEventListener(AVATAR_UPDATED_EVENT, handleAvatarUpdate);
+      return () => {
+        window.removeEventListener(PROFILE_UPDATED_EVENT, handleProfileUpdate);
+        window.removeEventListener(AVATAR_UPDATED_EVENT, handleAvatarUpdate);
+      };
     }
-
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error("File size must be less than 5MB.");
-      return;
-    }
-
-    setIsUploadingAvatar(true);
-
-    try {
-      const uploadedUrl = await uploadAvatar(file);
-      setProfileData(prev => prev ? { ...prev, avatar_url: uploadedUrl } : null);
-      
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent(AVATAR_UPDATED_EVENT, { 
-          detail: { avatarUrl: uploadedUrl } 
-        }));
-      }
-      
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
-      
-      toast.success("Profile picture updated!");
-    } catch (error: any) {
-      console.error('Avatar upload error:', error);
-      toast.error(error.message || "Failed to upload avatar");
-    } finally {
-      setIsUploadingAvatar(false);
-    }
-  };
+  }, [refreshAvatar]);
 
   const getInitials = () => {
     const first = displayData.first_name?.[0] || "";
@@ -253,9 +231,9 @@ export default function ProfileClient({ user: initialUser }: ProfileClientProps)
           <div className="absolute inset-0 h-48 bg-gradient-to-r from-purple-600/20 to-violet-600/20 rounded-2xl blur-xl" />
           <div className="relative bg-gradient-to-r from-purple-600/5 to-violet-600/5 rounded-2xl border border-white/10 p-8">
             <div className="flex flex-col md:flex-row gap-8">
-              {/* Avatar */}
+              {/* Avatar - Read only on profile page */}
               <div className="relative group">
-                <div className="w-32 h-32 rounded-2xl bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center shadow-2xl shadow-purple-500/30 transition-transform duration-500 group-hover:scale-105 overflow-hidden">
+                <div className="w-32 h-32 rounded-2xl bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center shadow-2xl shadow-purple-500/30 transition-transform duration-500 overflow-hidden">
                   {avatarUrl ? (
                     <img 
                       src={avatarUrl} 
@@ -266,26 +244,11 @@ export default function ProfileClient({ user: initialUser }: ProfileClientProps)
                     <span className="text-white font-black text-5xl tracking-tighter">{getInitials()}</span>
                   )}
                 </div>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/jpeg,image/png,image/gif,image/webp"
-                  onChange={handleAvatarUpload}
-                  className="hidden"
-                  id="avatar-upload"
-                />
-                <label
-                  htmlFor="avatar-upload"
-                  className={`absolute -bottom-2 -right-2 w-10 h-10 bg-[#1A1A24] border border-white/10 text-purple-400 rounded-xl flex items-center justify-center shadow-xl transition-all duration-300 cursor-pointer hover:bg-purple-500 hover:text-white ${
-                    isUploadingAvatar ? 'opacity-50 cursor-wait' : ''
-                  }`}
-                >
-                  {isUploadingAvatar ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Camera className="w-4 h-4" />
-                  )}
-                </label>
+                
+                {/* Edit hint - appears on hover to guide users to Settings */}
+                <div className="absolute -bottom-2 -right-2 w-10 h-10 bg-[#1A1A24] border border-white/10 text-purple-400 rounded-xl flex items-center justify-center shadow-xl opacity-0 group-hover:opacity-100 transition-all duration-300">
+                  <Camera className="w-4 h-4" />
+                </div>
               </div>
 
               {/* Profile Info */}

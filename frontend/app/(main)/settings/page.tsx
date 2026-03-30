@@ -18,6 +18,8 @@ import { toast } from "sonner";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 import { useAvatar } from "@/lib/useAvatar";
 
+const PROFILE_UPDATED_EVENT = 'profile-updated';
+
 const LANGUAGES = [
   { code: "EN", label: "English", flag: "🇺🇸" },
   { code: "CN", label: "中文 (Chinese)", flag: "🇨🇳" },
@@ -255,9 +257,9 @@ export default function SettingsPage() {
       toast.success("Profile updated successfully!");
       refreshAvatar();
       
-      // Dispatch profile updated event
+      // Dispatch profile updated event to notify all components
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('profile-updated'));
+        window.dispatchEvent(new CustomEvent(PROFILE_UPDATED_EVENT));
       }
       
     } catch (error: any) {

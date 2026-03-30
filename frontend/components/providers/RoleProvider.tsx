@@ -1,7 +1,7 @@
 // frontend/components/providers/RoleProvider.tsx
 "use client";
 
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { RoleData, UserRole, getUserRoleData, setUserRoleData } from "@/lib/role";
 
 interface RoleContextType {
@@ -9,12 +9,17 @@ interface RoleContextType {
   setRole: (data: Partial<RoleData>) => void;
   hasPermission: (role: UserRole) => boolean;
   isPending: () => boolean;
+  refreshRole: () => void;
 }
 
 const RoleContext = createContext<RoleContextType | undefined>(undefined);
 
 export function RoleProvider({ children }: { children: React.ReactNode }) {
   const [roleData, setRoleData] = useState<RoleData>(() => getUserRoleData());
+
+  const refreshRole = useCallback(() => {
+    setRoleData(getUserRoleData());
+  }, []);
 
   useEffect(() => {
     const handleRoleChange = (event: CustomEvent<RoleData>) => {
@@ -27,13 +32,13 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const setRole = (data: Partial<RoleData>) => {
+  const setRole = useCallback((data: Partial<RoleData>) => {
     const newData = { ...roleData, ...data };
     setRoleData(newData);
     setUserRoleData(newData);
-  };
+  }, [roleData]);
 
-  const hasPermission = (requiredRole: UserRole): boolean => {
+  const hasPermission = useCallback((requiredRole: UserRole): boolean => {
     const roleHierarchy: Record<UserRole, number> = {
       student: 1,
       pending_teacher: 1,
@@ -42,14 +47,14 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
       admin: 3,
     };
     return roleHierarchy[roleData.role] >= roleHierarchy[requiredRole];
-  };
+  }, [roleData.role]);
 
-  const isPending = (): boolean => {
+  const isPending = useCallback((): boolean => {
     return roleData.role === 'pending_admin' || roleData.role === 'pending_teacher';
-  };
+  }, [roleData.role]);
 
   return (
-    <RoleContext.Provider value={{ roleData, setRole, hasPermission, isPending }}>
+    <RoleContext.Provider value={{ roleData, setRole, hasPermission, isPending, refreshRole }}>
       {children}
     </RoleContext.Provider>
   );

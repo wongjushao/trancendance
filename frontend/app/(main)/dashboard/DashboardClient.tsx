@@ -89,24 +89,27 @@ const recentActivities = [
 
 export default function DashboardClient({ user: initialUser }: DashboardClientProps) {
   const [user, setUser] = useState(initialUser);
-  const { roleData, isPending } = useRole();
+  const { roleData, isPending, refreshRole } = useRole();
 
+  // Listen for profile updates to refresh user data
   useEffect(() => {
-    const handleProfileUpdate = async (event: CustomEvent) => {
+    const handleProfileUpdate = async () => {
       const supabase = getSupabaseBrowserClient();
       const { data: { user: updatedUser } } = await supabase.auth.getUser();
       if (updatedUser) {
         setUser(updatedUser);
       }
+      // Refresh role data as well
+      refreshRole();
     };
 
     if (typeof window !== 'undefined') {
-      window.addEventListener(PROFILE_UPDATED_EVENT, handleProfileUpdate as EventListener);
+      window.addEventListener(PROFILE_UPDATED_EVENT, handleProfileUpdate);
       return () => {
-        window.removeEventListener(PROFILE_UPDATED_EVENT, handleProfileUpdate as EventListener);
+        window.removeEventListener(PROFILE_UPDATED_EVENT, handleProfileUpdate);
       };
     }
-  }, []);
+  }, [refreshRole]);
 
   const fullName: string =
     user.user_metadata?.full_name ||

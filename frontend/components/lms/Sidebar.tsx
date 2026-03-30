@@ -41,16 +41,18 @@ const SIDEBAR_STATE_KEY = 'sidebar_collapsed';
 
 export function Sidebar({ user: initialUser }: SidebarProps) {
   const pathname = usePathname();
-  const { avatarUrl } = useAvatar();
+  const { avatarUrl, refreshAvatar } = useAvatar();
   const [user, setUser] = useState(initialUser);
-  const [isCollapsed, setIsCollapsed] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem(SIDEBAR_STATE_KEY);
-      return stored === 'true';
-    }
-    return false;
-  });
+  const [isCollapsed, setIsCollapsed] = useState(false); // Default to false for SSR
+  const [isMounted, setIsMounted] = useState(false); // Track mounted state
   const { roleData } = useRole();
+
+  // Load sidebar state from localStorage only after mount (client-side only)
+  useEffect(() => {
+    const stored = localStorage.getItem(SIDEBAR_STATE_KEY);
+    setIsCollapsed(stored === 'true');
+    setIsMounted(true);
+  }, []);
 
   // Save sidebar state
   const toggleSidebar = () => {
@@ -59,9 +61,13 @@ export function Sidebar({ user: initialUser }: SidebarProps) {
     localStorage.setItem(SIDEBAR_STATE_KEY, String(newState));
   };
 
-  // Listen for profile updates
+  // Listen for profile updates to refresh avatar and user data
   useEffect(() => {
-    const handleProfileUpdate = async (event: CustomEvent) => {
+    const handleProfileUpdate = async () => {
+      // Refresh avatar
+      await refreshAvatar();
+      
+      // Refresh user data from Supabase
       const supabase = getSupabaseBrowserClient();
       const { data: { user: updatedUser } } = await supabase.auth.getUser();
       if (updatedUser) {
@@ -75,7 +81,7 @@ export function Sidebar({ user: initialUser }: SidebarProps) {
         window.removeEventListener(PROFILE_UPDATED_EVENT, handleProfileUpdate as EventListener);
       };
     }
-  }, []);
+  }, [refreshAvatar]);
 
   const fullName: string =
     user.user_metadata?.full_name ||
@@ -97,6 +103,94 @@ export function Sidebar({ user: initialUser }: SidebarProps) {
     item.roles.includes(roleData.role)
   );
 
+  // Don't render until after mount to prevent hydration mismatch
+  // This ensures server and client render the same initial state (expanded)
+  if (!isMounted) {
+    return (
+      <aside 
+        className={`fixed left-0 top-0 h-screen bg-[#0B0B0F] border-r border-white/5 flex flex-col z-20 transition-all duration-300 w-64`}
+      >
+        {/* Logo - Always expanded during SSR */}
+        <div className="p-4 border-b border-white/5 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center shadow-lg shadow-purple-500/30">
+              <BookOpen className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h1 className="text-xl font-semibold text-white">Educatorio</h1>
+              <p className="text-xs text-[#6B6B80]">Learning Platform</p>
+            </div>
+          </div>
+          <button className="p-1.5 hover:bg-white/5 rounded-lg transition-colors">
+            <ChevronLeft className="w-4 h-4 text-[#A0A0B5]" />
+          </button>
+        </div>
+
+        {/* Navigation Placeholder */}
+        <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
+          {filteredNavItems.map((item) => {
+            const isActive = pathname === item.path;
+            const Icon = item.icon;
+
+            return (
+              <Link
+                key={item.path}
+                href={item.path}
+                className={`
+                  flex items-center gap-3 px-4 py-3 rounded-xl transition-all
+                  ${isActive
+                    ? "bg-gradient-to-r from-purple-500/20 to-violet-600/20 text-white border border-purple-500/30 shadow-lg shadow-purple-500/20"
+                    : "text-[#A0A0B5] hover:text-white hover:bg-white/5"
+                  }
+                `}
+              >
+                <Icon className="w-5 h-5 shrink-0" />
+                <span className="font-medium">{item.label}</span>
+              </Link>
+            );
+          })}
+          
+          {/* Admin Dashboard Link */}
+          {roleData.role === 'admin' && roleData.organizationId && (
+            <Link
+              href={`/organizations/${roleData.organizationId}/admin`}
+              className={`
+                flex items-center gap-3 px-4 py-3 rounded-xl transition-all mt-4 border-t border-white/10 pt-4
+                ${pathname === `/organizations/${roleData.organizationId}/admin`
+                  ? "bg-gradient-to-r from-purple-500/20 to-violet-600/20 text-white border border-purple-500/30 shadow-lg shadow-purple-500/20"
+                  : "text-[#A0A0B5] hover:text-white hover:bg-white/5"
+                }
+              `}
+            >
+              <Settings className="w-5 h-5 shrink-0" />
+              <span className="font-medium">Admin Dashboard</span>
+            </Link>
+          )}
+        </nav>
+
+        {/* User card placeholder */}
+        <div className="p-4 border-t border-white/5">
+          <Link
+            href="/profile"
+            className="flex items-center gap-3 p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
+          >
+            <div className="w-10 h-10 rounded-full overflow-hidden shrink-0 bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center">
+              <span className="text-white font-semibold text-sm">
+                {initials}
+              </span>
+            </div>
+            
+            <div className="flex-1 min-w-0">
+              <p className="text-white font-medium truncate text-sm">{fullName}</p>
+              <p className="text-xs text-[#6B6B80] truncate">{email}</p>
+            </div>
+          </Link>
+        </div>
+      </aside>
+    );
+  }
+
+  // Client-side render with actual collapsed state
   return (
     <aside 
       className={`fixed left-0 top-0 h-screen bg-[#0B0B0F] border-r border-white/5 flex flex-col z-20 transition-all duration-300 ${

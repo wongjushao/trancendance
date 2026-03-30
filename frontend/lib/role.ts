@@ -67,11 +67,11 @@ export const mockOrganizations: Organization[] = [
   },
 ];
 
-// Mock data for development
-const mockRoleData: RoleData = {
+// Default mock role data
+const defaultRoleData: RoleData = {
   role: 'student',
-  organizationId: 1,
-  organizationName: 'Tech University',
+  organizationId: null,
+  organizationName: null,
   pendingRole: null,
   pendingOrganizationId: null,
   pendingOrganizationName: null,
@@ -79,18 +79,23 @@ const mockRoleData: RoleData = {
 
 export function getUserRoleData(): RoleData {
   if (typeof window === 'undefined') {
-    return mockRoleData;
+    return defaultRoleData;
   }
   
   const stored = localStorage.getItem(ROLE_STORAGE_KEY);
   if (stored) {
     try {
-      return JSON.parse(stored);
+      const parsed = JSON.parse(stored);
+      // Ensure all fields exist
+      return {
+        ...defaultRoleData,
+        ...parsed,
+      };
     } catch {
-      return mockRoleData;
+      return defaultRoleData;
     }
   }
-  return mockRoleData;
+  return defaultRoleData;
 }
 
 export function setUserRoleData(data: RoleData): void {

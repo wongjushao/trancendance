@@ -21,11 +21,14 @@ export function TopNav({ user: initialUser }: TopNavProps) {
   const [profileOpen, setProfileOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [user, setUser] = useState(initialUser);
-  const { avatarUrl, isLoading } = useAvatar();
+  const { avatarUrl, refreshAvatar } = useAvatar();
 
-  // Listen for profile updates
+  // Listen for profile updates to refresh avatar and user data
   useEffect(() => {
-    const handleProfileUpdate = async (event: CustomEvent) => {
+    const handleProfileUpdate = async () => {
+      // Refresh avatar
+      await refreshAvatar();
+      
       // Refresh user data from Supabase
       const supabase = getSupabaseBrowserClient();
       const { data: { user: updatedUser } } = await supabase.auth.getUser();
@@ -35,12 +38,12 @@ export function TopNav({ user: initialUser }: TopNavProps) {
     };
 
     if (typeof window !== 'undefined') {
-      window.addEventListener(PROFILE_UPDATED_EVENT, handleProfileUpdate as EventListener);
+      window.addEventListener(PROFILE_UPDATED_EVENT, handleProfileUpdate);
       return () => {
-        window.removeEventListener(PROFILE_UPDATED_EVENT, handleProfileUpdate as EventListener);
+        window.removeEventListener(PROFILE_UPDATED_EVENT, handleProfileUpdate);
       };
     }
-  }, []);
+  }, [refreshAvatar]);
 
   // Derive display values from the real Supabase user
   const fullName: string =
