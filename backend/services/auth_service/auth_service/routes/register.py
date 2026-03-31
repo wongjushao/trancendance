@@ -10,7 +10,7 @@ from flask import Blueprint, current_app, jsonify, request
 from sqlalchemy.exc import SQLAlchemyError
 
 from backend.common.models import Profile, Organization, OrganizationMember, OrganizationDomain
-
+from backend.services.auth_service.auth_service.utils.supabase_jwt import extract_bearer_token, verify_supabase_jwt
 
 register_bp = Blueprint("register", __name__)
 
@@ -30,71 +30,11 @@ register_bp = Blueprint("register", __name__)
 #   email → the user's email address (if available)
 #   exp  → expiry timestamp (PyJWT validates this automatically)
 
-def _verify_supabase_jwt(token: str) -> tuple[uuid.UUID, str | None]:
-    """
-    Verifies the Supabase JWT and returns a tuple: (user_uuid, email).
-    Raises ValueError with a descriptive message on any failure.
-    """
-    try:
-        header = jwt.get_unverified_header(token)
-        alg = header.get("alg")
-        
-        algorithms = []
-        key = None
-
-        if alg == "HS256":
-            secret = os.environ.get("SUPABASE_JWT_SECRET")
-            if not secret:
-                raise ValueError("SUPABASE_JWT_SECRET env var is not set")
-            key = secret
-            algorithms = ["HS256"]
-        elif alg in ("RS256", "ES256"):
-            supabase_url = os.environ.get("SUPABASE_URL")
-            if not supabase_url:
-                raise ValueError("SUPABASE_URL env var is not set")
-            
-            jwks_url = f"{supabase_url}/auth/v1/.well-known/jwks.json"
-            jwks_client = jwt.PyJWKClient(jwks_url)
-            signing_key = jwks_client.get_signing_key_from_jwt(token)
-            key = signing_key.key
-            algorithms = [alg]
-        else:
-            raise ValueError(f"Unsupported algorithm: {alg}")
-        
-        payload = jwt.decode(
-            token,
-            key,
-            algorithms=algorithms,
-            audience="authenticated",
-            options={"verify_exp": True},
-        )
-    except jwt.PyJWKClientError as exc:
-        raise ValueError(f"Could not fetch JWKS: {exc}")
-    except jwt.ExpiredSignatureError:
-        raise ValueError("Token has expired — please log in again")
-    except jwt.InvalidAudienceError:
-        raise ValueError("Token audience is invalid — expected 'authenticated'")
-    except jwt.InvalidTokenError as exc:
-        raise ValueError(f"Invalid token: {exc}")
-
-    sub = payload.get("sub")
-    if not sub:
-        raise ValueError("Token is missing 'sub' claim")
-    
-    email = payload.get("email")
-
-    try:
-        return uuid.UUID(str(sub)), email
-    except (TypeError, ValueError):
-        raise ValueError(f"Token 'sub' is not a valid UUID: {sub!r}")
+# Reusing JWT helpers from utils/supabase_jwt.py
 
 
 def _extract_bearer_token() -> str | None:
-    auth = request.headers.get("Authorization", "")
-    parts = auth.split(" ", 1)
-    if len(parts) == 2 and parts[0].lower() == "bearer":
-        return parts[1].strip() or None
-    return None
+    return extract_bearer_token()
 
 
 # ── Field parsers ─────────────────────────────────────────────────────────────
@@ -144,12 +84,12 @@ def register_profile():
         return jsonify({"error": "Database is not configured. Set valid DATABASE_URL"}), 503
 
     # ── Auth: verify the Supabase JWT from the Authorization header ───────────
-    token = _extract_bearer_token()
+    token = extract_bearer_token()
     if token is None:
         return jsonify({"error": "Missing or invalid Authorization header. Expected: Bearer <token>"}), 401
 
     try:
-        user_id, email = _verify_supabase_jwt(token)
+        user_id, email = verify_supabase_jwt(token)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 401
 
@@ -204,15 +144,14 @@ def register_profile():
         # ── Auto-join organization based on email domain ──────────────────────
         if email:
             domain = email.split("@")[-1].lower()
-            
-            # Find organization associated with this domain
-            org_domain = (
+            # Find all organizations associated with this domain
+            org_domains = (
                 session.query(OrganizationDomain)
                 .filter(OrganizationDomain.domain == domain)
-                .first()
+                .all()
             )
-            
-            if org_domain:
+
+            for org_domain in org_domains:
                 # Check if already a member
                 member = (
                     session.query(OrganizationMember)
@@ -240,6 +179,57 @@ def register_profile():
 
     except SQLAlchemyError as exc:
         session.rollback()
+        return jsonify({"error": str(exc)}), 500
+    finally:
+        session.close()
+
+
+@register_bp.get("/check_org")
+def check_org():
+    """Check which organizations match the email domain from the supplied Supabase JWT.
+
+    Returns a JSON list of organizations with fields: id, name, slug, description, and domain.
+    """
+    db_session = current_app.config.get("DB_SESSION")
+    if db_session is None:
+        return jsonify({"error": "Database is not configured. Set valid DATABASE_URL"}), 503
+
+    token = extract_bearer_token()
+    if token is None:
+        return jsonify({"error": "Missing or invalid Authorization header. Expected: Bearer <token>"}), 401
+
+    try:
+        user_id, email = verify_supabase_jwt(token)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 401
+
+    if not email:
+        return jsonify({"organizations": []}), 200
+
+    domain = email.split("@")[-1].lower()
+
+    session = db_session()
+    try:
+        org_domains = (
+            session.query(OrganizationDomain)
+            .filter(OrganizationDomain.domain == domain)
+            .all()
+        )
+
+        orgs = []
+        for od in org_domains:
+            org = session.query(Organization).filter(Organization.id == od.organization_id).first()
+            if org:
+                orgs.append({
+                    "id": org.id,
+                    "name": org.name,
+                    "slug": org.slug,
+                    "description": org.description,
+                    "domain": od.domain,
+                })
+
+        return jsonify({"organizations": orgs}), 200
+    except SQLAlchemyError as exc:
         return jsonify({"error": str(exc)}), 500
     finally:
         session.close()
