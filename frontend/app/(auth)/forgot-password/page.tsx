@@ -11,8 +11,7 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 import { getSiteUrl } from "@/lib/site-url";
 import { useRouter } from "next/navigation";
 
-// ── Step 1: Send reset email ──────────────────────────────────────────────────
-
+// Step 1: Send reset email
 function SendResetForm() {
   const [email, setEmail] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -26,7 +25,7 @@ function SendResetForm() {
 
     const supabase = getSupabaseBrowserClient();
     const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${getSiteUrl()}/auth/confirm?type=recovery`,
+      redirectTo: `${getSiteUrl()}/reset-password`,
     });
 
     setIsLoading(false);
@@ -113,212 +112,22 @@ function SendResetForm() {
   );
 }
 
-// ── Step 2: Set new password (landed here from recovery email link) ───────────
-
-function SetNewPasswordForm() {
-  const router = useRouter();
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isDone, setIsDone] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const strength = (() => {
-    if (!password) return 0;
-    let s = 0;
-    if (password.length >= 8)             s++;
-    if (/[A-Z]/.test(password))           s++;
-    if (/[0-9]/.test(password))           s++;
-    if (/[^A-Za-z0-9]/.test(password))    s++;
-    return s;
-  })();
-
-  const strengthLabel = ["", "Weak", "Fair", "Good", "Strong"][strength];
-  const strengthColor = ["", "bg-red-500", "bg-yellow-500", "bg-blue-400", "bg-green-500"][strength];
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-
-    if (password !== confirmPassword) {
-      setError("Passwords do not match.");
-      return;
-    }
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters.");
-      return;
-    }
-
-    setIsLoading(true);
-    const supabase = getSupabaseBrowserClient();
-    const { data: { session } } = await supabase.auth.getSession();
-
-    if (!session?.access_token) {
-      setError("Session expired. Please request a new reset link.");
-      setIsLoading(false);
-      return;
-    }
-
-    // ✅ GOOD - Call backend to update password
-    try {
-      const response = await fetch('/api/auth-service/update-password', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({ password }),
-      });
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'Failed to update password');
-      }
-
-      setIsDone(true);
-      setTimeout(() => router.push("/login"), 2000);
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  if (isDone) {
-    return (
-      <div className="text-center space-y-6">
-        <div className="w-16 h-16 rounded-2xl bg-green-500/10 border border-green-500/20 flex items-center justify-center mx-auto">
-          <CheckCircle className="w-8 h-8 text-green-400" />
-        </div>
-        <div>
-          <h1 className="text-3xl font-bold text-white mb-2">Password Updated</h1>
-          <p className="text-[#A0A0B5] text-sm">
-            Your password has been changed successfully. Redirecting you to the login page…
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <>
-      <div className="text-center mb-8">
-        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center mx-auto mb-4 shadow-lg shadow-purple-500/30">
-          <Lock className="w-8 h-8 text-white" />
-        </div>
-        <h1 className="text-3xl font-bold text-white mb-2">Set New Password</h1>
-        <p className="text-[#A0A0B5]">Choose a strong password for your account</p>
-      </div>
-
-      <form onSubmit={handleSubmit} className="space-y-5">
-        <div>
-          <Label htmlFor="new-password" className="text-white mb-2 block">New Password</Label>
-          <div className="relative">
-            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[#6B6B80]" />
-            <Input
-              id="new-password"
-              type={showPassword ? "text" : "password"}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Min. 8 characters"
-              className="pl-12 pr-12 bg-[#12121A] border-white/10 text-white rounded-xl h-12"
-              required
-              minLength={8}
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-4 top-1/2 -translate-y-1/2 text-[#6B6B80] hover:text-white transition-colors"
-              tabIndex={-1}
-            >
-              {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-            </button>
-          </div>
-          {password && (
-            <div className="mt-2 space-y-1">
-              <div className="flex gap-1">
-                {[1, 2, 3, 4].map((i) => (
-                  <div
-                    key={i}
-                    className={`h-1 flex-1 rounded-full transition-all duration-300 ${
-                      i <= strength ? strengthColor : "bg-white/10"
-                    }`}
-                  />
-                ))}
-              </div>
-              <p className="text-xs text-[#6B6B80]">
-                Strength:{" "}
-                <span className={`font-semibold ${
-                  strength <= 1 ? "text-red-400" :
-                  strength === 2 ? "text-yellow-400" :
-                  strength === 3 ? "text-blue-400" : "text-green-400"
-                }`}>
-                  {strengthLabel}
-                </span>
-              </p>
-            </div>
-          )}
-        </div>
-
-        <div>
-          <Label htmlFor="confirm-password" className="text-white mb-2 block">Confirm New Password</Label>
-          <div className="relative">
-            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[#6B6B80]" />
-            <Input
-              id="confirm-password"
-              type={showConfirm ? "text" : "password"}
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              placeholder="Repeat your new password"
-              className={`pl-12 pr-12 bg-[#12121A] border text-white rounded-xl h-12 ${
-                confirmPassword && password !== confirmPassword
-                  ? "border-red-500/50"
-                  : confirmPassword && password === confirmPassword
-                  ? "border-green-500/40"
-                  : "border-white/10"
-              }`}
-              required
-            />
-            <button
-              type="button"
-              onClick={() => setShowConfirm(!showConfirm)}
-              className="absolute right-4 top-1/2 -translate-y-1/2 text-[#6B6B80] hover:text-white transition-colors"
-              tabIndex={-1}
-            >
-              {showConfirm ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-            </button>
-          </div>
-        </div>
-
-        {error && (
-          <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm font-medium text-red-400">
-            {error}
-          </div>
-        )}
-
-        <GlowButton type="submit" variant="primary" fullWidth isLoading={isLoading}>
-          Update Password
-        </GlowButton>
-      </form>
-    </>
-  );
-}
-
-// ── Router — reads ?step= from the URL ───────────────────────────────────────
-
+// ForgotPasswordContent router - reads ?step= from the URL (legacy support)
 function ForgotPasswordContent() {
   const searchParams = useSearchParams();
   const step = searchParams.get("step");
 
-  return (
-    <div className="w-full max-w-md">
-      <div className="bg-[#16161F] border border-white/10 rounded-3xl p-8 shadow-2xl shadow-purple-500/10">
-        {step === "reset" ? <SetNewPasswordForm /> : <SendResetForm />}
-      </div>
-    </div>
-  );
+  // If step=reset, redirect to the dedicated reset password page
+  if (step === "reset") {
+    // This handles legacy links that might have ?step=reset
+    // We redirect to the new reset-password page
+    if (typeof window !== "undefined") {
+      window.location.href = "/reset-password";
+    }
+    return null;
+  }
+
+  return <SendResetForm />;
 }
 
 export default function ForgotPasswordPage() {

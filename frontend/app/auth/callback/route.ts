@@ -41,6 +41,7 @@ export async function GET(request: NextRequest) {
 
   const code = searchParams.get("code");
   const next = searchParams.get("next") ?? "/dashboard";
+  const type = searchParams.get("type");
 
   const siteOrigin = getSiteOrigin();
 
@@ -79,8 +80,13 @@ export async function GET(request: NextRequest) {
       app_metadata: user.app_metadata,
     });
 
+    // Check if this is a password reset flow
+    if (type === "recovery") {
+      console.log("[auth/callback] Password reset flow - redirecting to reset-password");
+      return NextResponse.redirect(`${siteOrigin}/reset-password`);
+    }
+
     // Check onboarding status via backend
-    // The backend determines this by checking if all required profile fields are filled
     const onboarded = await checkOnboardingStatus(accessToken);
     console.log("[auth/callback] Onboarding status from database:", onboarded);
     

@@ -80,12 +80,12 @@ export async function GET(request: NextRequest) {
       
       // Check if this is a password reset flow
       if (type === "recovery") {
-        console.log("[auth/confirm] Password reset flow");
-        return NextResponse.redirect(`${siteOrigin}/forgot-password?step=reset`);
+        console.log("[auth/confirm] Password reset flow - redirecting to reset-password");
+        // Redirect to the reset password page where the user can set a new password
+        return NextResponse.redirect(`${siteOrigin}/reset-password`);
       }
       
       // Always check the actual database profile status via backend
-      // The backend determines onboarding by checking if required fields are filled
       const onboarded = await checkOnboardingStatus(accessToken);
       console.log("[auth/confirm] Onboarding status from database:", onboarded);
       
@@ -129,7 +129,8 @@ export async function GET(request: NextRequest) {
       const session = data.session;
       
       if (type === "recovery") {
-        return NextResponse.redirect(`${siteOrigin}/forgot-password?step=reset`);
+        console.log("[auth/confirm] Recovery flow via token_hash - redirecting to reset-password");
+        return NextResponse.redirect(`${siteOrigin}/reset-password`);
       }
       
       // For email confirmation, check onboarding status

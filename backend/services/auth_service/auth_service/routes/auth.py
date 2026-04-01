@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import uuid
+import re
 
 from flask import Blueprint, jsonify, request, current_app
 from supabase import create_client
@@ -10,6 +11,18 @@ from supabase import create_client
 from backend.services.auth_service.auth_service.utils.supabase_jwt import extract_bearer_token, verify_supabase_jwt
 
 auth_bp = Blueprint("auth", __name__)
+
+def validate_password_strength(password: str) -> tuple[bool, str]:
+    """Validate password strength."""
+    if len(password) < 8:
+        return False, "Password must be at least 8 characters long"
+    if not re.search(r"[A-Z]", password):
+        return False, "Password must contain at least one uppercase letter"
+    if not re.search(r"[0-9]", password):
+        return False, "Password must contain at least one number"
+    if not re.search(r"[^A-Za-z0-9]", password):
+        return False, "Password must contain at least one special character"
+    return True, ""
 
 
 @auth_bp.put("/update-password")
@@ -21,13 +34,18 @@ def update_password():
     
     user_id, email = verify_supabase_jwt(token)
     if not user_id:
-        return jsonify({"error": "Invalid token"}), 401
+        return jsonify({"error": "Invalid or expired token"}), 401
     
     data = request.get_json(silent=True) or {}
     new_password = data.get("password")
     
     if not new_password:
         return jsonify({"error": "Password is required"}), 400
+    
+    # Validate password strength
+    is_valid, error_message = validate_password_strength(new_password)
+    if not is_valid:
+        return jsonify({"error": error_message}), 400
     
     try:
         supabase_url = os.environ.get("SUPABASE_URL")
