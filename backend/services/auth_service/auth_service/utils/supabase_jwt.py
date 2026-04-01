@@ -4,13 +4,12 @@ from jwt.exceptions import InvalidTokenError
 import os
 import logging
 import re
-from datetime import datetime, timedelta
-import requests
 
 # Set up logger
 logger = logging.getLogger(__name__)
 
 def extract_bearer_token(auth_header=None):
+    """Extract Bearer token from Authorization header."""
     if auth_header is None:
         from flask import request
         auth_header = request.headers.get("Authorization")
@@ -23,7 +22,9 @@ def extract_bearer_token(auth_header=None):
 def verify_supabase_jwt(token):
     """
     Verify a Supabase JWT and return (user_id, email).
-    Simplified approach: Don't verify signature for ES256 since it's handled by Supabase.
+    
+    Simplified approach: decode without signature verification for development.
+    In production, you should verify the signature using the JWKS endpoint.
     """
     try:
         # First, decode without verification to get the algorithm and claims
@@ -43,6 +44,7 @@ def verify_supabase_jwt(token):
         # Log the expiration to help debug
         exp = unverified.get("exp")
         if exp:
+            from datetime import datetime
             exp_date = datetime.fromtimestamp(exp)
             logger.info(f"Token expires at: {exp_date}")
             

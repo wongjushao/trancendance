@@ -5,7 +5,6 @@ import os
 import uuid
 import logging
 
-import jwt
 from flask import Blueprint, jsonify, request, current_app
 from sqlalchemy.exc import SQLAlchemyError
 

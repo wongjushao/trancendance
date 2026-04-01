@@ -9,55 +9,13 @@ from supabase import create_client
 from sqlalchemy.exc import SQLAlchemyError
 
 from backend.common.models import Profile
+from backend.services.auth_service.auth_service.utils.supabase_jwt import extract_bearer_token, verify_supabase_jwt
 
 avatar_bp = Blueprint("avatar", __name__)
 
 # Allowed file extensions
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
-
-def _verify_supabase_jwt(token: str) -> uuid.UUID:
-    """Verify Supabase JWT and return user UUID."""
-    import jwt
-    
-    try:
-        # First try to decode without verification to get the algorithm
-        unverified = jwt.decode(token, options={"verify_signature": False})
-        alg = unverified.get("alg", "HS256")
-        
-        # Get the JWT secret
-        secret = os.environ.get("SUPABASE_JWT_SECRET")
-        if not secret:
-            raise ValueError("SUPABASE_JWT_SECRET env var is not set")
-        
-        # Decode with signature verification
-        payload = jwt.decode(
-            token,
-            secret,
-            algorithms=[alg],
-            options={"verify_aud": False, "verify_exp": True},
-        )
-    except jwt.ExpiredSignatureError:
-        raise ValueError("Token has expired — please log in again")
-    except jwt.InvalidTokenError as exc:
-        raise ValueError(f"Invalid token: {exc}")
-
-    sub = payload.get("sub")
-    if not sub:
-        raise ValueError("Token is missing 'sub' claim")
-
-    try:
-        return uuid.UUID(str(sub))
-    except (TypeError, ValueError):
-        raise ValueError(f"Token 'sub' is not a valid UUID: {sub!r}")
-
-def _extract_bearer_token() -> str | None:
-    """Extract bearer token from Authorization header."""
-    auth = request.headers.get("Authorization", "")
-    parts = auth.split(" ", 1)
-    if len(parts) == 2 and parts[0].lower() == "bearer":
-        return parts[1].strip() or None
-    return None
 
 def allowed_file(filename: str) -> bool:
     """Check if file has an allowed extension."""
@@ -71,15 +29,14 @@ def upload_avatar():
     if db_session is None:
         return jsonify({"error": "Database is not configured"}), 503
 
-    # Extract and verify token
-    token = _extract_bearer_token()
+    # Extract and verify token using the same helper as register.py
+    token = extract_bearer_token()
     if token is None:
         return jsonify({"error": "Missing authorization header"}), 401
 
-    try:
-        user_id = _verify_supabase_jwt(token)
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 401
+    user_id, email = verify_supabase_jwt(token)
+    if not user_id:
+        return jsonify({"error": "Invalid token"}), 401
 
     # Check if file was uploaded
     if 'avatar' not in request.files:

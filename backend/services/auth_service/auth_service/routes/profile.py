@@ -1,20 +1,14 @@
 # backend/services/auth_service/auth_service/routes/profile.py
-
 from __future__ import annotations
 
 import os
 import uuid
-import logging
 
-import jwt
 from flask import Blueprint, jsonify, request, current_app
 from sqlalchemy.exc import SQLAlchemyError
 
 from backend.common.models import Profile
 from backend.services.auth_service.auth_service.utils.supabase_jwt import extract_bearer_token, verify_supabase_jwt
-
-# Set up logger
-logger = logging.getLogger(__name__)
 
 profile_bp = Blueprint("profile", __name__)
 
@@ -61,10 +55,8 @@ def get_profile():
         if not profile:
             return jsonify({"error": "Profile not found"}), 404
         
-        logger.info(f"Profile retrieved for user {user_id}")
         return jsonify(serialize_profile(profile)), 200
     except SQLAlchemyError as exc:
-        logger.error(f"Database error in get_profile: {exc}")
         return jsonify({"error": str(exc)}), 500
     finally:
         session.close()
@@ -86,7 +78,6 @@ def update_profile():
         return jsonify({"error": "Invalid token"}), 401
 
     data = request.get_json(silent=True) or {}
-    logger.info(f"Profile update payload for user {user_id}: {data}")
     
     # All fields that can be updated
     allowed_fields = [
@@ -113,12 +104,10 @@ def update_profile():
         if updated:
             session.commit()
             session.refresh(profile)
-            logger.info(f"Profile updated for user {user_id}")
         
         return jsonify(serialize_profile(profile)), 200
     except SQLAlchemyError as exc:
         session.rollback()
-        logger.error(f"Database error in update_profile: {exc}")
         return jsonify({"error": str(exc)}), 500
     finally:
         session.close()
