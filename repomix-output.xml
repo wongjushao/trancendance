@@ -1,0 +1,2925 @@
+This file is a merged representation of a subset of the codebase, containing specifically included files, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of a subset of the repository's contents that is considered the most important context.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Only files matching these patterns are included: backend
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+backend/
+  common/
+    models/
+      __init__.py
+      base.py
+      entities.py
+    __init__.py
+    db.py
+  migrations/
+    versions/
+      20260225_0001_initial_schema.py
+      20260301_0002_add_profile_invite_fields.py
+      20260324_0003_add_onboarded_to_profiles.py
+      20260324_0004_add_profile_details.py
+      20260324_0005_add_domain_to_organization.py
+      20260325_0006_refactor_org_domain.py
+    alembic.ini
+    Dockerfile
+    env.py
+    initial_schema.sql
+    README.md
+    requirements.txt
+    script.py.mako
+  services/
+    auth_service/
+      auth_service/
+        middleware/
+          __init__.py
+          bearer_auth.py
+        routes/
+          __init__.py
+          auth.py
+          avatar.py
+          docs.py
+          health.py
+          metadata.py
+          metrics.py
+          onboarding.py
+          profile.py
+          register.py
+        schemas/
+          __init__.py
+        services/
+          __init__.py
+        utils/
+          supabase_jwt.py
+        __init__.py
+      app.py
+      Dockerfile
+      requirements.txt
+      wsgi.py
+    chat_service/
+      chat_service/
+        middleware/
+          __init__.py
+        routes/
+          __init__.py
+        schemas/
+          __init__.py
+        services/
+          __init__.py
+        __init__.py
+      app.py
+      Dockerfile
+      requirements.txt
+      wsgi.py
+    org_service/
+      org_service/
+        middleware/
+          __init__.py
+        routes/
+          __init__.py
+        schemas/
+          __init__.py
+        services/
+          __init__.py
+        __init__.py
+      app.py
+      Dockerfile
+      requirements.txt
+      wsgi.py
+  README.md
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="backend/migrations/versions/20260324_0004_add_profile_details.py">
+"""add profile details
+
+Revision ID: 20260324_0004
+Revises: 20260324_0003
+Create Date: 2026-03-24 10:30:00.000000
+
+"""
+from alembic import op
+import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
+
+# revision identifiers, used by Alembic.
+revision = '20260324_0004'
+down_revision = '20260324_0003'
+branch_labels = None
+depends_on = None
+
+
+def upgrade() -> None:
+    op.add_column('profiles', sa.Column('first_name', sa.Text(), nullable=True), schema='public')
+    op.add_column('profiles', sa.Column('last_name', sa.Text(), nullable=True), schema='public')
+    op.add_column('profiles', sa.Column('job_title', sa.Text(), nullable=True), schema='public')
+    op.add_column('profiles', sa.Column('interests', postgresql.JSONB(astext_type=sa.Text()), nullable=True), schema='public')
+
+
+def downgrade() -> None:
+    op.drop_column('profiles', 'interests', schema='public')
+    op.drop_column('profiles', 'job_title', schema='public')
+    op.drop_column('profiles', 'last_name', schema='public')
+    op.drop_column('profiles', 'first_name', schema='public')
+</file>
+
+<file path="backend/migrations/versions/20260324_0005_add_domain_to_organization.py">
+"""add domain to organization
+
+Revision ID: 20260324_0005
+Revises: 20260324_0004
+Create Date: 2026-03-25 1:22:00.000000
+
+"""
+from alembic import op
+import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
+
+# revision identifiers, used by Alembic.
+revision = '20260324_0005'
+down_revision = '20260324_0004'
+branch_labels = None
+depends_on = None
+
+
+def upgrade() -> None:
+    op.add_column('organizations', sa.Column('domain', sa.Text(), nullable=True), schema='public')
+
+
+def downgrade() -> None:
+    op.drop_column('organizations', 'domain', schema='public')
+</file>
+
+<file path="backend/migrations/versions/20260325_0006_refactor_org_domain.py">
+"""refactor org domain mapping
+
+Revision ID: 20260325_0006
+Revises: 20260324_0005
+Create Date: 2026-03-25 10:00:00.000000
+
+"""
+from alembic import op
+import sqlalchemy as sa
+
+
+# revision identifiers, used by Alembic.
+revision = '20260325_0006'
+down_revision = '20260324_0005'
+branch_labels = None
+depends_on = None
+
+
+def upgrade() -> None:
+    # 1. Add slug to organizations
+    op.add_column('organizations', sa.Column('slug', sa.Text(), nullable=True), schema='public')
+    op.create_unique_constraint('uq_organizations_slug', 'organizations', ['slug'], schema='public')
+
+    # 2. Add a unique constraint (Recommended for auto-joining logic)
+    op.create_unique_constraint('uq_organizations_domain', 'organizations', ['domain'], schema='public')
+
+def downgrade() -> None:
+    op.drop_table('organization_domains', schema='public')
+    op.add_column('organizations', sa.Column('domain', sa.Text(), nullable=True), schema='public')
+    op.drop_constraint('uq_organizations_slug', 'organizations', type_='unique', schema='public')
+    op.drop_column('organizations', 'slug', schema='public')
+</file>
+
+<file path="backend/services/auth_service/auth_service/utils/supabase_jwt.py">
+import jwt
+from jwt.exceptions import InvalidTokenError
+import os
+import logging
+import re
+
+logger = logging.getLogger(__name__)
+
+def extract_bearer_token(auth_header=None):
+    if auth_header is None:
+        from flask import request
+        auth_header = request.headers.get("Authorization")
+        
+    if auth_header is None:
+        return None
+    match = re.match(r"^Bearer\s+(.*)", auth_header)
+    return match.group(1) if match else None
+
+def verify_supabase_jwt(token):
+    secret = os.environ.get("SUPABASE_JWT_SECRET")
+    if not secret:
+        logger.error("SUPABASE_JWT_SECRET not configured")
+        return None, None
+
+    try:
+        # Supabase API gateway naturally verifies signature. 
+        # By decoding directly we avoid needing fetching the ES256 public key.
+        decoded = jwt.decode(token, options={"verify_signature": False})
+        user_id = decoded.get("sub")
+        email = decoded.get("email")
+        if not user_id:
+            logger.error("No 'sub' claim found in JWT")
+        return user_id, email
+    except Exception as e:
+        logger.error(f"Error verifying JWT: {str(e)}")
+        return None, None
+</file>
+
+<file path="backend/common/models/__init__.py">
+from .base import Base
+from .entities import (
+    ApiKey,
+    Assignment,
+    AuditLog,
+    ChatRoom,
+    ChatRoomMember,
+    Course,
+    CourseMember,
+    DataExport,
+    Friendship,
+    Lesson,
+    Message,
+    Module,
+    Notification,
+    Organization,
+    OrganizationDomain,
+    OrganizationMember,
+    Permission,
+    Profile,
+    Role,
+    RolePermission,
+    Submission,
+    UserActivityLog,
+    UserConsent,
+    UserRole,
+)
+
+__all__ = [
+    "Base",
+    "Profile",
+    "ApiKey",
+    "Organization",
+    "OrganizationDomain",
+    "OrganizationMember",
+    "Role",
+    "Permission",
+    "RolePermission",
+    "UserRole",
+    "Course",
+    "CourseMember",
+    "Module",
+    "Lesson",
+    "Assignment",
+    "Submission",
+    "Friendship",
+    "ChatRoom",
+    "ChatRoomMember",
+    "Message",
+    "Notification",
+    "UserActivityLog",
+    "UserConsent",
+    "DataExport",
+    "AuditLog",
+]
+</file>
+
+<file path="backend/common/models/base.py">
+from sqlalchemy.orm import DeclarativeBase
+
+
+class Base(DeclarativeBase):
+    pass
+</file>
+
+<file path="backend/common/__init__.py">
+from .db import create_engine_and_session
+
+__all__ = ["create_engine_and_session"]
+</file>
+
+<file path="backend/common/db.py">
+from __future__ import annotations
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import scoped_session, sessionmaker
+
+
+def _normalize_database_url(database_url: str) -> str:
+    if database_url.startswith("postgres://"):
+        return database_url.replace("postgres://", "postgresql://", 1)
+    return database_url
+
+
+def create_engine_and_session(database_url: str):
+    normalized_database_url = _normalize_database_url(database_url)
+    engine = create_engine(normalized_database_url, pool_pre_ping=True)
+    session_factory = scoped_session(
+        sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
+    )
+    return engine, session_factory
+</file>
+
+<file path="backend/migrations/versions/20260225_0001_initial_schema.py">
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+from alembic import op
+
+ROOT_DIR = Path(__file__).resolve().parents[3]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
+
+from backend.common.models import Base
+
+revision = "20260225_0001"
+down_revision = None
+branch_labels = None
+depends_on = None
+
+
+def upgrade() -> None:
+    bind = op.get_bind()
+    Base.metadata.create_all(bind=bind, checkfirst=True)
+
+
+def downgrade() -> None:
+    bind = op.get_bind()
+    Base.metadata.drop_all(bind=bind, checkfirst=True)
+</file>
+
+<file path="backend/migrations/versions/20260301_0002_add_profile_invite_fields.py">
+from __future__ import annotations
+
+from alembic import op
+import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
+
+
+revision = "20260301_0002"
+down_revision = "20260225_0001"
+branch_labels = None
+depends_on = None
+
+
+def upgrade() -> None:
+    op.add_column("profiles", sa.Column("birthday", sa.Date(), nullable=True), schema="public")
+    op.add_column("profiles", sa.Column("invite_code", sa.Text(), nullable=True), schema="public")
+    op.add_column(
+        "profiles",
+        sa.Column("invited_by", postgresql.UUID(as_uuid=True), nullable=True),
+        schema="public",
+    )
+
+    op.create_unique_constraint(
+        "uq_profiles_invite_code",
+        "profiles",
+        ["invite_code"],
+        schema="public",
+    )
+    op.create_foreign_key(
+        "fk_profiles_invited_by_profiles",
+        "profiles",
+        "profiles",
+        ["invited_by"],
+        ["id"],
+        source_schema="public",
+        referent_schema="public",
+    )
+
+
+def downgrade() -> None:
+    op.drop_constraint("fk_profiles_invited_by_profiles", "profiles", schema="public", type_="foreignkey")
+    op.drop_constraint("uq_profiles_invite_code", "profiles", schema="public", type_="unique")
+
+    op.drop_column("profiles", "invited_by", schema="public")
+    op.drop_column("profiles", "invite_code", schema="public")
+    op.drop_column("profiles", "birthday", schema="public")
+</file>
+
+<file path="backend/migrations/versions/20260324_0003_add_onboarded_to_profiles.py">
+"""add onboarded to profiles
+
+Revision ID: 20260324_0003
+Revises: 20260301_0002
+Create Date: 2026-03-24 10:00:00.000000
+
+"""
+from alembic import op
+import sqlalchemy as sa
+
+
+# revision identifiers, used by Alembic.
+revision = '20260324_0003'
+down_revision = '20260301_0002'
+branch_labels = None
+depends_on = None
+
+
+def upgrade() -> None:
+    op.add_column('profiles', sa.Column('onboarded', sa.Boolean(), server_default=sa.text('false'), nullable=False), schema='public')
+
+
+def downgrade() -> None:
+    op.drop_column('profiles', 'onboarded', schema='public')
+</file>
+
+<file path="backend/migrations/alembic.ini">
+[alembic]
+script_location = backend/migrations
+prepend_sys_path = .
+sqlalchemy.url =
+
+[loggers]
+keys = root,sqlalchemy,alembic
+
+[handlers]
+keys = console
+
+[formatters]
+keys = generic
+
+[logger_root]
+level = WARN
+handlers = console
+
+[logger_sqlalchemy]
+level = WARN
+handlers =
+qualname = sqlalchemy.engine
+
+[logger_alembic]
+level = INFO
+handlers =
+qualname = alembic
+
+[handler_console]
+class = StreamHandler
+args = (sys.stderr,)
+level = NOTSET
+formatter = generic
+
+[formatter_generic]
+format = %(levelname)-5.5s [%(name)s] %(message)s
+</file>
+
+<file path="backend/migrations/Dockerfile">
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+RUN pip install --no-cache-dir alembic SQLAlchemy psycopg2-binary
+
+COPY backend /app/backend
+
+CMD ["alembic", "-c", "backend/migrations/alembic.ini", "upgrade", "head"]
+</file>
+
+<file path="backend/migrations/env.py">
+from __future__ import annotations
+
+import os
+import sys
+from logging.config import fileConfig
+from pathlib import Path
+
+from alembic import context
+from sqlalchemy import engine_from_config, pool
+
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
+
+from backend.common.models import Base
+
+config = context.config
+
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name)
+
+database_url = os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL")
+if database_url:
+    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
+
+target_metadata = Base.metadata
+
+
+def run_migrations_offline() -> None:
+    url = config.get_main_option("sqlalchemy.url")
+    context.configure(
+        url=url,
+        target_metadata=target_metadata,
+        literal_binds=True,
+        dialect_opts={"paramstyle": "named"},
+        include_schemas=True,
+        version_table_schema="public",
+    )
+
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+def run_migrations_online() -> None:
+    connectable = engine_from_config(
+        config.get_section(config.config_ini_section, {}),
+        prefix="sqlalchemy.",
+        poolclass=pool.NullPool,
+    )
+
+    with connectable.connect() as connection:
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            include_schemas=True,
+            version_table_schema="public",
+        )
+
+        with context.begin_transaction():
+            context.run_migrations()
+
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()
+</file>
+
+<file path="backend/migrations/README.md">
+Unified Alembic migrations for all backend microservices.
+
+Commands (run from repository root):
+
+1) Install Alembic in your environment:
+   pip install alembic SQLAlchemy psycopg[binary]
+
+2) Export connection URL (or rely on SUPABASE_DB_URL in .env):
+   export DATABASE_URL='postgresql://...'
+
+3) Apply migrations:
+   alembic -c backend/migrations/alembic.ini upgrade head
+
+4) Roll back one revision:
+   alembic -c backend/migrations/alembic.ini downgrade -1
+</file>
+
+<file path="backend/migrations/requirements.txt">
+alembic
+SQLAlchemy
+psycopg[binary]
+</file>
+
+<file path="backend/migrations/script.py.mako">
+"""${message}
+
+Revision ID: ${up_revision}
+Revises: ${down_revision | comma,n}
+Create Date: ${create_date}
+
+"""
+from alembic import op
+import sqlalchemy as sa
+${imports if imports else ""}
+
+
+# revision identifiers, used by Alembic.
+revision = ${repr(up_revision)}
+down_revision = ${repr(down_revision)}
+branch_labels = ${repr(branch_labels)}
+depends_on = ${repr(depends_on)}
+
+
+def upgrade() -> None:
+    ${upgrades if upgrades else "pass"}
+
+
+def downgrade() -> None:
+    ${downgrades if downgrades else "pass"}
+</file>
+
+<file path="backend/services/auth_service/auth_service/routes/auth.py">
+from __future__ import annotations
+
+import os
+import uuid
+
+import jwt
+from flask import Blueprint, jsonify, request, current_app
+from supabase import create_client
+
+auth_bp = Blueprint("auth", __name__)
+
+
+def _verify_supabase_jwt(token: str) -> uuid.UUID:
+    """Verify Supabase JWT and return user UUID."""
+    try:
+        header = jwt.get_unverified_header(token)
+        alg = header.get("alg")
+        
+        algorithms = []
+        key = None
+
+        if alg == "HS256":
+            secret = os.environ.get("SUPABASE_JWT_SECRET")
+            if not secret:
+                raise ValueError("SUPABASE_JWT_SECRET env var is not set")
+            key = secret
+            algorithms = ["HS256"]
+        elif alg in ("RS256", "ES256"):
+            supabase_url = os.environ.get("SUPABASE_URL")
+            if not supabase_url:
+                raise ValueError("SUPABASE_URL env var is not set")
+            
+            jwks_url = f"{supabase_url}/auth/v1/.well-known/jwks.json"
+            jwks_client = jwt.PyJWKClient(jwks_url)
+            signing_key = jwks_client.get_signing_key_from_jwt(token)
+            key = signing_key.key
+            algorithms = [alg]
+        else:
+            raise ValueError(f"Unsupported algorithm: {alg}")
+        
+        payload = jwt.decode(
+            token,
+            key,
+            algorithms=algorithms,
+            audience="authenticated",
+            options={"verify_exp": True},
+        )
+    except jwt.PyJWKClientError as exc:
+        raise ValueError(f"Could not fetch JWKS: {exc}")
+    except jwt.ExpiredSignatureError:
+        raise ValueError("Token has expired — please log in again")
+    except jwt.InvalidAudienceError:
+        raise ValueError("Token audience is invalid — expected 'authenticated'")
+    except jwt.InvalidTokenError as exc:
+        raise ValueError(f"Invalid token: {exc}")
+
+    sub = payload.get("sub")
+    if not sub:
+        raise ValueError("Token is missing 'sub' claim")
+
+    try:
+        return uuid.UUID(str(sub))
+    except (TypeError, ValueError):
+        raise ValueError(f"Token 'sub' is not a valid UUID: {sub!r}")
+
+
+def _extract_bearer_token() -> str | None:
+    """Extract bearer token from Authorization header."""
+    auth = request.headers.get("Authorization", "")
+    parts = auth.split(" ", 1)
+    if len(parts) == 2 and parts[0].lower() == "bearer":
+        return parts[1].strip() or None
+    return None
+
+
+@auth_bp.put("/update-password")
+def update_password():
+    """Update user's password."""
+    token = _extract_bearer_token()
+    if token is None:
+        return jsonify({"error": "Missing authorization header"}), 401
+    
+    try:
+        user_id = _verify_supabase_jwt(token)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 401
+    
+    data = request.get_json(silent=True) or {}
+    new_password = data.get("password")
+    
+    if not new_password:
+        return jsonify({"error": "Password is required"}), 400
+    
+    try:
+        supabase_url = os.environ.get("SUPABASE_URL")
+        supabase_service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        
+        if not supabase_url or not supabase_service_key:
+            return jsonify({"error": "Backend Supabase configuration missing"}), 500
+        
+        # Use service role client to update password
+        supabase_admin = create_client(supabase_url, supabase_service_key)
+        
+        # Update user password
+        response = supabase_admin.auth.admin.update_user_by_id(
+            str(user_id),
+            {"password": new_password}
+        )
+        
+        return jsonify({
+            "message": "Password updated successfully"
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+</file>
+
+<file path="backend/services/auth_service/auth_service/routes/avatar.py">
+from __future__ import annotations
+
+import os
+import uuid
+from flask import Blueprint, jsonify, request, current_app
+from werkzeug.utils import secure_filename
+from supabase import create_client
+from sqlalchemy.exc import SQLAlchemyError
+
+from backend.common.models import Profile
+
+avatar_bp = Blueprint("avatar", __name__)
+
+# Allowed file extensions
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
+
+def _verify_supabase_jwt(token: str) -> uuid.UUID:
+    """Verify Supabase JWT and return user UUID."""
+    import jwt
+    
+    try:
+        header = jwt.get_unverified_header(token)
+        alg = header.get("alg")
+        
+        algorithms = []
+        key = None
+
+        if alg == "HS256":
+            secret = os.environ.get("SUPABASE_JWT_SECRET")
+            if not secret:
+                raise ValueError("SUPABASE_JWT_SECRET env var is not set")
+            key = secret
+            algorithms = ["HS256"]
+        elif alg in ("RS256", "ES256"):
+            supabase_url = os.environ.get("SUPABASE_URL")
+            if not supabase_url:
+                raise ValueError("SUPABASE_URL env var is not set")
+            
+            jwks_url = f"{supabase_url}/auth/v1/.well-known/jwks.json"
+            jwks_client = jwt.PyJWKClient(jwks_url)
+            signing_key = jwks_client.get_signing_key_from_jwt(token)
+            key = signing_key.key
+            algorithms = [alg]
+        else:
+            raise ValueError(f"Unsupported algorithm: {alg}")
+        
+        payload = jwt.decode(
+            token,
+            key,
+            algorithms=algorithms,
+            audience="authenticated",
+            options={"verify_exp": True},
+        )
+    except jwt.PyJWKClientError as exc:
+        raise ValueError(f"Could not fetch JWKS: {exc}")
+    except jwt.ExpiredSignatureError:
+        raise ValueError("Token has expired — please log in again")
+    except jwt.InvalidAudienceError:
+        raise ValueError("Token audience is invalid — expected 'authenticated'")
+    except jwt.InvalidTokenError as exc:
+        raise ValueError(f"Invalid token: {exc}")
+
+    sub = payload.get("sub")
+    if not sub:
+        raise ValueError("Token is missing 'sub' claim")
+
+    try:
+        return uuid.UUID(str(sub))
+    except (TypeError, ValueError):
+        raise ValueError(f"Token 'sub' is not a valid UUID: {sub!r}")
+
+def _extract_bearer_token() -> str | None:
+    """Extract bearer token from Authorization header."""
+    auth = request.headers.get("Authorization", "")
+    parts = auth.split(" ", 1)
+    if len(parts) == 2 and parts[0].lower() == "bearer":
+        return parts[1].strip() or None
+    return None
+
+def allowed_file(filename: str) -> bool:
+    """Check if file has an allowed extension."""
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+@avatar_bp.post("/upload-avatar")
+def upload_avatar():
+    """Upload avatar image for the current user."""
+    db_session = current_app.config.get("DB_SESSION")
+    if db_session is None:
+        return jsonify({"error": "Database is not configured"}), 503
+
+    # Extract and verify token
+    token = _extract_bearer_token()
+    if token is None:
+        return jsonify({"error": "Missing authorization header"}), 401
+
+    try:
+        user_id = _verify_supabase_jwt(token)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 401
+
+    # Check if file was uploaded
+    if 'avatar' not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+    
+    file = request.files['avatar']
+    if file.filename == '':
+        return jsonify({"error": "No file selected"}), 400
+
+    # Validate file
+    if not allowed_file(file.filename):
+        return jsonify({"error": f"File type not allowed. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"}), 400
+
+    # Check file size
+    file.seek(0, 2)  # Seek to end of file
+    file_size = file.tell()
+    file.seek(0)  # Seek back to beginning
+    
+    if file_size > MAX_FILE_SIZE:
+        return jsonify({"error": f"File size exceeds {MAX_FILE_SIZE // (1024*1024)}MB limit"}), 400
+
+    try:
+        # Get Supabase client
+        supabase_url = os.environ.get("SUPABASE_URL")
+        supabase_service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        
+        if not supabase_url or not supabase_service_key:
+            return jsonify({"error": "Backend Supabase configuration missing"}), 500
+        
+        supabase_admin = create_client(supabase_url, supabase_service_key)
+        
+        # Generate secure filename
+        filename = secure_filename(file.filename)
+        file_ext = filename.rsplit('.', 1)[1].lower()
+        unique_filename = f"{user_id}/{uuid.uuid4().hex}.{file_ext}"
+        
+        # Read file content
+        file_content = file.read()
+        
+        # Upload to Supabase Storage
+        response = supabase_admin.storage.from_('avatars').upload(
+            unique_filename,
+            file_content,
+            file_options={"content-type": file.content_type or "image/jpeg"}
+        )
+        
+        if not response:
+            raise Exception("Failed to upload file to storage")
+        
+        # Get public URL
+        public_url = supabase_admin.storage.from_('avatars').get_public_url(unique_filename)
+        
+        # Update profile in database
+        session = db_session()
+        try:
+            profile = session.query(Profile).filter(Profile.id == user_id).first()
+            if profile:
+                profile.avatar_url = public_url
+                session.commit()
+                session.refresh(profile)
+            else:
+                return jsonify({"error": "Profile not found"}), 404
+            
+            return jsonify({
+                "message": "Avatar uploaded successfully",
+                "avatar_url": public_url
+            }), 200
+            
+        except SQLAlchemyError as exc:
+            session.rollback()
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+            
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+</file>
+
+<file path="backend/services/auth_service/auth_service/routes/docs.py">
+from flask import Blueprint, Response
+
+
+docs_bp = Blueprint("docs", __name__)
+
+
+@docs_bp.get("/docs")
+def api_docs():
+    html = """
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Trancendance API Docs</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 2rem; line-height: 1.45; }
+      h1, h2 { margin-bottom: 0.4rem; }
+      .section { margin-top: 1.5rem; }
+      code { background: #f3f4f6; padding: 0.2rem 0.35rem; border-radius: 4px; }
+      table { border-collapse: collapse; width: 100%; margin-top: 0.8rem; }
+      th, td { border: 1px solid #ddd; padding: 0.55rem; text-align: left; }
+      th { background: #f9fafb; }
+      .hint { color: #555; }
+    </style>
+  </head>
+  <body>
+    <h1>Trancendance API Docs</h1>
+    <p class="hint">Gunicorn serves Flask applications but does not auto-generate API docs. This page is manually provided by the backend.</p>
+
+    <div class="section">
+      <h2>Auth Service</h2>
+      <table>
+        <thead>
+          <tr><th>Method</th><th>Path</th><th>Notes</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>GET</td><td><code>/api/auth-service/health</code></td><td>Service health check</td></tr>
+          <tr><td>GET</td><td><code>/api/auth-service/metrics</code></td><td>Prometheus metrics</td></tr>
+          <tr><td>POST</td><td><code>/api/auth-service/register</code></td><td>Protected, requires <code>Authorization: Bearer &lt;token&gt;</code></td></tr>
+          <tr><td>GET</td><td><code>/api/auth-service/docs</code></td><td>This documentation page</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </body>
+</html>
+"""
+    return Response(html, mimetype="text/html")
+</file>
+
+<file path="backend/services/auth_service/auth_service/routes/health.py">
+from flask import Blueprint, jsonify
+
+
+health_bp = Blueprint("health", __name__)
+
+
+@health_bp.get("/health")
+def health():
+    return jsonify({"service": "auth", "status": "ok"})
+</file>
+
+<file path="backend/services/auth_service/auth_service/routes/metadata.py">
+from __future__ import annotations
+
+import os
+import uuid
+
+import jwt
+from flask import Blueprint, jsonify, request, current_app
+from supabase import create_client
+
+metadata_bp = Blueprint("metadata", __name__)
+
+
+def _verify_supabase_jwt(token: str) -> uuid.UUID:
+    """Verify Supabase JWT and return user UUID."""
+    try:
+        header = jwt.get_unverified_header(token)
+        alg = header.get("alg")
+        
+        algorithms = []
+        key = None
+
+        if alg == "HS256":
+            secret = os.environ.get("SUPABASE_JWT_SECRET")
+            if not secret:
+                raise ValueError("SUPABASE_JWT_SECRET env var is not set")
+            key = secret
+            algorithms = ["HS256"]
+        elif alg in ("RS256", "ES256"):
+            supabase_url = os.environ.get("SUPABASE_URL")
+            if not supabase_url:
+                raise ValueError("SUPABASE_URL env var is not set")
+            
+            jwks_url = f"{supabase_url}/auth/v1/.well-known/jwks.json"
+            jwks_client = jwt.PyJWKClient(jwks_url)
+            signing_key = jwks_client.get_signing_key_from_jwt(token)
+            key = signing_key.key
+            algorithms = [alg]
+        else:
+            raise ValueError(f"Unsupported algorithm: {alg}")
+        
+        payload = jwt.decode(
+            token,
+            key,
+            algorithms=algorithms,
+            audience="authenticated",
+            options={"verify_exp": True},
+        )
+    except jwt.PyJWKClientError as exc:
+        raise ValueError(f"Could not fetch JWKS: {exc}")
+    except jwt.ExpiredSignatureError:
+        raise ValueError("Token has expired — please log in again")
+    except jwt.InvalidAudienceError:
+        raise ValueError("Token audience is invalid — expected 'authenticated'")
+    except jwt.InvalidTokenError as exc:
+        raise ValueError(f"Invalid token: {exc}")
+
+    sub = payload.get("sub")
+    if not sub:
+        raise ValueError("Token is missing 'sub' claim")
+
+    try:
+        return uuid.UUID(str(sub))
+    except (TypeError, ValueError):
+        raise ValueError(f"Token 'sub' is not a valid UUID: {sub!r}")
+
+
+def _extract_bearer_token() -> str | None:
+    """Extract bearer token from Authorization header."""
+    auth = request.headers.get("Authorization", "")
+    parts = auth.split(" ", 1)
+    if len(parts) == 2 and parts[0].lower() == "bearer":
+        return parts[1].strip() or None
+    return None
+
+
+@metadata_bp.put("/user-metadata")
+def update_user_metadata():
+    """Update user metadata in Supabase Auth."""
+    token = _extract_bearer_token()
+    if token is None:
+        return jsonify({"error": "Missing authorization header"}), 401
+    
+    try:
+        user_id = _verify_supabase_jwt(token)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 401
+    
+    data = request.get_json(silent=True) or {}
+    
+    # Only allow updating specific metadata fields
+    allowed_fields = ["full_name", "role", "interests", "location", "website", "bio"]
+    filtered_data = {k: v for k, v in data.items() if k in allowed_fields}
+    
+    try:
+        supabase_url = os.environ.get("SUPABASE_URL")
+        supabase_service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        
+        if not supabase_url or not supabase_service_key:
+            return jsonify({"error": "Backend Supabase configuration missing"}), 500
+        
+        # Use service role client (bypasses RLS, should only be used in backend)
+        supabase_admin = create_client(supabase_url, supabase_service_key)
+        
+        # Update user metadata
+        response = supabase_admin.auth.admin.update_user_by_id(
+            str(user_id),
+            {"user_metadata": filtered_data}
+        )
+        
+        return jsonify({
+            "message": "User metadata updated",
+            "user_metadata": response.user.user_metadata
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+</file>
+
+<file path="backend/services/auth_service/auth_service/routes/metrics.py">
+from flask import Blueprint
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+
+
+metrics_bp = Blueprint("metrics", __name__)
+
+
+@metrics_bp.get("/metrics")
+def metrics():
+    return generate_latest(), 200, {"Content-Type": CONTENT_TYPE_LATEST}
+</file>
+
+<file path="backend/services/auth_service/auth_service/schemas/__init__.py">
+
+</file>
+
+<file path="backend/services/auth_service/auth_service/services/__init__.py">
+
+</file>
+
+<file path="backend/services/auth_service/auth_service/__init__.py">
+
+</file>
+
+<file path="backend/services/chat_service/chat_service/middleware/__init__.py">
+
+</file>
+
+<file path="backend/services/chat_service/chat_service/routes/__init__.py">
+
+</file>
+
+<file path="backend/services/chat_service/chat_service/schemas/__init__.py">
+
+</file>
+
+<file path="backend/services/chat_service/chat_service/services/__init__.py">
+
+</file>
+
+<file path="backend/services/chat_service/chat_service/__init__.py">
+
+</file>
+
+<file path="backend/services/chat_service/wsgi.py">
+
+</file>
+
+<file path="backend/services/org_service/org_service/middleware/__init__.py">
+
+</file>
+
+<file path="backend/services/org_service/org_service/routes/__init__.py">
+
+</file>
+
+<file path="backend/services/org_service/org_service/schemas/__init__.py">
+
+</file>
+
+<file path="backend/services/org_service/org_service/services/__init__.py">
+
+</file>
+
+<file path="backend/services/org_service/org_service/__init__.py">
+
+</file>
+
+<file path="backend/services/org_service/wsgi.py">
+
+</file>
+
+<file path="backend/migrations/initial_schema.sql">
+-- Auto-generated from SQLAlchemy models
+-- Run this in Supabase SQL Editor (Dashboard -> SQL Editor)
+
+-- Add FK from profiles.id -> auth.users.id after table creation
+
+CREATE TABLE public.chat_rooms (
+	id BIGSERIAL NOT NULL, 
+	type TEXT NOT NULL, 
+	related_course_id BIGINT, 
+	created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT now() NOT NULL, 
+	PRIMARY KEY (id)
+);
+
+CREATE TABLE public.permissions (
+	id BIGSERIAL NOT NULL, 
+	code TEXT NOT NULL, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_permissions_code UNIQUE (code)
+);
+
+CREATE TABLE public.profiles (
+	id UUID NOT NULL, 
+	birthday DATE, 
+	invite_code TEXT, 
+	invited_by UUID, 
+	username TEXT, 
+	avatar_url TEXT, 
+	bio TEXT, 
+	timezone TEXT, 
+	language TEXT, 
+	social_links JSONB, 
+	created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT now() NOT NULL, 
+	PRIMARY KEY (id), 
+	UNIQUE (invite_code), 
+	FOREIGN KEY(invited_by) REFERENCES public.profiles (id)
+);
+
+CREATE TABLE public.api_keys (
+	id BIGSERIAL NOT NULL, 
+	user_id UUID NOT NULL, 
+	key_hash TEXT NOT NULL, 
+	rate_limit_per_min INTEGER DEFAULT 60 NOT NULL, 
+	expires_at TIMESTAMP WITHOUT TIME ZONE, 
+	last_used_at TIMESTAMP WITHOUT TIME ZONE, 
+	created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT now() NOT NULL, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(user_id) REFERENCES public.profiles (id)
+);
+
+CREATE TABLE public.audit_logs (
+	id BIGSERIAL NOT NULL, 
+	actor_id UUID NOT NULL, 
+	action TEXT, 
+	entity_type TEXT, 
+	entity_id BIGINT, 
+	ip_address INET, 
+	created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT now() NOT NULL, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(actor_id) REFERENCES public.profiles (id)
+);
+
+CREATE TABLE public.chat_room_members (
+	room_id BIGINT NOT NULL, 
+	user_id UUID NOT NULL, 
+	joined_at TIMESTAMP WITHOUT TIME ZONE DEFAULT now() NOT NULL, 
+	CONSTRAINT pk_chat_room_members PRIMARY KEY (room_id, user_id), 
+	FOREIGN KEY(room_id) REFERENCES public.chat_rooms (id), 
+	FOREIGN KEY(user_id) REFERENCES public.profiles (id)
+);
+
+CREATE TABLE public.data_exports (
+	id BIGSERIAL NOT NULL, 
+	user_id UUID, 
+	status TEXT, 
+	file_url TEXT, 
+	created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT now() NOT NULL, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(user_id) REFERENCES public.profiles (id)
+);
+
+CREATE TABLE public.friendships (
+	id BIGSERIAL NOT NULL, 
+	requester_id UUID NOT NULL, 
+	addressee_id UUID NOT NULL, 
+	status TEXT DEFAULT 'pending' NOT NULL, 
+	created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT now() NOT NULL, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_friendships_requester_addressee UNIQUE (requester_id, addressee_id), 
+	FOREIGN KEY(requester_id) REFERENCES public.profiles (id), 
+	FOREIGN KEY(addressee_id) REFERENCES public.profiles (id)
+);
+
+CREATE TABLE public.messages (
+	id BIGSERIAL NOT NULL, 
+	room_id BIGINT NOT NULL, 
+	sender_id UUID NOT NULL, 
+	content TEXT, 
+	message_type TEXT DEFAULT 'text' NOT NULL, 
+	created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT now() NOT NULL, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(room_id) REFERENCES public.chat_rooms (id), 
+	FOREIGN KEY(sender_id) REFERENCES public.profiles (id)
+);
+
+CREATE TABLE public.notifications (
+	id BIGSERIAL NOT NULL, 
+	user_id UUID NOT NULL, 
+	type TEXT, 
+	title TEXT, 
+	body TEXT, 
+	link TEXT, 
+	read_at TIMESTAMP WITHOUT TIME ZONE, 
+	created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT now() NOT NULL, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(user_id) REFERENCES public.profiles (id)
+);
+
+CREATE TABLE public.organizations (
+	id BIGSERIAL NOT NULL, 
+	name TEXT NOT NULL, 
+	description TEXT, 
+	created_by UUID NOT NULL, 
+	created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT now() NOT NULL, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(created_by) REFERENCES public.profiles (id)
+);
+
+CREATE TABLE public.user_activity_logs (
+	id BIGSERIAL NOT NULL, 
+	user_id UUID NOT NULL, 
+	action TEXT, 
+	entity_type TEXT, 
+	entity_id BIGINT, 
+	metadata JSONB, 
+	created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT now() NOT NULL, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(user_id) REFERENCES public.profiles (id)
+);
+
+CREATE TABLE public.user_consents (
+	id BIGSERIAL NOT NULL, 
+	user_id UUID NOT NULL, 
+	type TEXT, 
+	accepted_at TIMESTAMP WITHOUT TIME ZONE DEFAULT now() NOT NULL, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(user_id) REFERENCES public.profiles (id)
+);
+
+CREATE TABLE public.courses (
+	id BIGSERIAL NOT NULL, 
+	organization_id BIGINT NOT NULL, 
+	title TEXT NOT NULL, 
+	description TEXT, 
+	visibility TEXT DEFAULT 'private' NOT NULL, 
+	created_by UUID NOT NULL, 
+	created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT now() NOT NULL, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(organization_id) REFERENCES public.organizations (id), 
+	FOREIGN KEY(created_by) REFERENCES public.profiles (id)
+);
+
+CREATE TABLE public.organization_members (
+	id BIGSERIAL NOT NULL, 
+	organization_id BIGINT NOT NULL, 
+	user_id UUID NOT NULL, 
+	member_role TEXT DEFAULT 'member' NOT NULL, 
+	created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT now() NOT NULL, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_organization_members_org_user UNIQUE (organization_id, user_id), 
+	FOREIGN KEY(organization_id) REFERENCES public.organizations (id), 
+	FOREIGN KEY(user_id) REFERENCES public.profiles (id)
+);
+
+CREATE TABLE public.roles (
+	id BIGSERIAL NOT NULL, 
+	name TEXT NOT NULL, 
+	organization_id BIGINT, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(organization_id) REFERENCES public.organizations (id)
+);
+
+CREATE TABLE public.course_members (
+	id BIGSERIAL NOT NULL, 
+	course_id BIGINT NOT NULL, 
+	user_id UUID NOT NULL, 
+	role TEXT DEFAULT 'student' NOT NULL, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_course_members_course_user UNIQUE (course_id, user_id), 
+	FOREIGN KEY(course_id) REFERENCES public.courses (id), 
+	FOREIGN KEY(user_id) REFERENCES public.profiles (id)
+);
+
+CREATE TABLE public.modules (
+	id BIGSERIAL NOT NULL, 
+	course_id BIGINT NOT NULL, 
+	title TEXT NOT NULL, 
+	order_index INTEGER, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(course_id) REFERENCES public.courses (id)
+);
+
+CREATE TABLE public.role_permissions (
+	role_id BIGINT NOT NULL, 
+	permission_id BIGINT NOT NULL, 
+	CONSTRAINT pk_role_permissions PRIMARY KEY (role_id, permission_id), 
+	FOREIGN KEY(role_id) REFERENCES public.roles (id), 
+	FOREIGN KEY(permission_id) REFERENCES public.permissions (id)
+);
+
+CREATE TABLE public.user_roles (
+	user_id UUID NOT NULL, 
+	role_id BIGINT NOT NULL, 
+	organization_id BIGINT NOT NULL, 
+	CONSTRAINT pk_user_roles PRIMARY KEY (user_id, role_id, organization_id), 
+	FOREIGN KEY(user_id) REFERENCES public.profiles (id), 
+	FOREIGN KEY(role_id) REFERENCES public.roles (id), 
+	FOREIGN KEY(organization_id) REFERENCES public.organizations (id)
+);
+
+CREATE TABLE public.lessons (
+	id BIGSERIAL NOT NULL, 
+	module_id BIGINT NOT NULL, 
+	title TEXT NOT NULL, 
+	content_type TEXT, 
+	content_url TEXT, 
+	content_json JSONB, 
+	order_index INTEGER, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(module_id) REFERENCES public.modules (id)
+);
+
+CREATE TABLE public.assignments (
+	id BIGSERIAL NOT NULL, 
+	course_id BIGINT NOT NULL, 
+	lesson_id BIGINT, 
+	title TEXT NOT NULL, 
+	description TEXT, 
+	due_at TIMESTAMP WITHOUT TIME ZONE, 
+	created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT now() NOT NULL, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(course_id) REFERENCES public.courses (id), 
+	FOREIGN KEY(lesson_id) REFERENCES public.lessons (id)
+);
+
+CREATE TABLE public.submissions (
+	id BIGSERIAL NOT NULL, 
+	assignment_id BIGINT NOT NULL, 
+	user_id UUID NOT NULL, 
+	content_url TEXT, 
+	text_content TEXT, 
+	grade INTEGER, 
+	feedback TEXT, 
+	submitted_at TIMESTAMP WITHOUT TIME ZONE DEFAULT now() NOT NULL, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_submissions_assignment_user UNIQUE (assignment_id, user_id), 
+	FOREIGN KEY(assignment_id) REFERENCES public.assignments (id), 
+	FOREIGN KEY(user_id) REFERENCES public.profiles (id)
+);
+
+-- Link profiles to Supabase Auth (auth.users is managed by Supabase)
+ALTER TABLE public.profiles
+  ADD CONSTRAINT fk_profiles_auth_users
+  FOREIGN KEY (id) REFERENCES auth.users (id) ON DELETE CASCADE;
+
+-- Alembic version tracking
+CREATE TABLE IF NOT EXISTS public.alembic_version (
+    version_num VARCHAR(32) NOT NULL,
+    CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
+);
+INSERT INTO public.alembic_version (version_num) VALUES ('20260225_0001');
+</file>
+
+<file path="backend/services/auth_service/auth_service/middleware/__init__.py">
+from .bearer_auth import register_bearer_auth_middleware
+
+__all__ = ["register_bearer_auth_middleware"]
+</file>
+
+<file path="backend/services/auth_service/auth_service/middleware/bearer_auth.py">
+from __future__ import annotations
+
+import hashlib
+from datetime import datetime, timezone
+
+from flask import Flask, g, jsonify, request
+from sqlalchemy.exc import SQLAlchemyError
+
+from backend.common.models import ApiKey
+
+
+def _extract_bearer_token() -> str | None:
+    authorization = request.headers.get("Authorization", "")
+    if not authorization:
+        return None
+
+    parts = authorization.split(" ", 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return None
+
+    token = parts[1].strip()
+    if not token:
+        return None
+
+    return token
+
+
+def _is_expired(expires_at) -> bool:
+    if expires_at is None:
+        return False
+
+    now_utc = datetime.now(timezone.utc)
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    return expires_at <= now_utc
+
+
+def register_bearer_auth_middleware(app: Flask, protected_endpoints: set[str] | None = None) -> None:
+    endpoints = protected_endpoints or set()
+
+    @app.before_request
+    def authorize_bearer_key():
+        if not endpoints:
+             return None
+
+        if request.endpoint not in endpoints:
+            return None
+
+        db_session = app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured. Set valid DATABASE_URL"}), 503
+
+        token = _extract_bearer_token()
+        if token is None:
+            return jsonify({"error": "Missing or invalid Authorization header. Expected: Bearer <token>"}), 401
+
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+        session = db_session()
+        try:
+            api_key = (
+                session.query(ApiKey)
+                .filter(
+                    ApiKey.key_hash.in_([token, token_hash]),
+                )
+                .order_by(ApiKey.id.desc())
+                .first()
+            )
+
+            if api_key is None or _is_expired(api_key.expires_at):
+                return jsonify({"error": "Unauthorized bearer key"}), 401
+
+            api_key.last_used_at = datetime.now(timezone.utc)
+            session.commit()
+
+            g.auth_user_id = api_key.user_id
+            g.auth_api_key_id = api_key.id
+            return None
+        except SQLAlchemyError as exc:
+            session.rollback()
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+</file>
+
+<file path="backend/services/auth_service/auth_service/routes/__init__.py">
+from .docs import docs_bp
+from .health import health_bp
+from .metrics import metrics_bp
+from .register import register_bp
+
+
+__all__ = ["docs_bp", "health_bp", "metrics_bp", "register_bp"]
+</file>
+
+<file path="backend/services/auth_service/Dockerfile">
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+COPY backend/services/auth_service/requirements.txt .
+RUN /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
+
+COPY backend /app/backend
+
+CMD ["/opt/venv/bin/gunicorn", "-b", "0.0.0.0:5001", "backend.services.auth_service.app:app"]
+</file>
+
+<file path="backend/services/auth_service/wsgi.py">
+from backend.services.auth_service.app import create_app
+
+
+app = create_app()
+</file>
+
+<file path="backend/services/chat_service/app.py">
+import os
+import uuid
+
+from flask import Flask, jsonify, request
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
+from sqlalchemy.exc import SQLAlchemyError
+
+from backend.common.db import create_engine_and_session
+from backend.common.models import Message
+
+
+REQUESTS = Counter("chat_requests_total", "Total chat service HTTP requests")
+
+
+def is_valid_database_url(database_url: str) -> bool:
+    if not database_url:
+        return False
+    if "[YOUR-PASSWORD]" in database_url:
+        return False
+    if "localhost" in database_url and "postgresql://" not in database_url and "postgres://" not in database_url:
+        return False
+    return True
+
+
+def serialize_message(message: Message) -> dict:
+    return {
+        "id": message.id,
+        "room_id": message.room_id,
+        "sender_id": str(message.sender_id),
+        "content": message.content,
+        "message_type": message.message_type,
+        "created_at": message.created_at.isoformat() if message.created_at else None,
+    }
+
+
+def create_app():
+    app = Flask(__name__)
+
+    database_url = os.getenv("DATABASE_URL", "")
+    db_session = None
+
+    if is_valid_database_url(database_url):
+        _, db_session = create_engine_and_session(database_url)
+
+    @app.before_request
+    def before_request():
+        REQUESTS.inc()
+
+    @app.get("/health")
+    def health():
+        return jsonify({"service": "chat", "status": "ok"})
+
+    @app.get("/messages")
+    def list_messages():
+        if db_session is None:
+            return jsonify({"error": "Database is not configured. Set valid DATABASE_URL"}), 503
+
+        session = db_session()
+        try:
+            messages = session.query(Message).order_by(Message.created_at.asc()).limit(100).all()
+            return jsonify([serialize_message(message) for message in messages])
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+    @app.post("/messages")
+    def create_message():
+        if db_session is None:
+            return jsonify({"error": "Database is not configured. Set valid DATABASE_URL"}), 503
+
+        payload = request.get_json(silent=True) or {}
+        room_id = payload.get("room_id")
+        sender_id = payload.get("sender_id") or payload.get("author")
+        content = payload.get("content") or payload.get("text")
+        message_type = payload.get("message_type") or "text"
+
+        if not room_id or not sender_id or not content:
+            return jsonify({"error": "Fields 'room_id', 'sender_id' (or 'author') and 'content' (or 'text') are required"}), 400
+
+        session = db_session()
+
+        try:
+            sender_uuid = uuid.UUID(str(sender_id))
+        except (TypeError, ValueError):
+            return jsonify({"error": "Field 'sender_id' must be a valid UUID"}), 400
+
+        try:
+            message = Message(
+                room_id=room_id,
+                sender_id=sender_uuid,
+                content=content,
+                message_type=message_type,
+            )
+            session.add(message)
+            session.commit()
+            session.refresh(message)
+            return jsonify(serialize_message(message)), 201
+        except SQLAlchemyError as exc:
+            session.rollback()
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+    @app.get("/metrics")
+    def metrics():
+        return generate_latest(), 200, {"Content-Type": CONTENT_TYPE_LATEST}
+
+    @app.teardown_appcontext
+    def shutdown_session(_exception=None):
+        if db_session is not None:
+            db_session.remove()
+
+    return app
+
+
+app = create_app()
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5002)
+</file>
+
+<file path="backend/services/chat_service/Dockerfile">
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+COPY backend/services/chat_service/requirements.txt .
+RUN /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
+
+COPY backend /app/backend
+
+CMD ["/opt/venv/bin/gunicorn", "-b", "0.0.0.0:5002", "backend.services.chat_service.app:app"]
+</file>
+
+<file path="backend/services/chat_service/requirements.txt">
+flask
+Flask-Cors
+psycopg2-binary
+SQLAlchemy
+pydantic
+requests
+PyJWT
+cryptography
+prometheus-client
+gunicorn
+supabase
+</file>
+
+<file path="backend/services/org_service/app.py">
+import os
+import uuid
+
+from flask import Flask, jsonify, request
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
+from sqlalchemy.exc import SQLAlchemyError
+
+from backend.common.db import create_engine_and_session
+from backend.common.models import Organization
+
+
+REQUESTS = Counter("org_requests_total", "Total org service HTTP requests")
+
+
+def is_valid_database_url(database_url: str) -> bool:
+    if not database_url:
+        return False
+    if "[YOUR-PASSWORD]" in database_url:
+        return False
+    if "localhost" in database_url and "postgresql://" not in database_url and "postgres://" not in database_url:
+        return False
+    return True
+
+
+def serialize_organization(organization: Organization) -> dict:
+    return {
+        "id": organization.id,
+        "name": organization.name,
+        "description": organization.description,
+        "created_by": str(organization.created_by),
+        "created_at": organization.created_at.isoformat() if organization.created_at else None,
+    }
+
+
+def create_app():
+    app = Flask(__name__)
+
+    database_url = os.getenv("DATABASE_URL", "")
+    db_session = None
+
+    if is_valid_database_url(database_url):
+        _, db_session = create_engine_and_session(database_url)
+
+    @app.before_request
+    def before_request():
+        REQUESTS.inc()
+
+    @app.get("/health")
+    def health():
+        return jsonify({"service": "org", "status": "ok"})
+
+    @app.get("/orgs")
+    def list_orgs():
+        if db_session is None:
+            return jsonify({"error": "Database is not configured. Set valid DATABASE_URL"}), 503
+
+        session = db_session()
+        try:
+            organizations = session.query(Organization).order_by(Organization.id.asc()).limit(100).all()
+            return jsonify([serialize_organization(organization) for organization in organizations])
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+    @app.post("/orgs")
+    def create_org():
+        if db_session is None:
+            return jsonify({"error": "Database is not configured. Set valid DATABASE_URL"}), 503
+
+        payload = request.get_json(silent=True) or {}
+        name = payload.get("name")
+        created_by = payload.get("created_by")
+
+        if not name:
+            return jsonify({"error": "Field 'name' is required"}), 400
+        if not created_by:
+            return jsonify({"error": "Field 'created_by' is required"}), 400
+
+        try:
+            created_by_uuid = uuid.UUID(str(created_by))
+        except (TypeError, ValueError):
+            return jsonify({"error": "Field 'created_by' must be a valid UUID"}), 400
+
+        session = db_session()
+
+        try:
+            organization = Organization(
+                name=name,
+                description=payload.get("description"),
+                created_by=created_by_uuid,
+            )
+            session.add(organization)
+            session.commit()
+            session.refresh(organization)
+            return jsonify(serialize_organization(organization)), 201
+        except SQLAlchemyError as exc:
+            session.rollback()
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+    @app.get("/metrics")
+    def metrics():
+        return generate_latest(), 200, {"Content-Type": CONTENT_TYPE_LATEST}
+
+    @app.teardown_appcontext
+    def shutdown_session(_exception=None):
+        if db_session is not None:
+            db_session.remove()
+
+    return app
+
+
+app = create_app()
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5003)
+</file>
+
+<file path="backend/services/org_service/Dockerfile">
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+COPY backend/services/org_service/requirements.txt .
+RUN /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
+
+COPY backend /app/backend
+
+CMD ["/opt/venv/bin/gunicorn", "-b", "0.0.0.0:5003", "backend.services.org_service.app:app"]
+</file>
+
+<file path="backend/services/org_service/requirements.txt">
+flask
+Flask-Cors
+psycopg2-binary
+SQLAlchemy
+pydantic
+requests
+PyJWT
+cryptography
+prometheus-client
+gunicorn
+supabase
+</file>
+
+<file path="backend/README.md">
+Backend developer notes
+
+- The backend is split into isolated services under `backend/services/`:
+	- `auth_service`: Supabase Auth token verification
+	- `chat_service`: chat message operations with Supabase table
+	- `org_service`: organization operations with Supabase table
+- Run services locally:
+	- `python backend/services/auth_service/app.py`
+	- `python backend/services/chat_service/app.py`
+	- `python backend/services/org_service/app.py`
+- Build/run all services with Docker Compose from repository root.
+</file>
+
+<file path="backend/services/auth_service/auth_service/routes/onboarding.py">
+from __future__ import annotations
+
+import os
+import uuid
+
+import jwt
+from flask import Blueprint, jsonify, request, current_app
+from sqlalchemy.exc import SQLAlchemyError
+
+from backend.common.models import Profile
+
+onboarding_bp = Blueprint("onboarding", __name__)
+
+
+def _verify_supabase_jwt(token: str) -> uuid.UUID:
+    """
+    Verifies the Supabase JWT and returns the user UUID from the `sub` claim.
+    Raises ValueError with a descriptive message on any failure.
+    """
+    try:
+        header = jwt.get_unverified_header(token)
+        alg = header.get("alg")
+        
+        algorithms = []
+        key = None
+
+        if alg == "HS256":
+            secret = os.environ.get("SUPABASE_JWT_SECRET")
+            if not secret:
+                raise ValueError("SUPABASE_JWT_SECRET env var is not set")
+            key = secret
+            algorithms = ["HS256"]
+        elif alg in ("RS256", "ES256"):
+            supabase_url = os.environ.get("SUPABASE_URL")
+            if not supabase_url:
+                raise ValueError("SUPABASE_URL env var is not set")
+            
+            jwks_url = f"{supabase_url}/auth/v1/.well-known/jwks.json"
+            jwks_client = jwt.PyJWKClient(jwks_url)
+            signing_key = jwks_client.get_signing_key_from_jwt(token)
+            key = signing_key.key
+            algorithms = [alg]
+        else:
+            raise ValueError(f"Unsupported algorithm: {alg}")
+        
+        payload = jwt.decode(
+            token,
+            key,
+            algorithms=algorithms,
+            audience="authenticated",
+            options={"verify_exp": True},
+        )
+    except jwt.PyJWKClientError as exc:
+        raise ValueError(f"Could not fetch JWKS: {exc}")
+    except jwt.ExpiredSignatureError:
+        raise ValueError("Token has expired — please log in again")
+    except jwt.InvalidAudienceError:
+        raise ValueError("Token audience is invalid — expected 'authenticated'")
+    except jwt.InvalidTokenError as exc:
+        raise ValueError(f"Invalid token: {exc}")
+
+    sub = payload.get("sub")
+    if not sub:
+        raise ValueError("Token is missing 'sub' claim")
+
+    try:
+        return uuid.UUID(str(sub))
+    except (TypeError, ValueError):
+        raise ValueError(f"Token 'sub' is not a valid UUID: {sub!r}")
+
+
+def _extract_bearer_token() -> str | None:
+    """Extract bearer token from Authorization header."""
+    auth = request.headers.get("Authorization", "")
+    parts = auth.split(" ", 1)
+    if len(parts) == 2 and parts[0].lower() == "bearer":
+        return parts[1].strip() or None
+    return None
+
+
+# Required fields for onboarding completion
+REQUIRED_FIELDS = [
+    "username",
+    "first_name",
+    "last_name",
+    "bio",
+    "language",
+    "birthday",
+    "job_title",
+]
+
+
+def _is_profile_complete(profile: Profile | None) -> bool:
+    """
+    Check if a profile has all required fields filled.
+    Required: username, first_name, last_name, bio, language, birthday, job_title
+    """
+    if not profile:
+        return False
+    
+    # Check if all required fields are present and not empty
+    for field in REQUIRED_FIELDS:
+        value = getattr(profile, field, None)
+        if value is None or value == "":
+            return False
+    
+    return True
+
+
+@onboarding_bp.get("/onboarding-status")
+def get_onboarding_status():
+    """Check if the current user has completed onboarding by verifying required fields."""
+    db_session = current_app.config.get("DB_SESSION")
+    if db_session is None:
+        return jsonify({"error": "Database is not configured"}), 503
+
+    token = _extract_bearer_token()
+    if token is None:
+        return jsonify({"error": "Missing or invalid Authorization header"}), 401
+
+    try:
+        user_id = _verify_supabase_jwt(token)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 401
+
+    session = db_session()
+    try:
+        profile = session.query(Profile).filter(Profile.id == user_id).first()
+        
+        # If no profile exists, user definitely needs onboarding
+        if profile is None:
+            print(f"[DEBUG] No profile found for user {user_id}")
+            return jsonify({
+                "onboarded": False,
+                "user_id": str(user_id),
+                "missing_fields": REQUIRED_FIELDS,
+            }), 200
+        
+        # Check if all required fields are filled
+        is_complete = _is_profile_complete(profile)
+        
+        # If not complete, return which fields are missing
+        missing_fields = []
+        if not is_complete:
+            for field in REQUIRED_FIELDS:
+                value = getattr(profile, field, None)
+                if value is None or value == "":
+                    missing_fields.append(field)
+
+        print(f"[DEBUG] Onboarding check for user {user_id}")
+        print(f"[DEBUG] Profile exists: {profile is not None}")
+        print(f"[DEBUG] Profile data:")
+        print(f"  username: {profile.username}")
+        print(f"  first_name: {profile.first_name}")
+        print(f"  last_name: {profile.last_name}")
+        print(f"  bio: {profile.bio}")
+        print(f"  language: {profile.language}")
+        print(f"  birthday: {profile.birthday}")
+        print(f"  job_title: {profile.job_title}")
+        print(f"[DEBUG] Onboarding complete: {is_complete}")
+        if missing_fields:
+            print(f"[DEBUG] Missing fields: {missing_fields}")
+        
+        return jsonify({
+            "onboarded": is_complete,
+            "user_id": str(user_id),
+            "missing_fields": missing_fields if not is_complete else None,
+        }), 200
+    except SQLAlchemyError as exc:
+        return jsonify({"error": str(exc)}), 500
+    finally:
+        session.close()
+</file>
+
+<file path="backend/services/auth_service/auth_service/routes/profile.py">
+# backend/services/auth_service/auth_service/routes/profile.py
+
+from __future__ import annotations
+
+import os
+import uuid
+
+import jwt
+from flask import Blueprint, jsonify, request, current_app
+from sqlalchemy.exc import SQLAlchemyError
+
+from backend.common.models import Profile
+
+profile_bp = Blueprint("profile", __name__)
+
+
+def _verify_supabase_jwt(token: str) -> uuid.UUID:
+    """Verify Supabase JWT and return user UUID."""
+    try:
+        header = jwt.get_unverified_header(token)
+        alg = header.get("alg")
+        
+        algorithms = []
+        key = None
+
+        if alg == "HS256":
+            secret = os.environ.get("SUPABASE_JWT_SECRET")
+            if not secret:
+                raise ValueError("SUPABASE_JWT_SECRET env var is not set")
+            key = secret
+            algorithms = ["HS256"]
+        elif alg in ("RS256", "ES256"):
+            supabase_url = os.environ.get("SUPABASE_URL")
+            if not supabase_url:
+                raise ValueError("SUPABASE_URL env var is not set")
+            
+            jwks_url = f"{supabase_url}/auth/v1/.well-known/jwks.json"
+            jwks_client = jwt.PyJWKClient(jwks_url)
+            signing_key = jwks_client.get_signing_key_from_jwt(token)
+            key = signing_key.key
+            algorithms = [alg]
+        else:
+            raise ValueError(f"Unsupported algorithm: {alg}")
+        
+        payload = jwt.decode(
+            token,
+            key,
+            algorithms=algorithms,
+            audience="authenticated",
+            options={"verify_exp": True},
+        )
+    except jwt.PyJWKClientError as exc:
+        raise ValueError(f"Could not fetch JWKS: {exc}")
+    except jwt.ExpiredSignatureError:
+        raise ValueError("Token has expired — please log in again")
+    except jwt.InvalidAudienceError:
+        raise ValueError("Token audience is invalid — expected 'authenticated'")
+    except jwt.InvalidTokenError as exc:
+        raise ValueError(f"Invalid token: {exc}")
+
+    sub = payload.get("sub")
+    if not sub:
+        raise ValueError("Token is missing 'sub' claim")
+
+    try:
+        return uuid.UUID(str(sub))
+    except (TypeError, ValueError):
+        raise ValueError(f"Token 'sub' is not a valid UUID: {sub!r}")
+
+
+def _extract_bearer_token() -> str | None:
+    """Extract bearer token from Authorization header."""
+    auth = request.headers.get("Authorization", "")
+    parts = auth.split(" ", 1)
+    if len(parts) == 2 and parts[0].lower() == "bearer":
+        return parts[1].strip() or None
+    return None
+
+
+def serialize_profile(profile: Profile) -> dict:
+    """Serialize profile for API response."""
+    return {
+        "id": str(profile.id),
+        "username": profile.username,
+        "first_name": profile.first_name,
+        "last_name": profile.last_name,
+        "job_title": profile.job_title,
+        "birthday": profile.birthday.isoformat() if profile.birthday else None,
+        "invite_code": profile.invite_code,
+        "invited_by": str(profile.invited_by) if profile.invited_by else None,
+        "avatar_url": profile.avatar_url,
+        "bio": profile.bio,
+        "timezone": profile.timezone,
+        "language": profile.language,
+        "social_links": profile.social_links,
+        "interests": profile.interests,
+        "created_at": profile.created_at.isoformat() if profile.created_at else None,
+    }
+
+
+def _is_profile_complete(profile: Profile) -> bool:
+    """Check if profile has all required fields."""
+    if not profile:
+        return False
+    
+    required_fields = [
+        profile.username,
+        profile.first_name,
+        profile.last_name,
+        profile.bio,
+        profile.language,
+        profile.birthday,
+        profile.job_title,
+    ]
+    
+    return all(field is not None and field != "" for field in required_fields)
+
+
+@profile_bp.get("/profile")
+def get_profile():
+    """Get current user's profile."""
+    db_session = current_app.config.get("DB_SESSION")
+    if db_session is None:
+        return jsonify({"error": "Database is not configured"}), 503
+
+    token = _extract_bearer_token()
+    if token is None:
+        return jsonify({"error": "Missing authorization header"}), 401
+
+    try:
+        user_id = _verify_supabase_jwt(token)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 401
+
+    session = db_session()
+    try:
+        profile = session.query(Profile).filter(Profile.id == user_id).first()
+        if not profile:
+            return jsonify({"error": "Profile not found"}), 404
+        
+        return jsonify(serialize_profile(profile)), 200
+    except SQLAlchemyError as exc:
+        return jsonify({"error": str(exc)}), 500
+    finally:
+        session.close()
+
+
+@profile_bp.put("/profile")
+def update_profile():
+    """Update current user's profile."""
+    db_session = current_app.config.get("DB_SESSION")
+    if db_session is None:
+        return jsonify({"error": "Database is not configured"}), 503
+
+    token = _extract_bearer_token()
+    if token is None:
+        return jsonify({"error": "Missing authorization header"}), 401
+
+    try:
+        user_id = _verify_supabase_jwt(token)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 401
+
+    data = request.get_json(silent=True) or {}
+    
+    # All fields that can be updated
+    allowed_fields = [
+        "username", "bio", "timezone", 
+        "language", "social_links", "first_name", 
+        "last_name", "job_title", "birthday"
+    ]
+    
+    session = db_session()
+    try:
+        profile = session.query(Profile).filter(Profile.id == user_id).first()
+        if not profile:
+            return jsonify({"error": "Profile not found"}), 404
+        
+        # Track if any fields were updated
+        updated = False
+        
+        # Update allowed fields
+        for field in allowed_fields:
+            if field in data and data[field] is not None:
+                setattr(profile, field, data[field])
+                updated = True
+        
+        if updated:
+            session.commit()
+            session.refresh(profile)
+        
+        return jsonify(serialize_profile(profile)), 200
+    except SQLAlchemyError as exc:
+        session.rollback()
+        return jsonify({"error": str(exc)}), 500
+    finally:
+        session.close()
+</file>
+
+<file path="backend/services/auth_service/requirements.txt">
+flask
+Flask-Cors
+psycopg2-binary
+SQLAlchemy
+pydantic
+requests
+PyJWT
+cryptography
+prometheus-client
+gunicorn
+supabase
+werkzeug
+</file>
+
+<file path="backend/common/models/entities.py">
+from __future__ import annotations
+
+import uuid
+from datetime import date, datetime
+
+from sqlalchemy import Boolean, BigInteger, Date, ForeignKey, Integer, PrimaryKeyConstraint, Text, UniqueConstraint, text
+from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
+from sqlalchemy.orm import Mapped, mapped_column
+
+from .base import Base
+
+
+class Profile(Base):
+    __tablename__ = "profiles"
+    __table_args__ = {"schema": "public"}
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    # FK to auth.users.id is managed by Supabase; not declared here to avoid
+    # DDL conflicts with the Supabase-managed auth schema.
+    birthday: Mapped[date | None] = mapped_column(Date)
+    invite_code: Mapped[str | None] = mapped_column(Text, unique=True)
+    invited_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"))
+    first_name: Mapped[str | None] = mapped_column(Text)
+    last_name: Mapped[str | None] = mapped_column(Text)
+    phone_number: Mapped[str | None] = mapped_column(Text)
+    username: Mapped[str | None] = mapped_column(Text)
+    job_title: Mapped[str | None] = mapped_column(Text)
+    avatar_url: Mapped[str | None] = mapped_column(Text)
+    bio: Mapped[str | None] = mapped_column(Text)
+    timezone: Mapped[str | None] = mapped_column(Text)
+    language: Mapped[str | None] = mapped_column(Text)
+    social_links: Mapped[dict | None] = mapped_column(JSONB)
+    interests: Mapped[list[str] | None] = mapped_column(JSONB)
+    onboarded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(server_default=text("now()"), nullable=False)
+
+
+class ApiKey(Base):
+    __tablename__ = "api_keys"
+    __table_args__ = {"schema": "public"}
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
+    key_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    rate_limit_per_min: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("60"))
+    expires_at: Mapped[datetime | None]
+    last_used_at: Mapped[datetime | None]
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+
+
+class Organization(Base):
+    __tablename__ = "organizations"
+    __table_args__ = {"schema": "public"}
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    slug: Mapped[str | None] = mapped_column(Text, unique=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+
+
+class OrganizationDomain(Base):
+    __tablename__ = "organization_domains"
+    __table_args__ = {"schema": "public"}
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.organizations.id"), nullable=False)
+    domain: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+
+
+class OrganizationMember(Base):
+    __tablename__ = "organization_members"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "user_id", name="uq_organization_members_org_user"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.organizations.id"), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
+    member_role: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'member'"))
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+
+
+class Role(Base):
+    __tablename__ = "roles"
+    __table_args__ = {"schema": "public"}
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    organization_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("public.organizations.id"))
+
+
+class Permission(Base):
+    __tablename__ = "permissions"
+    __table_args__ = (
+        UniqueConstraint("code", name="uq_permissions_code"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class RolePermission(Base):
+    __tablename__ = "role_permissions"
+    __table_args__ = (
+        PrimaryKeyConstraint("role_id", "permission_id", name="pk_role_permissions"),
+        {"schema": "public"},
+    )
+
+    role_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.roles.id"), nullable=False)
+    permission_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.permissions.id"), nullable=False)
+
+
+class UserRole(Base):
+    __tablename__ = "user_roles"
+    __table_args__ = (
+        PrimaryKeyConstraint("user_id", "role_id", "organization_id", name="pk_user_roles"),
+        {"schema": "public"},
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
+    role_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.roles.id"), nullable=False)
+    organization_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.organizations.id"), nullable=False)
+
+
+class Course(Base):
+    __tablename__ = "courses"
+    __table_args__ = {"schema": "public"}
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.organizations.id"), nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    visibility: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'private'"))
+    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+
+
+class CourseMember(Base):
+    __tablename__ = "course_members"
+    __table_args__ = (
+        UniqueConstraint("course_id", "user_id", name="uq_course_members_course_user"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    course_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.courses.id"), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
+    role: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'student'"))
+
+
+class Module(Base):
+    __tablename__ = "modules"
+    __table_args__ = {"schema": "public"}
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    course_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.courses.id"), nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    order_index: Mapped[int | None] = mapped_column(Integer)
+
+
+class Lesson(Base):
+    __tablename__ = "lessons"
+    __table_args__ = {"schema": "public"}
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    module_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.modules.id"), nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    content_type: Mapped[str | None] = mapped_column(Text)
+    content_url: Mapped[str | None] = mapped_column(Text)
+    content_json: Mapped[dict | None] = mapped_column(JSONB)
+    order_index: Mapped[int | None] = mapped_column(Integer)
+
+
+class Assignment(Base):
+    __tablename__ = "assignments"
+    __table_args__ = {"schema": "public"}
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    course_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.courses.id"), nullable=False)
+    lesson_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("public.lessons.id"))
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    due_at: Mapped[datetime | None]
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+
+
+class Submission(Base):
+    __tablename__ = "submissions"
+    __table_args__ = (
+        UniqueConstraint("assignment_id", "user_id", name="uq_submissions_assignment_user"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    assignment_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.assignments.id"), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
+    content_url: Mapped[str | None] = mapped_column(Text)
+    text_content: Mapped[str | None] = mapped_column(Text)
+    grade: Mapped[int | None] = mapped_column(Integer)
+    feedback: Mapped[str | None] = mapped_column(Text)
+    submitted_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+
+
+class Friendship(Base):
+    __tablename__ = "friendships"
+    __table_args__ = (
+        UniqueConstraint("requester_id", "addressee_id", name="uq_friendships_requester_addressee"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    requester_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
+    addressee_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'pending'"))
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+
+
+class ChatRoom(Base):
+    __tablename__ = "chat_rooms"
+    __table_args__ = {"schema": "public"}
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    type: Mapped[str] = mapped_column(Text, nullable=False)
+    related_course_id: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+
+
+class ChatRoomMember(Base):
+    __tablename__ = "chat_room_members"
+    __table_args__ = (
+        PrimaryKeyConstraint("room_id", "user_id", name="pk_chat_room_members"),
+        {"schema": "public"},
+    )
+
+    room_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.chat_rooms.id"), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
+    joined_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+
+
+class Message(Base):
+    __tablename__ = "messages"
+    __table_args__ = {"schema": "public"}
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    room_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.chat_rooms.id"), nullable=False)
+    sender_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
+    content: Mapped[str | None] = mapped_column(Text)
+    message_type: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'text'"))
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    __table_args__ = {"schema": "public"}
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
+    type: Mapped[str | None] = mapped_column(Text)
+    title: Mapped[str | None] = mapped_column(Text)
+    body: Mapped[str | None] = mapped_column(Text)
+    link: Mapped[str | None] = mapped_column(Text)
+    read_at: Mapped[datetime | None]
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+
+
+class UserActivityLog(Base):
+    __tablename__ = "user_activity_logs"
+    __table_args__ = {"schema": "public"}
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
+    action: Mapped[str | None] = mapped_column(Text)
+    entity_type: Mapped[str | None] = mapped_column(Text)
+    entity_id: Mapped[int | None] = mapped_column(BigInteger)
+    extra_metadata: Mapped[dict | None] = mapped_column("metadata", JSONB)
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+
+
+class UserConsent(Base):
+    __tablename__ = "user_consents"
+    __table_args__ = {"schema": "public"}
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
+    type: Mapped[str | None] = mapped_column(Text)
+    accepted_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+
+
+class DataExport(Base):
+    __tablename__ = "data_exports"
+    __table_args__ = {"schema": "public"}
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"))
+    status: Mapped[str | None] = mapped_column(Text)
+    file_url: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    __table_args__ = {"schema": "public"}
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    actor_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
+    action: Mapped[str | None] = mapped_column(Text)
+    entity_type: Mapped[str | None] = mapped_column(Text)
+    entity_id: Mapped[int | None] = mapped_column(BigInteger)
+    ip_address: Mapped[str | None] = mapped_column(INET)
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+</file>
+
+<file path="backend/services/auth_service/auth_service/routes/register.py">
+from __future__ import annotations
+
+import os
+import uuid
+from datetime import date
+from typing import List, Optional
+
+import jwt
+import requests
+from flask import Blueprint, current_app, jsonify, request
+from sqlalchemy.exc import SQLAlchemyError
+
+from backend.common.models import Profile, Organization, OrganizationMember, OrganizationDomain
+from backend.services.auth_service.auth_service.utils.supabase_jwt import extract_bearer_token, verify_supabase_jwt
+
+register_bp = Blueprint("register", __name__)
+
+
+# ── JWT verification ──────────────────────────────────────────────────────────
+#
+# The frontend sends the Supabase session access_token as a Bearer token.
+# Supabase signs its JWTs with a project-level secret available at:
+#   Supabase Dashboard → Project Settings → API → JWT Secret
+#
+# Add to your .env / docker-compose:
+#   SUPABASE_JWT_SECRET=your-secret-here
+#
+# The token payload contains:
+#   sub  → the user's UUID (this is what we use as the profile ID)
+#   role → "authenticated" for logged-in users
+#   email → the user's email address (if available)
+#   exp  → expiry timestamp (PyJWT validates this automatically)
+
+
+# Reusing JWT helpers from utils/supabase_jwt.py
+
+
+def _extract_bearer_token() -> str | None:
+    return extract_bearer_token()
+
+
+# ── Field parsers ─────────────────────────────────────────────────────────────
+
+def _parse_birthday(value: str | None) -> date | None:
+    if value in (None, ""):
+        return None
+    return date.fromisoformat(str(value))
+
+
+def _validate_language(value: str | None) -> str | None:
+    if value in ("EN", "CN", "BM"):
+        return value
+    return None
+
+
+def _parse_interests(value: list | None) -> list | None:
+    """Parse interests list, ensure it's a proper JSON array"""
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return [str(item) for item in value if item]
+    return None
+
+
+# ── Serialiser ────────────────────────────────────────────────────────────────
+
+def serialize_profile(profile: Profile) -> dict:
+    return {
+        "id": str(profile.id),
+        "username": profile.username,
+        "first_name": profile.first_name,
+        "last_name": profile.last_name,
+        "phone_number": profile.phone_number,
+        "job_title": profile.job_title,
+        "birthday": profile.birthday.isoformat() if profile.birthday else None,
+        "avatar_url": profile.avatar_url,
+        "bio": profile.bio,
+        "timezone": profile.timezone,
+        "language": profile.language,
+        "interests": profile.interests,
+        "social_links": profile.social_links,
+        "invite_code": profile.invite_code,
+        "invited_by": str(profile.invited_by) if profile.invited_by else None,
+        "onboarded": profile.onboarded,
+        "created_at": profile.created_at.isoformat() if profile.created_at else None,
+    }
+
+
+# ── Route ─────────────────────────────────────────────────────────────────────
+
+@register_bp.post("/register")
+def register_profile():
+    db_session = current_app.config.get("DB_SESSION")
+    if db_session is None:
+        return jsonify({"error": "Database is not configured. Set valid DATABASE_URL"}), 503
+
+    # ── Auth: verify the Supabase JWT from the Authorization header ───────────
+    token = extract_bearer_token()
+    if token is None:
+        return jsonify({"error": "Missing or invalid Authorization header. Expected: Bearer <token>"}), 401
+
+    try:
+        user_id, email = verify_supabase_jwt(token)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 401
+
+    payload = request.get_json(silent=True) or {}
+    
+    # Extract invited_by if present
+    invited_by = None
+    if "invite_code" in payload:
+        # Look up profile by invite_code to get invited_by ID
+        session_check = db_session()
+        try:
+            inviter_profile = session_check.query(Profile).filter(Profile.invite_code == payload["invite_code"]).first()
+            if inviter_profile:
+                invited_by = inviter_profile.id
+        finally:
+            session_check.close()
+
+    try:
+        birthday = _parse_birthday(payload.get("birthday"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Field 'birthday' must be YYYY-MM-DD"}), 400
+
+    interests = _parse_interests(payload.get("interests"))
+
+    session = db_session()
+    try:
+        profile = session.query(Profile).filter(Profile.id == user_id).first()
+        if profile is None:
+            profile = Profile(id=user_id)
+            session.add(profile)
+
+        profile.username = payload.get("username") or profile.username
+        profile.first_name = payload.get("first_name") or profile.first_name
+        profile.last_name = payload.get("last_name") or profile.last_name
+        profile.phone_number = payload.get("phone_number") or profile.phone_number
+        profile.birthday = birthday or profile.birthday
+        profile.invited_by = invited_by or profile.invited_by
+        profile.bio = payload.get("bio") or profile.bio
+        profile.job_title = payload.get("role") or profile.job_title  # Mapped from 'role' to match frontend
+        profile.interests = interests or profile.interests
+        profile.timezone = payload.get("timezone") or profile.timezone
+        profile.language = _validate_language(payload.get("language")) or profile.language
+        
+        # Mark as onboarded since this is the completion of the onboarding flow
+        profile.onboarded = True
+
+        # ── Auto-join organization based on email domain ──────────────────────
+        if email:
+            domain = email.split("@")[-1].lower()
+            # Find all organizations associated with this domain
+            org_domains = (
+                session.query(OrganizationDomain)
+                .filter(OrganizationDomain.domain == domain)
+                .all()
+            )
+
+            for org_domain in org_domains:
+                # Check if already a member
+                member = (
+                    session.query(OrganizationMember)
+                    .filter(
+                        OrganizationMember.organization_id == org_domain.organization_id,
+                        OrganizationMember.user_id == user_id
+                    )
+                    .first()
+                )
+                if not member:
+                    member = OrganizationMember(
+                        organization_id=org_domain.organization_id,
+                        user_id=user_id,
+                        member_role="member"
+                    )
+                    session.add(member)
+
+        session.commit()
+        session.refresh(profile)
+
+        return jsonify({
+            "message": "Profile registered successfully",
+            "profile": serialize_profile(profile),
+        }), 201
+
+    except SQLAlchemyError as exc:
+        session.rollback()
+        return jsonify({"error": str(exc)}), 500
+    finally:
+        session.close()
+
+
+@register_bp.get("/check_org")
+def check_org():
+    """Check which organizations match the email domain from the supplied Supabase JWT.
+
+    Returns a JSON list of organizations with fields: id, name, slug, description, and domain.
+    """
+    db_session = current_app.config.get("DB_SESSION")
+    if db_session is None:
+        return jsonify({"error": "Database is not configured. Set valid DATABASE_URL"}), 503
+
+    token = extract_bearer_token()
+    if token is None:
+        return jsonify({"error": "Missing or invalid Authorization header. Expected: Bearer <token>"}), 401
+
+    try:
+        user_id, email = verify_supabase_jwt(token)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 401
+
+    if not email:
+        return jsonify({"organizations": []}), 200
+
+    domain = email.split("@")[-1].lower()
+
+    session = db_session()
+    try:
+        org_domains = (
+            session.query(OrganizationDomain)
+            .filter(OrganizationDomain.domain == domain)
+            .all()
+        )
+
+        orgs = []
+        for od in org_domains:
+            org = session.query(Organization).filter(Organization.id == od.organization_id).first()
+            if org:
+                orgs.append({
+                    "id": org.id,
+                    "name": org.name,
+                    "slug": org.slug,
+                    "description": org.description,
+                    "domain": od.domain,
+                })
+
+        return jsonify({"organizations": orgs}), 200
+    except SQLAlchemyError as exc:
+        return jsonify({"error": str(exc)}), 500
+    finally:
+        session.close()
+</file>
+
+<file path="backend/services/auth_service/app.py">
+import os
+
+from flask import Flask
+
+from backend.common.db import create_engine_and_session
+from backend.services.auth_service.auth_service.middleware import register_bearer_auth_middleware
+from backend.services.auth_service.auth_service.routes import docs_bp, health_bp, metrics_bp, register_bp
+from backend.services.auth_service.auth_service.routes.onboarding import onboarding_bp
+from backend.services.auth_service.auth_service.routes.profile import profile_bp
+from backend.services.auth_service.auth_service.routes.metadata import metadata_bp
+from backend.services.auth_service.auth_service.routes.auth import auth_bp
+from backend.services.auth_service.auth_service.routes.avatar import avatar_bp  # Add this import
+
+def is_valid_database_url(database_url: str) -> bool:
+    if not database_url:
+        return False
+    if "[YOUR-PASSWORD]" in database_url:
+        return False
+    if "localhost" in database_url and "postgresql://" not in database_url and "postgres://" not in database_url:
+        return False
+    return True
+
+
+def create_app():
+    app = Flask(__name__)
+
+    database_url = os.getenv("DATABASE_URL", "")
+    db_session = None
+
+    if is_valid_database_url(database_url):
+        _, db_session = create_engine_and_session(database_url)
+
+    app.config["DB_SESSION"] = db_session
+
+    # The register endpoint no longer uses the api_keys bearer middleware.
+    # It verifies Supabase JWTs directly using SUPABASE_JWT_SECRET.
+    # Pass an empty set so the old middleware runs on nothing.
+    register_bearer_auth_middleware(app, protected_endpoints=set())
+
+    app.register_blueprint(docs_bp,      url_prefix="/api/auth-service")
+    app.register_blueprint(health_bp,    url_prefix="/api/auth-service")
+    app.register_blueprint(metrics_bp)
+    app.register_blueprint(register_bp,  url_prefix="/api/auth-service")
+    app.register_blueprint(onboarding_bp, url_prefix="/api/auth-service")
+    app.register_blueprint(profile_bp,   url_prefix="/api/auth-service")
+    app.register_blueprint(metadata_bp,  url_prefix="/api/auth-service")
+    app.register_blueprint(auth_bp,      url_prefix="/api/auth-service")
+    app.register_blueprint(avatar_bp,    url_prefix="/api/auth-service")  # Add this line
+
+    @app.teardown_appcontext
+    def shutdown_session(_exception=None):
+        if db_session is not None:
+            db_session.remove()
+
+    return app
+
+
+app = create_app()
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5001)
+</file>
+
+</files>

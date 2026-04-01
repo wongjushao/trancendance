@@ -43,6 +43,7 @@ export function Sidebar({ user: initialUser }: SidebarProps) {
   const pathname = usePathname();
   const { avatarUrl, refreshAvatar } = useAvatar();
   const [user, setUser] = useState(initialUser);
+  const [profileData, setProfileData] = useState<any>(null);
   const [isCollapsed, setIsCollapsed] = useState(false); // Default to false for SSR
   const [isMounted, setIsMounted] = useState(false); // Track mounted state
   const { roleData } = useRole();
@@ -61,6 +62,28 @@ export function Sidebar({ user: initialUser }: SidebarProps) {
     localStorage.setItem(SIDEBAR_STATE_KEY, String(newState));
   };
 
+  // Fetch profile data for name display
+  const fetchProfileData = async () => {
+    const supabase = getSupabaseBrowserClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    if (session?.access_token) {
+      try {
+        const response = await fetch('/api/auth-service/profile', {
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setProfileData(data);
+        }
+      } catch (error) {
+        console.error('Failed to fetch profile:', error);
+      }
+    }
+  };
+
   // Listen for profile updates to refresh avatar and user data
   useEffect(() => {
     const handleProfileUpdate = async () => {
@@ -73,7 +96,13 @@ export function Sidebar({ user: initialUser }: SidebarProps) {
       if (updatedUser) {
         setUser(updatedUser);
       }
+      
+      // Refresh profile data
+      await fetchProfileData();
     };
+
+    // Initial fetch
+    fetchProfileData();
 
     if (typeof window !== 'undefined') {
       window.addEventListener(PROFILE_UPDATED_EVENT, handleProfileUpdate as EventListener);
@@ -91,12 +120,25 @@ export function Sidebar({ user: initialUser }: SidebarProps) {
 
   const email: string = user.email ?? "";
 
-  const initials = fullName
-    .split(" ")
-    .map((part) => part[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
+  // Get initials from profile data first, fallback to user metadata
+  const getInitials = () => {
+    if (profileData?.first_name && profileData?.last_name) {
+      return `${profileData.first_name[0]}${profileData.last_name[0]}`.toUpperCase();
+    }
+    return fullName
+      .split(" ")
+      .map((part) => part[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase();
+  };
+
+  // Get display name from profile data first
+  const displayName = profileData?.first_name && profileData?.last_name
+    ? `${profileData.first_name} ${profileData.last_name}`
+    : fullName;
+
+  const initials = getInitials();
 
   // Filter nav items based on role
   const filteredNavItems = navItems.filter(item => 
@@ -181,7 +223,7 @@ export function Sidebar({ user: initialUser }: SidebarProps) {
             </div>
             
             <div className="flex-1 min-w-0">
-              <p className="text-white font-medium truncate text-sm">{fullName}</p>
+              <p className="text-white font-medium truncate text-sm">{displayName}</p>
               <p className="text-xs text-[#6B6B80] truncate">{email}</p>
             </div>
           </Link>
@@ -287,7 +329,7 @@ export function Sidebar({ user: initialUser }: SidebarProps) {
               {avatarUrl ? (
                 <img 
                   src={avatarUrl} 
-                  alt={fullName}
+                  alt={displayName}
                   className="w-full h-full object-cover"
                 />
               ) : (
@@ -298,7 +340,7 @@ export function Sidebar({ user: initialUser }: SidebarProps) {
             </div>
             
             <div className="flex-1 min-w-0">
-              <p className="text-white font-medium truncate text-sm">{fullName}</p>
+              <p className="text-white font-medium truncate text-sm">{displayName}</p>
               <p className="text-xs text-[#6B6B80] truncate">{email}</p>
             </div>
           </Link>

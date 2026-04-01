@@ -1,3 +1,4 @@
+# backend/services/auth_service/auth_service/routes/auth.py
 from __future__ import annotations
 
 import os
@@ -13,44 +14,24 @@ auth_bp = Blueprint("auth", __name__)
 def _verify_supabase_jwt(token: str) -> uuid.UUID:
     """Verify Supabase JWT and return user UUID."""
     try:
-        header = jwt.get_unverified_header(token)
-        alg = header.get("alg")
+        # First try to decode without verification to get the algorithm
+        unverified = jwt.decode(token, options={"verify_signature": False})
+        alg = unverified.get("alg", "HS256")
         
-        algorithms = []
-        key = None
-
-        if alg == "HS256":
-            secret = os.environ.get("SUPABASE_JWT_SECRET")
-            if not secret:
-                raise ValueError("SUPABASE_JWT_SECRET env var is not set")
-            key = secret
-            algorithms = ["HS256"]
-        elif alg in ("RS256", "ES256"):
-            supabase_url = os.environ.get("SUPABASE_URL")
-            if not supabase_url:
-                raise ValueError("SUPABASE_URL env var is not set")
-            
-            jwks_url = f"{supabase_url}/auth/v1/.well-known/jwks.json"
-            jwks_client = jwt.PyJWKClient(jwks_url)
-            signing_key = jwks_client.get_signing_key_from_jwt(token)
-            key = signing_key.key
-            algorithms = [alg]
-        else:
-            raise ValueError(f"Unsupported algorithm: {alg}")
+        # Get the JWT secret
+        secret = os.environ.get("SUPABASE_JWT_SECRET")
+        if not secret:
+            raise ValueError("SUPABASE_JWT_SECRET env var is not set")
         
+        # Decode with signature verification
         payload = jwt.decode(
             token,
-            key,
-            algorithms=algorithms,
-            audience="authenticated",
-            options={"verify_exp": True},
+            secret,
+            algorithms=[alg],
+            options={"verify_aud": False, "verify_exp": True},
         )
-    except jwt.PyJWKClientError as exc:
-        raise ValueError(f"Could not fetch JWKS: {exc}")
     except jwt.ExpiredSignatureError:
         raise ValueError("Token has expired — please log in again")
-    except jwt.InvalidAudienceError:
-        raise ValueError("Token audience is invalid — expected 'authenticated'")
     except jwt.InvalidTokenError as exc:
         raise ValueError(f"Invalid token: {exc}")
 

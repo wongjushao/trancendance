@@ -1,7 +1,9 @@
+# backend/services/auth_service/auth_service/routes/register.py
 from __future__ import annotations
 
 import os
 import uuid
+import logging
 from datetime import date
 from typing import List, Optional
 
@@ -10,80 +12,20 @@ import requests
 from flask import Blueprint, current_app, jsonify, request
 from sqlalchemy.exc import SQLAlchemyError
 
-from backend.common.models import Profile
+from backend.common.models import Profile, Organization, OrganizationMember, OrganizationDomain
+from backend.services.auth_service.auth_service.utils.supabase_jwt import extract_bearer_token, verify_supabase_jwt
 
+# Set up logger
+logger = logging.getLogger(__name__)
 
 register_bp = Blueprint("register", __name__)
 
 
-# ── JWT verification ──────────────────────────────────────────────────────────
-
-def _verify_supabase_jwt(token: str) -> uuid.UUID:
-    """
-    Verifies the Supabase JWT and returns the user UUID from the `sub` claim.
-    Raises ValueError with a descriptive message on any failure.
-    """
-    try:
-        header = jwt.get_unverified_header(token)
-        alg = header.get("alg")
-        
-        algorithms = []
-        key = None
-
-        if alg == "HS256":
-            secret = os.environ.get("SUPABASE_JWT_SECRET")
-            if not secret:
-                raise ValueError("SUPABASE_JWT_SECRET env var is not set")
-            key = secret
-            algorithms = ["HS256"]
-        elif alg in ("RS256", "ES256"):
-            supabase_url = os.environ.get("SUPABASE_URL")
-            if not supabase_url:
-                raise ValueError("SUPABASE_URL env var is not set")
-            
-            jwks_url = f"{supabase_url}/auth/v1/.well-known/jwks.json"
-            jwks_client = jwt.PyJWKClient(jwks_url)
-            signing_key = jwks_client.get_signing_key_from_jwt(token)
-            key = signing_key.key
-            algorithms = [alg]
-        else:
-            raise ValueError(f"Unsupported algorithm: {alg}")
-        
-        payload = jwt.decode(
-            token,
-            key,
-            algorithms=algorithms,
-            audience="authenticated",
-            options={"verify_exp": True},
-        )
-    except jwt.PyJWKClientError as exc:
-        raise ValueError(f"Could not fetch JWKS: {exc}")
-    except jwt.ExpiredSignatureError:
-        raise ValueError("Token has expired — please log in again")
-    except jwt.InvalidAudienceError:
-        raise ValueError("Token audience is invalid — expected 'authenticated'")
-    except jwt.InvalidTokenError as exc:
-        raise ValueError(f"Invalid token: {exc}")
-
-    sub = payload.get("sub")
-    if not sub:
-        raise ValueError("Token is missing 'sub' claim")
-
-    try:
-        return uuid.UUID(str(sub))
-    except (TypeError, ValueError):
-        raise ValueError(f"Token 'sub' is not a valid UUID: {sub!r}")
-
-
 def _extract_bearer_token() -> str | None:
-    auth = request.headers.get("Authorization", "")
-    parts = auth.split(" ", 1)
-    if len(parts) == 2 and parts[0].lower() == "bearer":
-        return parts[1].strip() or None
-    return None
+    return extract_bearer_token()
 
 
-# ── Field parsers ─────────────────────────────────────────────────────────────
+# ── Field parsers ───────────────────────────────────────────────────────────
 
 def _parse_birthday(value: str | None) -> date | None:
     if value in (None, ""):
@@ -106,7 +48,7 @@ def _parse_interests(value: list | None) -> list | None:
     return None
 
 
-# ── Serialiser ────────────────────────────────────────────────────────────────
+# ── Serialiser ───────────────────────────────────────────────────────────────
 
 def serialize_profile(profile: Profile) -> dict:
     return {
@@ -114,6 +56,7 @@ def serialize_profile(profile: Profile) -> dict:
         "username": profile.username,
         "first_name": profile.first_name,
         "last_name": profile.last_name,
+        "phone_number": profile.phone_number,
         "job_title": profile.job_title,
         "birthday": profile.birthday.isoformat() if profile.birthday else None,
         "avatar_url": profile.avatar_url,
@@ -122,11 +65,14 @@ def serialize_profile(profile: Profile) -> dict:
         "language": profile.language,
         "interests": profile.interests,
         "social_links": profile.social_links,
+        "invite_code": profile.invite_code,
+        "invited_by": str(profile.invited_by) if profile.invited_by else None,
+        "onboarded": profile.onboarded,
         "created_at": profile.created_at.isoformat() if profile.created_at else None,
     }
 
 
-# ── Route ─────────────────────────────────────────────────────────────────────
+# ── Route ────────────────────────────────────────────────────────────────────
 
 @register_bp.post("/register")
 def register_profile():
@@ -134,16 +80,29 @@ def register_profile():
     if db_session is None:
         return jsonify({"error": "Database is not configured. Set valid DATABASE_URL"}), 503
 
-    token = _extract_bearer_token()
+    # ── Auth: verify the Supabase JWT from the Authorization header ─────────
+    token = extract_bearer_token()
     if token is None:
         return jsonify({"error": "Missing or invalid Authorization header. Expected: Bearer <token>"}), 401
 
-    try:
-        user_id = _verify_supabase_jwt(token)
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 401
+    user_id, email = verify_supabase_jwt(token)
+    if not user_id:
+        return jsonify({"error": "Invalid token"}), 401
 
     payload = request.get_json(silent=True) or {}
+    logger.info(f"Register payload: {payload}")
+    
+    # Extract invited_by if present
+    invited_by = None
+    if "invite_code" in payload:
+        session_check = db_session()
+        try:
+            inviter_profile = session_check.query(Profile).filter(Profile.invite_code == payload["invite_code"]).first()
+            if inviter_profile:
+                invited_by = inviter_profile.id
+                logger.info(f"Found inviter: {invited_by}")
+        finally:
+            session_check.close()
 
     try:
         birthday = _parse_birthday(payload.get("birthday"))
@@ -151,6 +110,10 @@ def register_profile():
         return jsonify({"error": "Field 'birthday' must be YYYY-MM-DD"}), 400
 
     interests = _parse_interests(payload.get("interests"))
+    
+    # Get timezone from payload, default to UTC if not provided
+    timezone = payload.get("timezone", "UTC")
+    logger.info(f"Timezone from payload: {timezone}")
 
     session = db_session()
     try:
@@ -158,20 +121,58 @@ def register_profile():
         if profile is None:
             profile = Profile(id=user_id)
             session.add(profile)
+            logger.info(f"Created new profile for user: {user_id}")
 
         # Update all fields
         profile.username = payload.get("username") or profile.username
         profile.first_name = payload.get("first_name") or profile.first_name
         profile.last_name = payload.get("last_name") or profile.last_name
-        profile.job_title = payload.get("job_title") or profile.job_title
+        profile.phone_number = payload.get("phone_number") or profile.phone_number
         profile.birthday = birthday or profile.birthday
+        profile.invited_by = invited_by or profile.invited_by
         profile.bio = payload.get("bio") or profile.bio
-        profile.timezone = payload.get("timezone") or profile.timezone
-        profile.language = _validate_language(payload.get("language")) or profile.language
+        profile.job_title = payload.get("job_title") or profile.job_title
         profile.interests = interests or profile.interests
+        profile.timezone = timezone  # Always set timezone
+        profile.language = _validate_language(payload.get("language")) or profile.language
+        
+        # Mark as onboarded since this is the completion of the onboarding flow
+        profile.onboarded = True
+        
+        logger.info(f"Profile data after update: username={profile.username}, first_name={profile.first_name}, timezone={profile.timezone}")
+
+        # ── Auto-join organization based on email domain ────────────────────
+        if email:
+            domain = email.split("@")[-1].lower()
+            org_domains = (
+                session.query(OrganizationDomain)
+                .filter(OrganizationDomain.domain == domain)
+                .all()
+            )
+            logger.info(f"Found {len(org_domains)} organizations for domain {domain}")
+
+            for org_domain in org_domains:
+                member = (
+                    session.query(OrganizationMember)
+                    .filter(
+                        OrganizationMember.organization_id == org_domain.organization_id,
+                        OrganizationMember.user_id == user_id
+                    )
+                    .first()
+                )
+                if not member:
+                    member = OrganizationMember(
+                        organization_id=org_domain.organization_id,
+                        user_id=user_id,
+                        member_role="member"
+                    )
+                    session.add(member)
+                    logger.info(f"Added user to organization: {org_domain.organization_id}")
 
         session.commit()
         session.refresh(profile)
+
+        logger.info(f"Profile registered successfully for user: {user_id}")
 
         return jsonify({
             "message": "Profile registered successfully",
@@ -180,6 +181,52 @@ def register_profile():
 
     except SQLAlchemyError as exc:
         session.rollback()
+        logger.error(f"Database error: {exc}")
+        return jsonify({"error": str(exc)}), 500
+    finally:
+        session.close()
+
+
+@register_bp.get("/check_org")
+def check_org():
+    """Check which organizations match the email domain from the supplied Supabase JWT."""
+    db_session = current_app.config.get("DB_SESSION")
+    if db_session is None:
+        return jsonify({"error": "Database is not configured. Set valid DATABASE_URL"}), 503
+
+    token = extract_bearer_token()
+    if token is None:
+        return jsonify({"error": "Missing or invalid Authorization header. Expected: Bearer <token>"}), 401
+
+    user_id, email = verify_supabase_jwt(token)
+    if not email:
+        return jsonify({"organizations": []}), 200
+
+    domain = email.split("@")[-1].lower()
+
+    session = db_session()
+    try:
+        org_domains = (
+            session.query(OrganizationDomain)
+            .filter(OrganizationDomain.domain == domain)
+            .all()
+        )
+
+        orgs = []
+        for od in org_domains:
+            org = session.query(Organization).filter(Organization.id == od.organization_id).first()
+            if org:
+                orgs.append({
+                    "id": org.id,
+                    "name": org.name,
+                    "slug": org.slug,
+                    "description": org.description,
+                    "domain": od.domain,
+                })
+
+        return jsonify({"organizations": orgs}), 200
+    except SQLAlchemyError as exc:
+        logger.error(f"Database error in check_org: {exc}")
         return jsonify({"error": str(exc)}), 500
     finally:
         session.close()

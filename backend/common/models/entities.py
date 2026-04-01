@@ -20,17 +20,20 @@ class Profile(Base):
     birthday: Mapped[date | None] = mapped_column(Date)
     invite_code: Mapped[str | None] = mapped_column(Text, unique=True)
     invited_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"))
+    first_name: Mapped[str | None] = mapped_column(Text)
+    last_name: Mapped[str | None] = mapped_column(Text)
+    phone_number: Mapped[str | None] = mapped_column(Text)
     username: Mapped[str | None] = mapped_column(Text)
-    first_name: Mapped[str | None] = mapped_column(Text)  # NEW
-    last_name: Mapped[str | None] = mapped_column(Text)   # NEW
-    job_title: Mapped[str | None] = mapped_column(Text)   # NEW
+    job_title: Mapped[str | None] = mapped_column(Text)
     avatar_url: Mapped[str | None] = mapped_column(Text)
     bio: Mapped[str | None] = mapped_column(Text)
     timezone: Mapped[str | None] = mapped_column(Text)
     language: Mapped[str | None] = mapped_column(Text)
     social_links: Mapped[dict | None] = mapped_column(JSONB)
-    interests: Mapped[list | None] = mapped_column(JSONB)  # NEW - store as JSON  array
+    interests: Mapped[list[str] | None] = mapped_column(JSONB)
+    onboarded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(server_default=text("now()"), nullable=False)
+
 
 class ApiKey(Base):
     __tablename__ = "api_keys"
@@ -51,8 +54,19 @@ class Organization(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
+    slug: Mapped[str | None] = mapped_column(Text, unique=True)
     description: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+
+
+class OrganizationDomain(Base):
+    __tablename__ = "organization_domains"
+    __table_args__ = {"schema": "public"}
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.organizations.id"), nullable=False)
+    domain: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
 
 

@@ -39,27 +39,56 @@ This repository runs a loosely-coupled service architecture in Docker Compose:
 
 ```text
 trancendance/
+├── api-docs.md
 ├── DBdesign.md
 ├── docker-compose.yml
 ├── Makefile
 ├── README.md
+├── wjun-note
 ├── backend/
+│   ├── README.md
 │   ├── common/
 │   │   ├── db.py
 │   │   └── models/
+│   │       ├── base.py
+│   │       └── entities.py
 │   ├── migrations/
+│   │   ├── alembic.ini
+│   │   ├── Dockerfile
+│   │   ├── env.py
 │   │   ├── initial_schema.sql
 │   │   └── versions/
 │   └── services/
 │       ├── auth_service/
+│       │   ├── app.py
+│       │   ├── Dockerfile
+│       │   └── wsgi.py
 │       ├── chat_service/
+│       │   ├── app.py
+│       │   ├── Dockerfile
+│       │   └── wsgi.py
 │       └── org_service/
+│           ├── app.py
+│           ├── Dockerfile
+│           └── wsgi.py
 ├── frontend/
+│   ├── app/
+│   │   ├── (auth)/
+│   │   ├── (main)/
+│   │   ├── auth/
+│   │   ├── onboarding/
+│   │   ├── layout.tsx
+│   │   └── page.tsx
+│   ├── components/
+│   │   ├── lms/
+│   │   └── ui/
+│   ├── lib/
+│   ├── public/
+│   ├── types/
 │   ├── Dockerfile
-│   ├── next.config.mjs
+│   ├── next.config.ts
 │   ├── package.json
-│   ├── pages/
-│   └── src/
+│   └── README.md
 ├── grafana/
 │   ├── dashboards/
 │   └── provisioning/
@@ -96,10 +125,10 @@ docker compose --profile dev up frontend-dev auth-service chat-service org-servi
 - Prometheus: `http://localhost:9090`
 - Grafana: `http://localhost:3001`
 
-Frontend proxy routes (`frontend/next.config.mjs`):
-- `/api/auth/:path*` -> `http://auth-service:5001/:path*`
-- `/api/chat/:path*` -> `http://chat-service:5002/:path*`
-- `/api/org/:path*` -> `http://org-service:5003/:path*`
+Frontend proxy routes (`frontend/next.config.ts`):
+- `/api/auth/*` -> `http://auth-service:5001/*`
+- `/api/chat/*` -> `http://chat-service:5002/*`
+- `/api/org/*` -> `http://org-service:5003/*`
 
 Common service endpoints:
 - Auth: `POST /api/auth-service/register` (requires `Authorization: Bearer <api-key>`), `GET /api/auth-service/health`, `GET /api/auth-service/metrics`, `GET /api/auth-service/docs`

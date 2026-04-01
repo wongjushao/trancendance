@@ -4,77 +4,19 @@ from __future__ import annotations
 
 import os
 import uuid
+import logging
 
 import jwt
 from flask import Blueprint, jsonify, request, current_app
 from sqlalchemy.exc import SQLAlchemyError
 
 from backend.common.models import Profile
+from backend.services.auth_service.auth_service.utils.supabase_jwt import extract_bearer_token, verify_supabase_jwt
+
+# Set up logger
+logger = logging.getLogger(__name__)
 
 profile_bp = Blueprint("profile", __name__)
-
-
-def _verify_supabase_jwt(token: str) -> uuid.UUID:
-    """Verify Supabase JWT and return user UUID."""
-    try:
-        header = jwt.get_unverified_header(token)
-        alg = header.get("alg")
-        
-        algorithms = []
-        key = None
-
-        if alg == "HS256":
-            secret = os.environ.get("SUPABASE_JWT_SECRET")
-            if not secret:
-                raise ValueError("SUPABASE_JWT_SECRET env var is not set")
-            key = secret
-            algorithms = ["HS256"]
-        elif alg in ("RS256", "ES256"):
-            supabase_url = os.environ.get("SUPABASE_URL")
-            if not supabase_url:
-                raise ValueError("SUPABASE_URL env var is not set")
-            
-            jwks_url = f"{supabase_url}/auth/v1/.well-known/jwks.json"
-            jwks_client = jwt.PyJWKClient(jwks_url)
-            signing_key = jwks_client.get_signing_key_from_jwt(token)
-            key = signing_key.key
-            algorithms = [alg]
-        else:
-            raise ValueError(f"Unsupported algorithm: {alg}")
-        
-        payload = jwt.decode(
-            token,
-            key,
-            algorithms=algorithms,
-            audience="authenticated",
-            options={"verify_exp": True},
-        )
-    except jwt.PyJWKClientError as exc:
-        raise ValueError(f"Could not fetch JWKS: {exc}")
-    except jwt.ExpiredSignatureError:
-        raise ValueError("Token has expired — please log in again")
-    except jwt.InvalidAudienceError:
-        raise ValueError("Token audience is invalid — expected 'authenticated'")
-    except jwt.InvalidTokenError as exc:
-        raise ValueError(f"Invalid token: {exc}")
-
-    sub = payload.get("sub")
-    if not sub:
-        raise ValueError("Token is missing 'sub' claim")
-
-    try:
-        return uuid.UUID(str(sub))
-    except (TypeError, ValueError):
-        raise ValueError(f"Token 'sub' is not a valid UUID: {sub!r}")
-
-
-def _extract_bearer_token() -> str | None:
-    """Extract bearer token from Authorization header."""
-    auth = request.headers.get("Authorization", "")
-    parts = auth.split(" ", 1)
-    if len(parts) == 2 and parts[0].lower() == "bearer":
-        return parts[1].strip() or None
-    return None
 
 
 def serialize_profile(profile: Profile) -> dict:
@@ -98,24 +40,6 @@ def serialize_profile(profile: Profile) -> dict:
     }
 
 
-def _is_profile_complete(profile: Profile) -> bool:
-    """Check if profile has all required fields."""
-    if not profile:
-        return False
-    
-    required_fields = [
-        profile.username,
-        profile.first_name,
-        profile.last_name,
-        profile.bio,
-        profile.language,
-        profile.birthday,
-        profile.job_title,
-    ]
-    
-    return all(field is not None and field != "" for field in required_fields)
-
-
 @profile_bp.get("/profile")
 def get_profile():
     """Get current user's profile."""
@@ -123,14 +47,13 @@ def get_profile():
     if db_session is None:
         return jsonify({"error": "Database is not configured"}), 503
 
-    token = _extract_bearer_token()
+    token = extract_bearer_token()
     if token is None:
         return jsonify({"error": "Missing authorization header"}), 401
 
-    try:
-        user_id = _verify_supabase_jwt(token)
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 401
+    user_id, email = verify_supabase_jwt(token)
+    if not user_id:
+        return jsonify({"error": "Invalid token"}), 401
 
     session = db_session()
     try:
@@ -138,8 +61,10 @@ def get_profile():
         if not profile:
             return jsonify({"error": "Profile not found"}), 404
         
+        logger.info(f"Profile retrieved for user {user_id}")
         return jsonify(serialize_profile(profile)), 200
     except SQLAlchemyError as exc:
+        logger.error(f"Database error in get_profile: {exc}")
         return jsonify({"error": str(exc)}), 500
     finally:
         session.close()
@@ -152,16 +77,16 @@ def update_profile():
     if db_session is None:
         return jsonify({"error": "Database is not configured"}), 503
 
-    token = _extract_bearer_token()
+    token = extract_bearer_token()
     if token is None:
         return jsonify({"error": "Missing authorization header"}), 401
 
-    try:
-        user_id = _verify_supabase_jwt(token)
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 401
+    user_id, email = verify_supabase_jwt(token)
+    if not user_id:
+        return jsonify({"error": "Invalid token"}), 401
 
     data = request.get_json(silent=True) or {}
+    logger.info(f"Profile update payload for user {user_id}: {data}")
     
     # All fields that can be updated
     allowed_fields = [
@@ -188,10 +113,12 @@ def update_profile():
         if updated:
             session.commit()
             session.refresh(profile)
+            logger.info(f"Profile updated for user {user_id}")
         
         return jsonify(serialize_profile(profile)), 200
     except SQLAlchemyError as exc:
         session.rollback()
+        logger.error(f"Database error in update_profile: {exc}")
         return jsonify({"error": str(exc)}), 500
     finally:
         session.close()

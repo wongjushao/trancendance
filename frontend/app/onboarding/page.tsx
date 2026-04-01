@@ -293,6 +293,7 @@ export default function OnboardingPage() {
       job_title: finalJobTitle,
       interests: formData.interests,
       desired_role: formData.desiredRole,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       ...(formData.desiredRole === "teacher" && formData.selectedOrganizationId ? {
         organization_id: formData.selectedOrganizationId,
       } : {}),
@@ -334,6 +335,37 @@ export default function OnboardingPage() {
       setSubmitError(backendErrorMessage ?? "An unexpected error occurred.");
       setIsSaving(false);
       return;
+    }
+
+    // Wait for database to commit the transaction
+    console.log('[onboarding] Waiting for database commit...');
+    await new Promise(resolve => setTimeout(resolve, 1500));
+
+    // Refresh the session to get updated user data
+    const { data: { session: refreshedSession } } = await supabase.auth.getSession();
+    
+    if (refreshedSession) {
+      // Verify onboarding status one more time
+      try {
+        const verifyResponse = await fetch('/api/auth-service/onboarding-status', {
+          headers: {
+            'Authorization': `Bearer ${refreshedSession.access_token}`,
+          },
+        });
+        
+        if (verifyResponse.ok) {
+          const status = await verifyResponse.json();
+          console.log('[onboarding] Verification status:', status);
+          
+          if (!status.onboarded) {
+            console.warn('[onboarding] Profile saved but verification shows not onboarded:', status.missing_fields);
+            // Continue anyway - this might be a race condition
+          }
+        }
+      } catch (e) {
+        console.error('[onboarding] Verification check failed:', e);
+        // Continue anyway - don't block the user
+      }
     }
 
     // Set role data after successful registration
@@ -414,6 +446,14 @@ export default function OnboardingPage() {
     }
 
     clearOnboardingCache();
+    
+    // Dispatch profile updated event
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('profile-updated'));
+    }
+    
+    // Final redirect to dashboard
+    console.log('[onboarding] Redirecting to dashboard...');
     router.push("/dashboard");
   };
 

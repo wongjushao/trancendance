@@ -21,7 +21,30 @@ export function TopNav({ user: initialUser }: TopNavProps) {
   const [profileOpen, setProfileOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [user, setUser] = useState(initialUser);
+  const [profileData, setProfileData] = useState<any>(null);
   const { avatarUrl, refreshAvatar } = useAvatar();
+
+  // Fetch profile data for name display
+  const fetchProfileData = async () => {
+    const supabase = getSupabaseBrowserClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    if (session?.access_token) {
+      try {
+        const response = await fetch('/api/auth-service/profile', {
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setProfileData(data);
+        }
+      } catch (error) {
+        console.error('Failed to fetch profile:', error);
+      }
+    }
+  };
 
   // Listen for profile updates to refresh avatar and user data
   useEffect(() => {
@@ -35,7 +58,13 @@ export function TopNav({ user: initialUser }: TopNavProps) {
       if (updatedUser) {
         setUser(updatedUser);
       }
+      
+      // Refresh profile data
+      await fetchProfileData();
     };
+
+    // Initial fetch
+    fetchProfileData();
 
     if (typeof window !== 'undefined') {
       window.addEventListener(PROFILE_UPDATED_EVENT, handleProfileUpdate);
@@ -45,7 +74,7 @@ export function TopNav({ user: initialUser }: TopNavProps) {
     }
   }, [refreshAvatar]);
 
-  // Derive display values from the real Supabase user
+  // Derive display values from profile data first, fallback to user metadata
   const fullName: string =
     user.user_metadata?.full_name ||
     user.user_metadata?.name ||
@@ -54,15 +83,44 @@ export function TopNav({ user: initialUser }: TopNavProps) {
 
   const email: string = user.email ?? "";
 
-  const initials = fullName
-    .split(" ")
-    .map((part) => part[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
+  // Get initials from profile data first, fallback to user metadata
+  const getInitials = () => {
+    if (profileData?.first_name && profileData?.last_name) {
+      return `${profileData.first_name[0]}${profileData.last_name[0]}`.toUpperCase();
+    }
+    return fullName
+      .split(" ")
+      .map((part) => part[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase();
+  };
+
+  // Get display name from profile data first
+  const displayName = profileData?.first_name && profileData?.last_name
+    ? `${profileData.first_name} ${profileData.last_name}`
+    : fullName;
+
+  const initials = getInitials();
+
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (!target.closest('.profile-dropdown') && !target.closest('.profile-button')) {
+        setProfileOpen(false);
+      }
+      if (!target.closest('.notif-dropdown') && !target.closest('.notif-button')) {
+        setNotifOpen(false);
+      }
+    };
+
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, []);
 
   return (
-    <header className="h-20 border-b border-white/5 bg-[#0B0B0F]/80 backdrop-blur-xl sticky top-0 z-10">
+    <header className="h-20 border-b border-white/5 bg-[#0B0B0F]/80 backdrop-blur-xl sticky top-0 z-30">
       <div className="h-full px-8 flex items-center justify-between">
 
         {/* Search */}
@@ -81,20 +139,21 @@ export function TopNav({ user: initialUser }: TopNavProps) {
         <div className="flex items-center gap-3 ml-8">
 
           {/* Notifications */}
-          <div className="relative">
+          <div className="relative notif-dropdown">
             <button
-              onClick={() => {
+              onClick={(e) => {
+                e.stopPropagation();
                 setNotifOpen(!notifOpen);
                 setProfileOpen(false);
               }}
-              className="relative p-3 rounded-xl bg-[#12121A] hover:bg-white/5 transition-colors border border-white/5"
+              className="notif-button relative p-3 rounded-xl bg-[#12121A] hover:bg-white/5 transition-colors border border-white/5"
             >
               <Bell className="w-5 h-5 text-[#A0A0B5]" />
               <span className="absolute top-2 right-2 w-2 h-2 bg-purple-500 rounded-full" />
             </button>
 
             {notifOpen && (
-              <div className="absolute top-14 right-0 w-80 rounded-2xl border border-white/10 bg-[#16161F] p-4 shadow-2xl">
+              <div className="absolute top-14 right-0 w-80 rounded-2xl border border-white/10 bg-[#16161F] p-4 shadow-2xl z-50">
                 <div className="flex justify-between items-center mb-4">
                   <p className="font-bold text-sm text-white">Notifications</p>
                   <button
@@ -122,20 +181,21 @@ export function TopNav({ user: initialUser }: TopNavProps) {
           </div>
 
           {/* Profile dropdown */}
-          <div className="relative">
+          <div className="relative profile-dropdown">
             <button
-              onClick={() => {
+              onClick={(e) => {
+                e.stopPropagation();
                 setProfileOpen(!profileOpen);
                 setNotifOpen(false);
               }}
-              className="flex items-center gap-2 pl-1 pr-3 py-1 rounded-xl hover:bg-white/5 transition-colors"
+              className="profile-button flex items-center gap-2 pl-1 pr-3 py-1 rounded-xl hover:bg-white/5 transition-colors"
             >
               {/* Avatar with image support */}
               <div className="w-9 h-9 rounded-full overflow-hidden bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center shadow-lg shadow-purple-500/20">
                 {avatarUrl ? (
                   <img 
                     src={avatarUrl} 
-                    alt={fullName}
+                    alt={displayName}
                     className="w-full h-full object-cover"
                   />
                 ) : (
@@ -148,10 +208,10 @@ export function TopNav({ user: initialUser }: TopNavProps) {
             </button>
 
             {profileOpen && (
-              <div className="absolute top-12 right-0 w-64 rounded-2xl border border-white/10 bg-[#16161F] shadow-2xl overflow-hidden py-2">
+              <div className="absolute top-12 right-0 w-64 rounded-2xl border border-white/10 bg-[#16161F] shadow-2xl overflow-hidden py-2 z-50">
                 {/* User info header */}
                 <div className="px-4 py-3 border-b border-white/5 mb-1">
-                  <p className="text-sm font-bold text-white truncate">{fullName}</p>
+                  <p className="text-sm font-bold text-white truncate">{displayName}</p>
                   <p className="text-xs text-[#6B6B80] truncate">{email}</p>
                 </div>
 

@@ -254,10 +254,17 @@ export default function SettingsPage() {
         throw new Error('Failed to update profile');
       }
       
+      // Refresh the user object from Supabase
+      const { data: { user: updatedUser } } = await supabase.auth.getUser();
+      if (updatedUser) {
+        // This will trigger a re-render of components that use user data
+        window.dispatchEvent(new CustomEvent(PROFILE_UPDATED_EVENT));
+      }
+      
       toast.success("Profile updated successfully!");
       refreshAvatar();
       
-      // Dispatch profile updated event to notify all components
+      // Dispatch profile updated event
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent(PROFILE_UPDATED_EVENT));
       }
