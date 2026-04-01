@@ -1,14 +1,16 @@
+// frontend/app/(auth)/login/page.tsx
 "use client";
 
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Mail, Lock, Eye, EyeOff } from "lucide-react";
+import { Mail, Lock, Eye, EyeOff, AlertCircle } from "lucide-react";
 import { GlowButton } from "@/components/lms/GlowButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 import { getSiteUrl } from "@/lib/site-url";
+import { validateEmail, validatePassword } from "@/lib/validation";
 
 function getFriendlyLoginError(
   errorMessage: string
@@ -51,6 +53,8 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+  const [touched, setTouched] = useState<{ email?: boolean; password?: boolean }>({});
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [status, setStatus] = useState<{
@@ -59,9 +63,64 @@ export default function LoginPage() {
     action?: { label: string; href: string };
   } | null>(null);
 
+  const validateField = (field: string, value: string): string | undefined => {
+    switch (field) {
+      case "email":
+        return validateEmail(value).error;
+      case "password":
+        return !value ? "Password is required" : undefined;
+      default:
+        return undefined;
+    }
+  };
+
+  const handleBlur = (field: string) => {
+    setTouched((prev) => ({ ...prev, [field]: true }));
+    const error = validateField(field, field === "email" ? email : password);
+    setErrors((prev) => ({ ...prev, [field]: error }));
+  };
+
+  const handleEmailChange = (value: string) => {
+    setEmail(value);
+    if (touched.email) {
+      const error = validateEmail(value).error;
+      setErrors((prev) => ({ ...prev, email: error }));
+    }
+    if (status) setStatus(null);
+  };
+
+  const handlePasswordChange = (value: string) => {
+    setPassword(value);
+    if (touched.password) {
+      const error = !value ? "Password is required" : undefined;
+      setErrors((prev) => ({ ...prev, password: error }));
+    }
+    if (status) setStatus(null);
+  };
+
+  const validateForm = (): boolean => {
+    const emailError = validateEmail(email).error;
+    const passwordError = !password ? "Password is required" : undefined;
+    
+    const newErrors = {
+      email: emailError,
+      password: passwordError,
+    };
+    
+    setErrors(newErrors);
+    setTouched({ email: true, password: true });
+    
+    return !emailError && !passwordError;
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setStatus(null);
+
+    if (!validateForm()) {
+      return;
+    }
+
     setIsLoading(true);
 
     const supabase = getSupabaseBrowserClient();
@@ -88,8 +147,6 @@ export default function LoginPage() {
       options: {
         redirectTo: `${getSiteUrl()}/auth/callback`,
         queryParams: {
-          // Pass a hint about where the sign-in originated from
-          // This helps with redirect logic if needed
           access_type: 'offline',
           prompt: 'consent',
         }
@@ -107,7 +164,11 @@ export default function LoginPage() {
       setStatus({ type: "error", message });
       setIsGoogleLoading(false);
     }
-    // No need to handle redirect here - Supabase handles it
+  };
+
+  const getInputClassName = (field: string) => {
+    const hasError = field === "email" ? errors.email : errors.password;
+    return `pl-12 pr-12 bg-[#12121A] rounded-xl h-12 ${hasError && touched[field as keyof typeof touched] ? 'border-red-500' : 'border-white/10'} text-white`;
   };
 
   return (
@@ -140,38 +201,40 @@ export default function LoginPage() {
 
         <form onSubmit={handleLogin} className="space-y-5">
           <div>
-            <Label htmlFor="email" className="text-white mb-2 block">Email Address</Label>
+            <Label htmlFor="email" className="text-white mb-2 block">Email Address <span className="text-red-400">*</span></Label>
             <div className="relative">
               <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[#6B6B80]" />
               <Input
                 id="email"
                 type="email"
                 value={email}
-                onChange={(e) => {
-                  setEmail(e.target.value);
-                  if (status?.type === "error") setStatus(null);
-                }}
+                onChange={(e) => handleEmailChange(e.target.value)}
+                onBlur={() => handleBlur("email")}
                 placeholder="you@example.com"
-                className="pl-12 bg-[#12121A] border-white/10 text-white rounded-xl h-12"
+                className={getInputClassName("email")}
                 required
               />
             </div>
+            {touched.email && errors.email && (
+              <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
+                <AlertCircle className="w-3 h-3" />
+                {errors.email}
+              </p>
+            )}
           </div>
 
           <div>
-            <Label htmlFor="password" className="text-white mb-2 block">Password</Label>
+            <Label htmlFor="password" className="text-white mb-2 block">Password <span className="text-red-400">*</span></Label>
             <div className="relative">
               <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[#6B6B80]" />
               <Input
                 id="password"
                 type={showPassword ? "text" : "password"}
                 value={password}
-                onChange={(e) => {
-                  setPassword(e.target.value);
-                  if (status?.type === "error") setStatus(null);
-                }}
+                onChange={(e) => handlePasswordChange(e.target.value)}
+                onBlur={() => handleBlur("password")}
                 placeholder="••••••••"
-                className="pl-12 pr-12 bg-[#12121A] border-white/10 text-white rounded-xl h-12"
+                className={getInputClassName("password")}
                 required
               />
               <button
@@ -183,6 +246,12 @@ export default function LoginPage() {
                 {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
               </button>
             </div>
+            {touched.password && errors.password && (
+              <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
+                <AlertCircle className="w-3 h-3" />
+                {errors.password}
+              </p>
+            )}
           </div>
 
           <div className="flex justify-end">

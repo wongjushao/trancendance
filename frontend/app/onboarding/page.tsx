@@ -19,6 +19,14 @@ import { UserRole, Organization, mockOrganizations } from "@/lib/role";
 import { OrganizationAutoDetect } from "@/components/onboarding/OrganizationAutoDetect";
 import { createRoleRequest } from "@/lib/role-requests";
 import { toast } from "sonner";
+import {
+  validateUsername,
+  validateName,
+  validateBio,
+  validateBirthday,
+  validateLanguage,
+  validateJobTitle,
+} from "@/lib/validation";
 
 // Constants
 const TOTAL_STEPS = 4;
@@ -122,6 +130,10 @@ export default function OnboardingPage() {
   const [isLoadingUser, setIsLoadingUser] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [detectedOrg, setDetectedOrg] = useState<Organization | null>(null);
+  
+  // Validation states
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [fieldTouched, setFieldTouched] = useState<Record<string, boolean>>({});
 
   const [formData, setFormData] = useState<FormData>({
     avatar: null,
@@ -160,6 +172,88 @@ export default function OnboardingPage() {
         selectedOrganizationId: null
       }));
     }
+  };
+
+  // Validation functions
+  const validateStep1 = (): boolean => {
+    const errors: Record<string, string> = {};
+    
+    const firstNameError = validateName(formData.firstName, "First name").error;
+    if (firstNameError) errors.firstName = firstNameError;
+    
+    const lastNameError = validateName(formData.lastName, "Last name").error;
+    if (lastNameError) errors.lastName = lastNameError;
+    
+    const usernameError = validateUsername(formData.username).error;
+    if (usernameError) errors.username = usernameError;
+    
+    const bioError = validateBio(formData.bio).error;
+    if (bioError) errors.bio = bioError;
+    
+    setFieldErrors(errors);
+    setFieldTouched({
+      firstName: true,
+      lastName: true,
+      username: true,
+      bio: true,
+    });
+    
+    return Object.keys(errors).length === 0;
+  };
+
+  const validateStep2 = (): boolean => {
+    const errors: Record<string, string> = {};
+    
+    const birthdayError = validateBirthday(formData.birthday).error;
+    if (birthdayError) errors.birthday = birthdayError;
+    
+    const languageError = validateLanguage(formData.language).error;
+    if (languageError) errors.language = languageError;
+    
+    const jobTitleError = validateJobTitle(
+      formData.jobTitle,
+      formData.jobTitle === "Other",
+      formData.customJobTitle
+    ).error;
+    if (jobTitleError) errors.jobTitle = jobTitleError;
+    
+    setFieldErrors(errors);
+    setFieldTouched({
+      birthday: true,
+      language: true,
+      jobTitle: true,
+    });
+    
+    return Object.keys(errors).length === 0;
+  };
+
+  // Handle field blur for validation
+  const handleFieldBlur = (field: string, value: string, step: number) => {
+    setFieldTouched(prev => ({ ...prev, [field]: true }));
+    
+    let error: string | undefined;
+    switch (field) {
+      case "firstName":
+      case "lastName":
+        error = validateName(value, field === "firstName" ? "First name" : "Last name").error;
+        break;
+      case "username":
+        error = validateUsername(value).error;
+        break;
+      case "bio":
+        error = validateBio(value).error;
+        break;
+      case "birthday":
+        error = validateBirthday(value).error;
+        break;
+      case "language":
+        error = validateLanguage(value).error;
+        break;
+      default:
+        return;
+    }
+    
+    setFieldErrors(prev => ({ ...prev, [field]: error }));
   };
 
   // Load user data from Google OAuth if available
@@ -221,28 +315,6 @@ export default function OnboardingPage() {
     loadUserData();
   }, [router]);
 
-  // Per-step validation
-  function validateStep(step: number): string | null {
-    if (step === 1) {
-      if (!formData.firstName.trim()) return "First name is required.";
-      if (!formData.lastName.trim()) return "Last name is required.";
-      if (!formData.username.trim()) return "Username is required.";
-      if (formData.username.includes(" ")) return "Username cannot contain spaces.";
-      if (formData.username.length < 3) return "Username must be at least 3 characters.";
-      if (!formData.bio.trim()) return "Bio is required — tell us a little about yourself.";
-    }
-    if (step === 2) {
-      if (!formData.birthday) return "Birthday is required.";
-      if (!formData.jobTitle) return "Please select your job title to continue.";
-    }
-    if (step === 3) {
-      if (formData.desiredRole === "teacher" && !formData.selectedOrganizationId) {
-        return "Please select an organization to join as a teacher.";
-      }
-    }
-    return null;
-  }
-
   // Navigation
   const handleBack = () => {
     setStepError(null);
@@ -251,12 +323,18 @@ export default function OnboardingPage() {
 
   const handleNext = async () => {
     setSubmitError(null);
-    const err = validateStep(currentStep);
-    if (err) {
-      setStepError(err);
+    setStepError(null);
+    
+    let isValid = false;
+    if (currentStep === 1) isValid = validateStep1();
+    else if (currentStep === 2) isValid = validateStep2();
+    else if (currentStep === 3) isValid = true; // Organization selection is optional
+    else if (currentStep === 4) isValid = true; // Interests are optional
+    
+    if (!isValid) {
+      setStepError("Please fix the errors above before continuing.");
       return;
     }
-    setStepError(null);
 
     if (currentStep < TOTAL_STEPS) {
       setCurrentStep((s) => s + 1);
@@ -360,12 +438,10 @@ export default function OnboardingPage() {
           
           if (!status.onboarded) {
             console.warn('[onboarding] Profile saved but verification shows not onboarded:', status.missing_fields);
-            // Continue anyway - this might be a race condition
           }
         }
       } catch (e) {
         console.error('[onboarding] Verification check failed:', e);
-        // Continue anyway - don't block the user
       }
     }
 
@@ -441,7 +517,6 @@ export default function OnboardingPage() {
         } else {
           const errorData = await uploadRes.json();
           console.error('[onboarding] Avatar upload failed:', errorData.error);
-          // Show a toast notification but don't block onboarding
           toast.error("Profile created but avatar upload failed. You can upload it later from settings.");
         }
       } catch (err) {
@@ -487,8 +562,23 @@ export default function OnboardingPage() {
   const setField = (field: keyof FormData) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
       setStepError(null);
-      setFormData((prev) => ({ ...prev, [field]: e.target.value }));
+      const value = e.target.value;
+      setFormData((prev) => ({ ...prev, [field]: value }));
+      
+      // Clear field error when user starts typing
+      if (fieldErrors[field]) {
+        setFieldErrors(prev => ({ ...prev, [field]: undefined }));
+      }
     };
+
+  const getFieldError = (field: string) => {
+    return fieldTouched[field] && fieldErrors[field];
+  };
+
+  const getInputClassName = (field: string) => {
+    const hasError = getFieldError(field);
+    return `bg-[#12121A] border rounded-xl h-12 ${hasError ? 'border-red-500' : 'border-white/10'} text-white`;
+  };
 
   if (isLoadingUser) {
     return (
@@ -607,10 +697,17 @@ export default function OnboardingPage() {
                           </Label>
                           <Input 
                             value={formData.firstName} 
-                            onChange={setField("firstName")} 
+                            onChange={setField("firstName")}
+                            onBlur={() => handleFieldBlur("firstName", formData.firstName, 1)}
                             placeholder="Alex"
-                            className="bg-[#12121A] border-white/10 text-white rounded-xl h-12" 
+                            className={getInputClassName("firstName")}
                           />
+                          {getFieldError("firstName") && (
+                            <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
+                              <AlertCircle className="w-3 h-3" />
+                              {fieldErrors.firstName}
+                            </p>
+                          )}
                         </div>
                         <div className="space-y-2">
                           <Label className="text-sm font-medium text-[#A0A0B5]">
@@ -618,10 +715,17 @@ export default function OnboardingPage() {
                           </Label>
                           <Input 
                             value={formData.lastName} 
-                            onChange={setField("lastName")} 
+                            onChange={setField("lastName")}
+                            onBlur={() => handleFieldBlur("lastName", formData.lastName, 1)}
                             placeholder="Smith"
-                            className="bg-[#12121A] border-white/10 text-white rounded-xl h-12" 
+                            className={getInputClassName("lastName")}
                           />
+                          {getFieldError("lastName") && (
+                            <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
+                              <AlertCircle className="w-3 h-3" />
+                              {fieldErrors.lastName}
+                            </p>
+                          )}
                         </div>
                       </div>
 
@@ -647,12 +751,19 @@ export default function OnboardingPage() {
                           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B6B80] text-sm font-medium">@</span>
                           <Input 
                             value={formData.username} 
-                            onChange={setField("username")} 
+                            onChange={setField("username")}
+                            onBlur={() => handleFieldBlur("username", formData.username, 1)}
                             placeholder="alex_smith"
-                            className="pl-8 bg-[#12121A] border-white/10 text-white rounded-xl h-12" 
+                            className={`pl-8 ${getInputClassName("username")}`}
                           />
                         </div>
-                        <p className="text-xs text-[#6B6B80]">No spaces. 3+ characters. This is your unique identifier.</p>
+                        {getFieldError("username") && (
+                          <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3" />
+                            {fieldErrors.username}
+                          </p>
+                        )}
+                        <p className="text-xs text-[#6B6B80]">No spaces. 3+ characters. Letters, numbers, dots, underscores, hyphens only.</p>
                       </div>
 
                       {/* Bio */}
@@ -665,13 +776,20 @@ export default function OnboardingPage() {
                           <textarea
                             value={formData.bio}
                             onChange={setField("bio")}
+                            onBlur={() => handleFieldBlur("bio", formData.bio, 1)}
                             placeholder="Tell us about yourself — your background, what you're passionate about..."
                             rows={3}
-                            maxLength={300}
-                            className="w-full pl-10 pr-4 py-3 bg-[#12121A] border border-white/10 text-white rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500/50 transition-all placeholder:text-[#6B6B80] text-sm"
+                            maxLength={500}
+                            className={`w-full pl-10 pr-4 py-3 ${getInputClassName("bio")} resize-none`}
                           />
                         </div>
-                        <p className="text-xs text-[#6B6B80] text-right">{formData.bio.length}/300</p>
+                        {getFieldError("bio") && (
+                          <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3" />
+                            {fieldErrors.bio}
+                          </p>
+                        )}
+                        <p className="text-xs text-[#6B6B80] text-right">{formData.bio.length}/500 (minimum 10 characters)</p>
                       </div>
                     </div>
                   )}
@@ -695,10 +813,18 @@ export default function OnboardingPage() {
                             type="date"
                             value={formData.birthday}
                             onChange={setField("birthday")}
+                            onBlur={() => handleFieldBlur("birthday", formData.birthday, 2)}
                             max={new Date().toISOString().split("T")[0]}
-                            className="pl-10 bg-[#12121A] border-white/10 text-white rounded-xl h-12 [color-scheme:dark]"
+                            className={`pl-10 ${getInputClassName("birthday")} [color-scheme:dark]`}
                           />
                         </div>
+                        {getFieldError("birthday") && (
+                          <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3" />
+                            {fieldErrors.birthday}
+                          </p>
+                        )}
+                        <p className="text-xs text-[#6B6B80]">You must be at least 13 years old to register</p>
                       </div>
 
                       {/* Language */}
@@ -709,12 +835,20 @@ export default function OnboardingPage() {
                         <select
                           value={formData.language}
                           onChange={setField("language")}
-                          className={SELECT_CLASS}
+                          onBlur={() => handleFieldBlur("language", formData.language, 2)}
+                          className={getInputClassName("language")}
                         >
+                          <option value="">Select your language</option>
                           {LANGUAGES.map(({ code, label }) => (
                             <option key={code} value={code}>{label}</option>
                           ))}
                         </select>
+                        {getFieldError("language") && (
+                          <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3" />
+                            {fieldErrors.language}
+                          </p>
+                        )}
                       </div>
 
                       {/* Job Title */}
@@ -727,7 +861,8 @@ export default function OnboardingPage() {
                           <select
                             value={formData.jobTitle}
                             onChange={setField("jobTitle")}
-                            className="w-full bg-[#12121A] border border-white/10 text-white rounded-xl h-12 pl-10 pr-4 focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500/50 transition-all outline-none appearance-none cursor-pointer [color-scheme:dark]"
+                            onBlur={() => handleFieldBlur("jobTitle", formData.jobTitle, 2)}
+                            className={`w-full pl-10 ${getInputClassName("jobTitle")}`}
                           >
                             <option value="">Select your job title</option>
                             {JOB_TITLES.map((title) => (
@@ -735,20 +870,32 @@ export default function OnboardingPage() {
                             ))}
                           </select>
                         </div>
+                        {getFieldError("jobTitle") && (
+                          <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3" />
+                            {fieldErrors.jobTitle}
+                          </p>
+                        )}
                       </div>
 
                       {/* Custom job title input */}
                       {formData.jobTitle === "Other" && (
                         <div className="space-y-2">
                           <Label className="text-sm font-medium text-[#A0A0B5]">
-                            Custom Job Title
+                            Custom Job Title <span className="text-red-400">*</span>
                           </Label>
                           <Input
                             value={formData.customJobTitle}
                             onChange={setField("customJobTitle")}
                             placeholder="e.g., Full Stack Developer, DevOps Engineer"
-                            className="bg-[#12121A] border-white/10 text-white rounded-xl h-12"
+                            className={getInputClassName("customJobTitle")}
                           />
+                          {getFieldError("customJobTitle") && (
+                            <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
+                              <AlertCircle className="w-3 h-3" />
+                              {fieldErrors.customJobTitle}
+                            </p>
+                          )}
                         </div>
                       )}
 
@@ -932,7 +1079,7 @@ export default function OnboardingPage() {
                       <div className="text-center">
                         <h2 className="text-3xl font-bold text-white mb-2">Your Interests</h2>
                         <p className="text-[#A0A0B5]">We'll personalize your learning feed based on these</p>
-                        <p className="text-xs text-[#6B6B80] mt-1">Select as many as you like</p>
+                        <p className="text-xs text-[#6B6B80] mt-1">Select as many as you like (max 20)</p>
                       </div>
                       
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -953,6 +1100,12 @@ export default function OnboardingPage() {
                           </button>
                         ))}
                       </div>
+
+                      {formData.interests.length > 0 && (
+                        <p className="text-center text-xs text-[#6B6B80]">
+                          {formData.interests.length} interest{formData.interests.length !== 1 ? 's' : ''} selected
+                        </p>
+                      )}
 
                       {submitError && (
                         <div className="flex items-center gap-2 p-3 bg-red-500/10 border border-red-500/30 rounded-xl">

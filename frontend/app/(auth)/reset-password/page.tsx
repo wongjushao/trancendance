@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 import { toast } from "sonner";
+import { validatePassword, validateConfirmPassword } from "@/lib/validation";
 
 function ResetPasswordContent() {
   const router = useRouter();
@@ -19,34 +20,82 @@ function ResetPasswordContent() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [errors, setErrors] = useState<{ password?: string; confirmPassword?: string }>({});
+  const [touched, setTouched] = useState<{ password?: boolean; confirmPassword?: boolean }>({});
   const [isLoading, setIsLoading] = useState(false);
   const [isValidating, setIsValidating] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [isSuccess, setIsSuccess] = useState(false);
   
   // Get token from URL
   const token = searchParams.get("token");
   const type = searchParams.get("type");
 
+  const validateField = (field: string, value: string): string | undefined => {
+    switch (field) {
+      case "password":
+        return validatePassword(value).error;
+      case "confirmPassword":
+        return validateConfirmPassword(password, value).error;
+      default:
+        return undefined;
+    }
+  };
+
+  const handleBlur = (field: string) => {
+    setTouched((prev) => ({ ...prev, [field]: true }));
+    const error = validateField(field, field === "password" ? password : confirmPassword);
+    setErrors((prev) => ({ ...prev, [field]: error }));
+  };
+
+  const handlePasswordChange = (value: string) => {
+    setPassword(value);
+    if (touched.password) {
+      const error = validatePassword(value).error;
+      setErrors((prev) => ({ ...prev, password: error }));
+    }
+    if (touched.confirmPassword) {
+      const confirmError = validateConfirmPassword(value, confirmPassword).error;
+      setErrors((prev) => ({ ...prev, confirmPassword: confirmError }));
+    }
+  };
+
+  const handleConfirmChange = (value: string) => {
+    setConfirmPassword(value);
+    if (touched.confirmPassword) {
+      const error = validateConfirmPassword(password, value).error;
+      setErrors((prev) => ({ ...prev, confirmPassword: error }));
+    }
+  };
+
+  const validateForm = (): boolean => {
+    const passwordError = validatePassword(password).error;
+    const confirmError = validateConfirmPassword(password, confirmPassword).error;
+    
+    const newErrors = {
+      password: passwordError,
+      confirmPassword: confirmError,
+    };
+    
+    setErrors(newErrors);
+    setTouched({ password: true, confirmPassword: true });
+    
+    return !passwordError && !confirmError;
+  };
+
   useEffect(() => {
     const validateToken = async () => {
       setIsValidating(true);
       
-      // If no token in URL, try to get session
       const supabase = getSupabaseBrowserClient();
       const { data: { session } } = await supabase.auth.getSession();
       
-      // Check if we have a recovery session
       if (session?.user?.email_confirmed_at) {
-        // User is already authenticated via recovery link
         setIsValidating(false);
         return;
       }
       
-      // If we have a token in URL, verify it
       if (token && type === "recovery") {
         try {
-          // Verify the token by trying to get session
           const { data, error: verifyError } = await supabase.auth.verifyOtp({
             token_hash: token,
             type: "recovery",
@@ -54,17 +103,16 @@ function ResetPasswordContent() {
           
           if (verifyError) {
             console.error("Token validation error:", verifyError);
-            setError("This password reset link is invalid or has expired. Please request a new one.");
+            setErrors({ password: "This password reset link is invalid or has expired. Please request a new one." });
           }
         } catch (err) {
           console.error("Token validation error:", err);
-          setError("This password reset link is invalid or has expired. Please request a new one.");
+          setErrors({ password: "This password reset link is invalid or has expired. Please request a new one." });
         }
       } else if (!token) {
-        // No token in URL, check if we have a recovery session
         const { data: { session: currentSession } } = await supabase.auth.getSession();
         if (!currentSession?.user?.email_confirmed_at) {
-          setError("No valid password reset token found. Please request a new password reset link.");
+          setErrors({ password: "No valid password reset token found. Please request a new password reset link." });
         }
       }
       
@@ -89,31 +137,8 @@ function ResetPasswordContent() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
     
-    // Validate password
-    if (password !== confirmPassword) {
-      setError("Passwords do not match.");
-      return;
-    }
-    
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters.");
-      return;
-    }
-    
-    if (!/[A-Z]/.test(password)) {
-      setError("Password must contain at least one uppercase letter.");
-      return;
-    }
-    
-    if (!/[0-9]/.test(password)) {
-      setError("Password must contain at least one number.");
-      return;
-    }
-    
-    if (!/[^A-Za-z0-9]/.test(password)) {
-      setError("Password must contain at least one special character.");
+    if (!validateForm()) {
       return;
     }
     
@@ -123,13 +148,12 @@ function ResetPasswordContent() {
     const { data: { session } } = await supabase.auth.getSession();
     
     if (!session?.access_token) {
-      setError("Session expired. Please request a new password reset link.");
+      setErrors({ password: "Session expired. Please request a new password reset link." });
       setIsLoading(false);
       return;
     }
     
     try {
-      // Call backend to update password
       const response = await fetch('/api/auth-service/update-password', {
         method: 'PUT',
         headers: {
@@ -148,19 +172,23 @@ function ResetPasswordContent() {
       setIsSuccess(true);
       toast.success("Password updated successfully! Redirecting to login...");
       
-      // Sign out to ensure user needs to log in with new password
       await supabase.auth.signOut();
       
-      // Redirect to login after a delay
       setTimeout(() => {
         router.push("/login");
       }, 3000);
       
     } catch (err: any) {
-      setError(err.message);
+      setErrors({ password: err.message });
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const getInputClassName = (field: string) => {
+    const hasError = field === "password" ? errors.password : errors.confirmPassword;
+    const showError = hasError && touched[field as keyof typeof touched];
+    return `pl-12 pr-12 bg-[#12121A] rounded-xl h-12 ${showError ? 'border-red-500' : 'border-white/10'} text-white`;
   };
   
   if (isValidating) {
@@ -177,7 +205,7 @@ function ResetPasswordContent() {
     );
   }
   
-  if (error) {
+  if (errors.password && errors.password.includes("invalid or expired")) {
     return (
       <div className="w-full max-w-md">
         <div className="bg-[#16161F] border border-white/10 rounded-3xl p-8 shadow-2xl shadow-purple-500/10 text-center">
@@ -185,7 +213,7 @@ function ResetPasswordContent() {
             <AlertCircle className="w-8 h-8 text-red-400" />
           </div>
           <h2 className="text-xl font-semibold text-white mb-2">Invalid Reset Link</h2>
-          <p className="text-[#A0A0B5] mb-6">{error}</p>
+          <p className="text-[#A0A0B5] mb-6">{errors.password}</p>
           <Link href="/forgot-password">
             <GlowButton variant="primary" fullWidth>
               Request New Reset Link
@@ -243,7 +271,7 @@ function ResetPasswordContent() {
         <form onSubmit={handleSubmit} className="space-y-5">
           <div>
             <Label htmlFor="new-password" className="text-white mb-2 block">
-              New Password
+              New Password <span className="text-red-400">*</span>
             </Label>
             <div className="relative">
               <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[#6B6B80]" />
@@ -251,12 +279,10 @@ function ResetPasswordContent() {
                 id="new-password"
                 type={showPassword ? "text" : "password"}
                 value={password}
-                onChange={(e) => {
-                  setPassword(e.target.value);
-                  setError(null);
-                }}
+                onChange={(e) => handlePasswordChange(e.target.value)}
+                onBlur={() => handleBlur("password")}
                 placeholder="Min. 8 characters, with uppercase, number, and special character"
-                className="pl-12 pr-12 bg-[#12121A] border-white/10 text-white rounded-xl h-12"
+                className={getInputClassName("password")}
                 required
                 autoFocus
               />
@@ -270,7 +296,6 @@ function ResetPasswordContent() {
               </button>
             </div>
             
-            {/* Password strength indicator */}
             {password && (
               <div className="mt-2 space-y-1">
                 <div className="flex gap-1">
@@ -295,11 +320,17 @@ function ResetPasswordContent() {
                 </p>
               </div>
             )}
+            {touched.password && errors.password && (
+              <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
+                <AlertCircle className="w-3 h-3" />
+                {errors.password}
+              </p>
+            )}
           </div>
           
           <div>
             <Label htmlFor="confirm-password" className="text-white mb-2 block">
-              Confirm New Password
+              Confirm New Password <span className="text-red-400">*</span>
             </Label>
             <div className="relative">
               <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[#6B6B80]" />
@@ -307,18 +338,10 @@ function ResetPasswordContent() {
                 id="confirm-password"
                 type={showConfirm ? "text" : "password"}
                 value={confirmPassword}
-                onChange={(e) => {
-                  setConfirmPassword(e.target.value);
-                  setError(null);
-                }}
+                onChange={(e) => handleConfirmChange(e.target.value)}
+                onBlur={() => handleBlur("confirmPassword")}
                 placeholder="Repeat your new password"
-                className={`pl-12 pr-12 bg-[#12121A] border text-white rounded-xl h-12 ${
-                  confirmPassword && password !== confirmPassword
-                    ? "border-red-500/50"
-                    : confirmPassword && password === confirmPassword
-                    ? "border-green-500/40"
-                    : "border-white/10"
-                }`}
+                className={getInputClassName("confirmPassword")}
                 required
               />
               <button
@@ -330,12 +353,14 @@ function ResetPasswordContent() {
                 {showConfirm ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
               </button>
             </div>
-            {confirmPassword && password !== confirmPassword && (
-              <p className="text-xs text-red-400 mt-1 ml-1">Passwords don&apos;t match</p>
+            {touched.confirmPassword && errors.confirmPassword && (
+              <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
+                <AlertCircle className="w-3 h-3" />
+                {errors.confirmPassword}
+              </p>
             )}
           </div>
           
-          {/* Password requirements */}
           <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-xl">
             <p className="text-sm font-medium text-blue-400 mb-2">Password Requirements:</p>
             <ul className="text-xs text-[#A0A0B5] space-y-1">
@@ -354,18 +379,12 @@ function ResetPasswordContent() {
             </ul>
           </div>
           
-          {error && (
-            <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm font-medium text-red-400">
-              {error}
-            </div>
-          )}
-          
           <GlowButton 
             type="submit" 
             variant="primary" 
             fullWidth 
             isLoading={isLoading}
-            disabled={!password || !confirmPassword || password !== confirmPassword}
+            disabled={!password || !confirmPassword}
           >
             Update Password
           </GlowButton>

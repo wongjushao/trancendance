@@ -1,14 +1,29 @@
+// frontend/app/(auth)/register/page.tsx
 "use client";
 
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Mail, Lock, User } from "lucide-react";
+import { Mail, Lock, User, AlertCircle, CheckCircle } from "lucide-react";
 import { GlowButton } from "@/components/lms/GlowButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 import { getSiteUrl } from "@/lib/site-url";
+import {
+  validateEmail,
+  validatePassword,
+  validateName,
+  validateConfirmPassword,
+} from "@/lib/validation";
+
+interface FormErrors {
+  name?: string;
+  email?: string;
+  password?: string;
+  confirmPassword?: string;
+  terms?: string;
+}
 
 function getFriendlyRegisterError(
   errorMessage: string,
@@ -52,6 +67,8 @@ export default function RegisterPage() {
     password: "",
     confirmPassword: "",
   });
+  const [errors, setErrors] = useState<FormErrors>({});
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [status, setStatus] = useState<{
@@ -60,16 +77,85 @@ export default function RegisterPage() {
     action?: { label: string; href: string };
   } | null>(null);
 
+  const validateField = (field: string, value: string): string | undefined => {
+    switch (field) {
+      case "name":
+        return validateName(value, "Full name").error;
+      case "email":
+        return validateEmail(value).error;
+      case "password":
+        return validatePassword(value).error;
+      case "confirmPassword":
+        return validateConfirmPassword(formData.password, value).error;
+      default:
+        return undefined;
+    }
+  };
+
+  const handleBlur = (field: string) => {
+    setTouched((prev) => ({ ...prev, [field]: true }));
+    const error = validateField(field, formData[field as keyof typeof formData]);
+    setErrors((prev) => ({ ...prev, [field]: error }));
+  };
+
+  const handleChange = (field: string, value: string) => {
+    setFormData((prev) => ({ ...prev, [field]: value }));
+    
+    if (touched[field]) {
+      const error = validateField(field, value);
+      setErrors((prev) => ({ ...prev, [field]: error }));
+    }
+    
+    if (field === "password" && touched["confirmPassword"]) {
+      const confirmError = validateConfirmPassword(value, formData.confirmPassword).error;
+      setErrors((prev) => ({ ...prev, confirmPassword: confirmError }));
+    }
+  };
+
+  const validateForm = (): boolean => {
+    const newErrors: FormErrors = {};
+    let isValid = true;
+
+    const nameError = validateName(formData.name, "Full name").error;
+    if (nameError) {
+      newErrors.name = nameError;
+      isValid = false;
+    }
+
+    const emailError = validateEmail(formData.email).error;
+    if (emailError) {
+      newErrors.email = emailError;
+      isValid = false;
+    }
+
+    const passwordError = validatePassword(formData.password).error;
+    if (passwordError) {
+      newErrors.password = passwordError;
+      isValid = false;
+    }
+
+    const confirmError = validateConfirmPassword(formData.password, formData.confirmPassword).error;
+    if (confirmError) {
+      newErrors.confirmPassword = confirmError;
+      isValid = false;
+    }
+
+    setErrors(newErrors);
+    setTouched({
+      name: true,
+      email: true,
+      password: true,
+      confirmPassword: true,
+    });
+
+    return isValid;
+  };
+
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setStatus(null);
 
-    if (formData.password !== formData.confirmPassword) {
-      setStatus({ type: "error", message: "Passwords do not match." });
-      return;
-    }
-    if (formData.password.length < 6) {
-      setStatus({ type: "error", message: "Password must be at least 6 characters." });
+    if (!validateForm()) {
       return;
     }
 
@@ -80,7 +166,6 @@ export default function RegisterPage() {
       email: formData.email,
       password: formData.password,
       options: {
-        // Use getSiteUrl() — never window.location.origin in Docker
         emailRedirectTo: `${getSiteUrl()}/auth/callback`,
         data: { full_name: formData.name },
       },
@@ -135,7 +220,15 @@ export default function RegisterPage() {
       setStatus({ type: "error", message, action: { label: "Log in", href: "/login" } });
       setIsGoogleLoading(false);
     }
-    // No need to handle redirect here - Supabase handles it
+  };
+
+  const getFieldError = (field: string) => {
+    return touched[field] ? errors[field as keyof FormErrors] : undefined;
+  };
+
+  const getInputClassName = (field: string) => {
+    const hasError = getFieldError(field);
+    return `pl-12 bg-[#12121A] rounded-xl h-12 ${hasError ? 'border-red-500' : 'border-white/10'} text-white`;
   };
 
   return (
@@ -151,78 +244,100 @@ export default function RegisterPage() {
 
         <form onSubmit={handleRegister} className="space-y-5">
           <div>
-            <Label htmlFor="name" className="text-white mb-2 block">Full Name</Label>
+            <Label htmlFor="name" className="text-white mb-2 block">Full Name <span className="text-red-400">*</span></Label>
             <div className="relative">
               <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[#6B6B80]" />
               <Input
                 id="name"
                 type="text"
                 value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                onChange={(e) => handleChange("name", e.target.value)}
+                onBlur={() => handleBlur("name")}
                 placeholder="Your full name"
-                className="pl-12 bg-[#12121A] border-white/10 text-white rounded-xl h-12"
+                className={getInputClassName("name")}
                 required
               />
             </div>
+            {getFieldError("name") && (
+              <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
+                <AlertCircle className="w-3 h-3" />
+                {getFieldError("name")}
+              </p>
+            )}
           </div>
 
           <div>
-            <Label htmlFor="email" className="text-white mb-2 block">Email Address</Label>
+            <Label htmlFor="email" className="text-white mb-2 block">Email Address <span className="text-red-400">*</span></Label>
             <div className="relative">
               <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[#6B6B80]" />
               <Input
                 id="email"
                 type="email"
                 value={formData.email}
-                onChange={(e) => {
-                  setFormData({ ...formData, email: e.target.value });
-                  if (status?.type === "error") setStatus(null);
-                }}
+                onChange={(e) => handleChange("email", e.target.value)}
+                onBlur={() => handleBlur("email")}
                 placeholder="you@example.com"
-                className="pl-12 bg-[#12121A] border-white/10 text-white rounded-xl h-12"
+                className={getInputClassName("email")}
                 required
               />
             </div>
+            {getFieldError("email") && (
+              <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
+                <AlertCircle className="w-3 h-3" />
+                {getFieldError("email")}
+              </p>
+            )}
           </div>
 
           <div>
-            <Label htmlFor="password" className="text-white mb-2 block">Password</Label>
+            <Label htmlFor="password" className="text-white mb-2 block">Password <span className="text-red-400">*</span></Label>
             <div className="relative">
               <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[#6B6B80]" />
               <Input
                 id="password"
                 type="password"
                 value={formData.password}
-                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                onChange={(e) => handleChange("password", e.target.value)}
+                onBlur={() => handleBlur("password")}
                 placeholder="Min. 6 characters"
-                className="pl-12 bg-[#12121A] border-white/10 text-white rounded-xl h-12"
+                className={getInputClassName("password")}
                 required
               />
             </div>
+            {getFieldError("password") && (
+              <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
+                <AlertCircle className="w-3 h-3" />
+                {getFieldError("password")}
+              </p>
+            )}
+            {formData.password && !getFieldError("password") && (
+              <p className="text-xs text-green-400 mt-1 flex items-center gap-1">
+                <CheckCircle className="w-3 h-3" />
+                Password is strong
+              </p>
+            )}
           </div>
 
           <div>
-            <Label htmlFor="confirmPassword" className="text-white mb-2 block">Confirm Password</Label>
+            <Label htmlFor="confirmPassword" className="text-white mb-2 block">Confirm Password <span className="text-red-400">*</span></Label>
             <div className="relative">
               <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[#6B6B80]" />
               <Input
                 id="confirmPassword"
                 type="password"
                 value={formData.confirmPassword}
-                onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
+                onChange={(e) => handleChange("confirmPassword", e.target.value)}
+                onBlur={() => handleBlur("confirmPassword")}
                 placeholder="Repeat your password"
-                className={`pl-12 bg-[#12121A] border text-white rounded-xl h-12 ${
-                  formData.confirmPassword && formData.password !== formData.confirmPassword
-                    ? "border-red-500/50"
-                    : formData.confirmPassword && formData.password === formData.confirmPassword
-                    ? "border-green-500/40"
-                    : "border-white/10"
-                }`}
+                className={getInputClassName("confirmPassword")}
                 required
               />
             </div>
-            {formData.confirmPassword && formData.password !== formData.confirmPassword && (
-              <p className="text-xs text-red-400 mt-1 ml-1">Passwords don&apos;t match</p>
+            {getFieldError("confirmPassword") && (
+              <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
+                <AlertCircle className="w-3 h-3" />
+                {getFieldError("confirmPassword")}
+              </p>
             )}
           </div>
 
