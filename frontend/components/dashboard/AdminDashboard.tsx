@@ -1,14 +1,26 @@
+// frontend/components/dashboard/AdminDashboard.tsx
 "use client";
 
-import { Users, Shield, Activity, Settings, Search, Crown } from "lucide-react";
+import { useState } from "react";
+import Link from "next/link";
+import { 
+  Users, Shield, Activity, Settings, Search, 
+  BarChart3, DollarSign, BookOpen, Star, TrendingUp,
+  Plus, Edit, Trash2, UserPlus, Crown, X,
+  CheckCircle, Clock, AlertCircle
+} from "lucide-react";
 import { GlowCard, StatCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import Link from "next/link";
 import { useRole } from "@/components/providers/RoleProvider";
 
-// Data remains exactly the same as your React context
+interface AdminDashboardProps {
+  user: any;
+  organizationId?: number | null;
+  organizationName?: string | null;
+}
+
 const users = [
   { id: 1, name: "Alice Johnson", email: "alice@example.com", role: "Student", status: "Active", joinDate: "2024-01-15" },
   { id: 2, name: "Bob Smith", email: "bob@example.com", role: "Instructor", status: "Active", joinDate: "2024-02-01" },
@@ -17,7 +29,7 @@ const users = [
 ];
 
 const roles = [
-  { id: 1, name: "Admin", users: 5, permissions: ["All Access"], color: "red" },
+  { id: 1, name: "Admin", users: 5, permissions: ["All Access"], color: "purple" },
   { id: 2, name: "Instructor", users: 23, permissions: ["Manage Courses", "Grade Assignments"], color: "blue" },
   { id: 3, name: "Student", users: 2819, permissions: ["View Courses", "Submit Assignments"], color: "green" },
 ];
@@ -29,124 +41,121 @@ const auditLogs = [
   { id: 4, user: "System", action: "Backup completed", timestamp: "2026-03-05 02:00 AM", status: "success" },
 ];
 
-export default function AdminPage() {
+export default function AdminDashboard({ user, organizationId, organizationName }: AdminDashboardProps) {
+  const [searchQuery, setSearchQuery] = useState("");
   const { roleData } = useRole();
+  
+  const firstName = user.user_metadata?.full_name?.split(" ")[0] || user.email?.split("@")[0] || "there";
+  const orgName = organizationName || roleData.organizationName || "your organization";
 
-  // System admin can access this page, org admin should go to org admin panel
-  if (roleData.role !== 'system_admin') {
-    return (
-      <div className="text-center py-12">
-        <Shield className="w-16 h-16 text-[#6B6B80] mx-auto mb-4" />
-        <h1 className="text-2xl font-bold text-white mb-2">Access Denied</h1>
-        <p className="text-[#A0A0B5]">
-          This page is for System Administrators only.
-          {roleData.role === 'org_admin' && roleData.organizationId && (
-            <span className="block mt-2">
-              <Link href={`/organizations/${roleData.organizationId}/admin`} className="text-purple-400 hover:text-purple-300 underline">
-                Go to your Organization Admin Panel →
-              </Link>
-            </span>
-          )}
-        </p>
-      </div>
-    );
-  }
+  const stats = {
+    totalUsers: 2847,
+    activeRoles: 3,
+    systemHealth: 98,
+    apiCalls: 45200,
+  };
+
+  const filteredUsers = users.filter(user =>
+    user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    user.email.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 pb-12">
       {/* Header */}
-      <div>
-        <h1 className="text-4xl font-bold text-white mb-2">System Administration</h1>
-        <p className="text-[#A0A0B5]">Manage platform-wide settings, users, and global configurations</p>
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-purple-600 via-purple-500 to-violet-600 p-8">
+        <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl" />
+        <div className="absolute bottom-0 left-0 w-48 h-48 bg-purple-400/20 rounded-full blur-2xl" />
         
-        {/* Organization Admin Link */}
-        {roleData.organizationId && (
-          <div className="mt-4 p-4 bg-purple-500/10 border border-purple-500/20 rounded-xl">
-            <div className="flex items-start gap-3">
-              <Crown className="w-5 h-5 text-purple-400 shrink-0 mt-0.5" />
-              <div>
-                <p className="text-white font-medium mb-1">Organization Administration</p>
-                <p className="text-sm text-[#A0A0B5]">
-                  Need to manage your organization's courses and members? 
-                  <Link href={`/organizations/${roleData.organizationId}/admin`} className="text-purple-400 hover:text-purple-300 ml-1 underline">
-                    Go to Organization Admin Panel →
-                  </Link>
-                </p>
-              </div>
+        <div className="relative z-10">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="px-3 py-1 bg-white/20 rounded-full text-xs font-medium text-white">
+              Admin Dashboard
+            </div>
+            <div className="px-3 py-1 bg-white/20 rounded-full text-xs font-medium text-white">
+              {orgName}
             </div>
           </div>
-        )}
+          <h1 className="text-4xl font-bold text-white mb-2">
+            Welcome back, {firstName}!
+          </h1>
+          <p className="text-purple-100 text-lg">
+            Manage users, roles, and system settings for {orgName}.
+          </p>
+          
+          <div className="flex gap-4 mt-6">
+            {organizationId && (
+              <Link href={`/organizations/${organizationId}/admin`}>
+                <GlowButton variant="primary" className="bg-white text-purple-600 hover:bg-purple-50">
+                  <Crown className="w-4 h-4 mr-2" />
+                  Organization Admin
+                </GlowButton>
+              </Link>
+            )}
+            <GlowButton variant="ghost" className="text-white border-white/30 hover:bg-white/10">
+              <Settings className="w-4 h-4 mr-2" />
+              System Settings
+            </GlowButton>
+          </div>
+        </div>
       </div>
-      
-      {/* Stats */}
+
+      {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <StatCard
-          icon={Users}
-          label="Total Users"
-          value="2,847"
-          trend="+145 this month"
-          trendUp={true}
-        />
-        <StatCard
-          icon={Shield}
-          label="Active Roles"
-          value="3"
-        />
-        <StatCard
-          icon={Activity}
-          label="System Health"
-          value="98%"
-          trend="All systems operational"
-          trendUp={true}
-        />
-        <StatCard
-          icon={Settings}
-          label="API Calls"
-          value="45.2K"
-          trend="+12% from yesterday"
-          trendUp={true}
-        />
+        <StatCard icon={Users} label="Total Users" value={stats.totalUsers.toLocaleString()} trend="+145 this month" trendUp={true} />
+        <StatCard icon={Shield} label="Active Roles" value={stats.activeRoles.toString()} />
+        <StatCard icon={Activity} label="System Health" value={`${stats.systemHealth}%`} trend="All systems operational" trendUp={true} />
+        <StatCard icon={Settings} label="API Calls" value={`${(stats.apiCalls / 1000).toFixed(1)}K`} trend="+12% from yesterday" trendUp={true} />
       </div>
-      
-      {/* Admin Tabs - Same as before */}
+
+      {/* Admin Tabs */}
       <Tabs defaultValue="users" className="w-full">
-        <TabsList className="bg-[#12121A] border border-white/10 p-1 rounded-xl">
-          <TabsTrigger value="users" className="rounded-lg data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-500 data-[state=active]:to-violet-600">
+        <TabsList className="bg-[#12121A] border border-white/5 p-1 rounded-2xl mb-8 flex-wrap h-auto">
+          <TabsTrigger value="users" className="rounded-xl px-6 py-2.5">
             <Users className="w-4 h-4 mr-2" />
             Users
           </TabsTrigger>
-          <TabsTrigger value="roles" className="rounded-lg data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-500 data-[state=active]:to-violet-600">
+          <TabsTrigger value="roles" className="rounded-xl px-6 py-2.5">
             <Shield className="w-4 h-4 mr-2" />
             Roles & Permissions
           </TabsTrigger>
-          <TabsTrigger value="audit" className="rounded-lg data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-500 data-[state=active]:to-violet-600">
+          <TabsTrigger value="audit" className="rounded-xl px-6 py-2.5">
             <Activity className="w-4 h-4 mr-2" />
             Audit Logs
           </TabsTrigger>
-          <TabsTrigger value="settings" className="rounded-lg data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-500 data-[state=active]:to-violet-600">
+          <TabsTrigger value="analytics" className="rounded-xl px-6 py-2.5">
+            <BarChart3 className="w-4 h-4 mr-2" />
+            Analytics
+          </TabsTrigger>
+          <TabsTrigger value="settings" className="rounded-xl px-6 py-2.5">
             <Settings className="w-4 h-4 mr-2" />
             Settings
           </TabsTrigger>
         </TabsList>
-        
-        {/* Users Tab Content */}
-        <TabsContent value="users" className="mt-6">
+
+        {/* Users Tab */}
+        <TabsContent value="users">
           <GlowCard>
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-semibold text-white">User Management</h2>
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-6">
+              <h2 className="text-2xl font-bold text-white">User Management</h2>
               <div className="flex gap-3">
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[#6B6B80]" />
                   <Input
                     type="text"
                     placeholder="Search users..."
-                    className="pl-10 bg-[#12121A] border-white/10 text-white rounded-xl"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-10 bg-[#12121A] border-white/10 text-white rounded-xl w-48"
                   />
                 </div>
-                <GlowButton variant="primary">Add User</GlowButton>
+                <GlowButton variant="primary">
+                  <UserPlus className="w-4 h-4 mr-2" />
+                  Add User
+                </GlowButton>
               </div>
             </div>
-            
+
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
@@ -156,10 +165,10 @@ export default function AdminPage() {
                     <th className="text-left text-[#A0A0B5] font-medium py-3 px-4">Status</th>
                     <th className="text-left text-[#A0A0B5] font-medium py-3 px-4">Join Date</th>
                     <th className="text-left text-[#A0A0B5] font-medium py-3 px-4">Actions</th>
-                  </tr>
+                   </tr>
                 </thead>
                 <tbody>
-                  {users.map((user) => (
+                  {filteredUsers.map((user) => (
                     <tr key={user.id} className="border-b border-white/5 hover:bg-white/5">
                       <td className="py-4 px-4">
                         <div>
@@ -168,7 +177,11 @@ export default function AdminPage() {
                         </div>
                       </td>
                       <td className="py-4 px-4">
-                        <span className="px-3 py-1 bg-purple-500/20 text-purple-400 rounded-full text-sm">
+                        <span className={`px-3 py-1 rounded-full text-sm ${
+                          user.role === "Admin" ? "bg-purple-500/20 text-purple-400" :
+                          user.role === "Instructor" ? "bg-blue-500/20 text-blue-400" :
+                          "bg-green-500/20 text-green-400"
+                        }`}>
                           {user.role}
                         </span>
                       </td>
@@ -196,12 +209,15 @@ export default function AdminPage() {
           </GlowCard>
         </TabsContent>
 
-        {/* Roles Tab Content - Same as before */}
-        <TabsContent value="roles" className="mt-6">
+        {/* Roles Tab */}
+        <TabsContent value="roles">
           <GlowCard>
             <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-semibold text-white">Roles & Permissions</h2>
-              <GlowButton variant="primary">Create Role</GlowButton>
+              <h2 className="text-2xl font-bold text-white">Roles & Permissions</h2>
+              <GlowButton variant="primary">
+                <Plus className="w-4 h-4 mr-2" />
+                Create Role
+              </GlowButton>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {roles.map((role) => (
@@ -226,10 +242,10 @@ export default function AdminPage() {
           </GlowCard>
         </TabsContent>
 
-        {/* Audit Logs Tab Content - Same as before */}
-        <TabsContent value="audit" className="mt-6">
+        {/* Audit Logs Tab */}
+        <TabsContent value="audit">
           <GlowCard>
-            <h2 className="text-2xl font-semibold text-white mb-6">Audit Logs</h2>
+            <h2 className="text-2xl font-bold text-white mb-6">Audit Logs</h2>
             <div className="space-y-3">
               {auditLogs.map((log) => (
                 <div key={log.id} className="flex items-center justify-between p-4 bg-[#12121A] rounded-xl">
@@ -249,10 +265,58 @@ export default function AdminPage() {
           </GlowCard>
         </TabsContent>
 
-        {/* Settings Tab Content - Same as before */}
-        <TabsContent value="settings" className="mt-6">
+        {/* Analytics Tab */}
+        <TabsContent value="analytics">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <GlowCard>
+              <h2 className="text-xl font-bold text-white mb-6">Revenue Overview</h2>
+              <div className="text-center py-12">
+                <DollarSign className="w-16 h-16 text-purple-400 mx-auto mb-4" />
+                <p className="text-3xl font-bold text-white mb-2">$401,983</p>
+                <p className="text-[#A0A0B5]">Total earnings</p>
+                <p className="text-sm text-green-400 mt-2">↑ 12% from last month</p>
+              </div>
+            </GlowCard>
+
+            <GlowCard>
+              <h2 className="text-xl font-bold text-white mb-6">Platform Metrics</h2>
+              <div className="space-y-4">
+                <div>
+                  <div className="flex items-center justify-between text-sm mb-1">
+                    <span className="text-[#A0A0B5]">Course Completion Rate</span>
+                    <span className="text-purple-400">68%</span>
+                  </div>
+                  <div className="h-2 bg-[#1A1A24] rounded-full overflow-hidden">
+                    <div className="h-full bg-purple-500 rounded-full" style={{ width: "68%" }} />
+                  </div>
+                </div>
+                <div>
+                  <div className="flex items-center justify-between text-sm mb-1">
+                    <span className="text-[#A0A0B5]">Active Students</span>
+                    <span className="text-purple-400">78%</span>
+                  </div>
+                  <div className="h-2 bg-[#1A1A24] rounded-full overflow-hidden">
+                    <div className="h-full bg-purple-500 rounded-full" style={{ width: "78%" }} />
+                  </div>
+                </div>
+                <div>
+                  <div className="flex items-center justify-between text-sm mb-1">
+                    <span className="text-[#A0A0B5]">User Satisfaction</span>
+                    <span className="text-purple-400">4.7/5</span>
+                  </div>
+                  <div className="h-2 bg-[#1A1A24] rounded-full overflow-hidden">
+                    <div className="h-full bg-purple-500 rounded-full" style={{ width: "94%" }} />
+                  </div>
+                </div>
+              </div>
+            </GlowCard>
+          </div>
+        </TabsContent>
+
+        {/* Settings Tab */}
+        <TabsContent value="settings">
           <GlowCard>
-            <h2 className="text-2xl font-semibold text-white mb-6">System Settings</h2>
+            <h2 className="text-2xl font-bold text-white mb-6">System Settings</h2>
             <div className="space-y-6">
               <div className="p-4 bg-[#12121A] rounded-xl">
                 <div className="flex items-center justify-between mb-2">
@@ -275,6 +339,19 @@ export default function AdminPage() {
                   </div>
                   <label className="relative inline-block w-12 h-6 cursor-pointer">
                     <input type="checkbox" className="sr-only peer" defaultChecked />
+                    <div className="w-12 h-6 bg-[#16161F] peer-checked:bg-purple-500 rounded-full peer-checked:after:translate-x-6 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
+                  </label>
+                </div>
+              </div>
+
+              <div className="p-4 bg-[#12121A] rounded-xl">
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <p className="text-white font-medium">Maintenance Mode</p>
+                    <p className="text-[#6B6B80] text-sm">Put the platform in maintenance mode</p>
+                  </div>
+                  <label className="relative inline-block w-12 h-6 cursor-pointer">
+                    <input type="checkbox" className="sr-only peer" />
                     <div className="w-12 h-6 bg-[#16161F] peer-checked:bg-purple-500 rounded-full peer-checked:after:translate-x-6 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
                   </label>
                 </div>

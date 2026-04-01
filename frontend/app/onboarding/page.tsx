@@ -74,7 +74,7 @@ const STEP_LABELS = ["Profile", "Personal & Career", "Organization", "Interests"
 const ROLES: { value: UserRole; label: string; description: string }[] = [
   { value: 'student', label: 'Student', description: 'Learn at your own pace, take courses, and earn certificates.' },
   { value: 'teacher', label: 'Teacher', description: 'Create courses, share knowledge, and mentor students.' },
-  { value: 'admin', label: 'Admin', description: 'Manage organizations, users, and platform settings.' },
+  { value: 'org_admin', label: 'Organization Admin', description: 'Manage your organization\'s members, courses, and settings.' },
 ];
 
 // Types
@@ -447,11 +447,11 @@ export default function OnboardingPage() {
 
     // Set role data after successful registration
     let role: UserRole;
-    let pendingRole: 'teacher' | 'admin' | null = null;
-    
-    if (formData.desiredRole === 'admin') {
-      role = 'pending_admin';
-      pendingRole = 'admin';
+    let pendingRole: 'teacher' | 'org_admin' | null = null;
+
+    if (formData.desiredRole === 'org_admin') {
+      role = 'pending_org_admin';
+      pendingRole = 'org_admin';
     } else if (formData.desiredRole === 'teacher') {
       role = 'pending_teacher';
       pendingRole = 'teacher';

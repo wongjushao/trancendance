@@ -144,7 +144,7 @@ export default function ProfileClient({ user: initialUser }: ProfileClientProps)
   const [currentUser, setCurrentUser] = useState(initialUser);
   const [activeTab, setActiveTab] = useState("activity");
   const [showRequestTeacherModal, setShowRequestTeacherModal] = useState(false);
-  const [showRequestAdminModal, setShowRequestAdminModal] = useState(false);
+  const [showRequestOrgAdminModal, setShowRequestOrgAdminModal] = useState(false);
   const [selectedOrgId, setSelectedOrgId] = useState<number | null>(null);
   const [isRequesting, setIsRequesting] = useState(false);
   
@@ -323,16 +323,36 @@ export default function ProfileClient({ user: initialUser }: ProfileClientProps)
     setIsRequesting(false);
   };
 
-  const handleRequestAdmin = async () => {
+  const handleRequestOrgAdmin = async () => {
+    if (!selectedOrgId) {
+      toast.error("Please select an organization");
+      return;
+    }
+    
     setIsRequesting(true);
     
-    setRole({
-      ...roleData,
-      pendingRole: 'admin',
-    });
-    
-    toast.success("Admin request submitted. You'll be contacted for verification.");
-    setShowRequestAdminModal(false);
+    const org = mockOrganizations.find(o => o.id === selectedOrgId);
+    if (org && currentUser) {
+      createRoleRequest(
+        currentUser.id,
+        displayName,
+        displayData.email,
+        'org_admin',
+        selectedOrgId,
+        org.name
+      );
+      
+      setRole({
+        ...roleData,
+        pendingRole: 'org_admin',
+        pendingOrganizationId: selectedOrgId,
+        pendingOrganizationName: org.name,
+      });
+      
+      toast.success(`Organization admin request sent to ${org.name}`);
+      setShowRequestOrgAdminModal(false);
+      setSelectedOrgId(null);
+    }
     
     setIsRequesting(false);
   };
@@ -610,7 +630,7 @@ export default function ProfileClient({ user: initialUser }: ProfileClientProps)
                       </span>
                     )}
                     <span className="px-2 py-0.5 bg-purple-500/10 text-purple-400 rounded-full text-xs capitalize">
-                      {roleData.role === 'admin' ? 'Admin' : roleData.role === 'teacher' ? 'Teacher' : 'Student'}
+                      {roleData.role === 'org_admin' ? 'Organization Admin' : roleData.role === 'teacher' ? 'Teacher' : 'Student'}
                     </span>
                   </div>
                 </div>
@@ -619,7 +639,7 @@ export default function ProfileClient({ user: initialUser }: ProfileClientProps)
                 <GlowButton variant="outline" size="sm" onClick={() => router.push(`/organizations/${currentOrganization.id}`)}>
                   View Organization
                 </GlowButton>
-                {roleData.role === 'admin' && (
+                {roleData.role === 'org_admin' && (
                   <GlowButton variant="primary" size="sm" onClick={() => router.push(`/organizations/${currentOrganization.id}/admin`)}>
                     <Settings className="w-4 h-4 mr-1" />
                     Admin Panel
@@ -688,23 +708,23 @@ export default function ProfileClient({ user: initialUser }: ProfileClientProps)
               </div>
             </GlowCard>
 
-            {/* Admin Request Card */}
+            {/* Organization Admin Request Card */}
             <GlowCard className="hover:border-purple-500/30 transition-all">
               <div className="flex items-start gap-4">
                 <div className="p-3 rounded-xl bg-purple-500/10">
                   <Crown className="w-6 h-6 text-purple-400" />
                 </div>
                 <div className="flex-1">
-                  <h3 className="text-lg font-semibold text-white mb-1">Become an Admin</h3>
+                  <h3 className="text-lg font-semibold text-white mb-1">Become an Organization Admin</h3>
                   <p className="text-sm text-[#A0A0B5] mb-4">
-                    Manage organizations, users, and platform settings. Admin privileges require verification.
+                    Manage your organization's members, courses, and settings. Organization admin privileges require verification.
                   </p>
                   <GlowButton 
                     variant="outline" 
-                    onClick={() => setShowRequestAdminModal(true)}
+                    onClick={() => setShowRequestOrgAdminModal(true)}
                     className="text-purple-400 border-purple-500/30 hover:bg-purple-500/10"
                   >
-                    Request Admin Role
+                    Request Org Admin Role
                   </GlowButton>
                 </div>
               </div>
@@ -714,19 +734,19 @@ export default function ProfileClient({ user: initialUser }: ProfileClientProps)
       )}
 
       {/* Pending Role Status - Show if user has pending requests */}
-      {(roleData.pendingRole === 'teacher' || roleData.pendingRole === 'admin') && (
+      {(roleData.pendingRole === 'teacher' || roleData.pendingRole === 'org_admin') && (
         <div className="px-6">
           <div className="p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-xl">
             <div className="flex items-start gap-3">
               <Clock className="w-5 h-5 text-yellow-400 shrink-0 mt-0.5" />
               <div>
                 <p className="text-white font-medium mb-1">
-                  {roleData.pendingRole === 'teacher' ? 'Teacher Request Pending' : 'Admin Request Pending'}
+                  {roleData.pendingRole === 'teacher' ? 'Teacher Request Pending' : 'Organization Admin Request Pending'}
                 </p>
                 <p className="text-sm text-yellow-400">
                   {roleData.pendingRole === 'teacher' 
                     ? `Your request to become a teacher at ${roleData.pendingOrganizationName || 'an organization'} is awaiting approval.`
-                    : 'Your admin request is being reviewed. You will be contacted for verification.'}
+                    : 'Your organization admin request is being reviewed. You will be contacted for verification.'}
                 </p>
               </div>
             </div>
@@ -1142,36 +1162,51 @@ export default function ProfileClient({ user: initialUser }: ProfileClientProps)
         </div>
       )}
 
-      {/* Admin Request Modal */}
-      {showRequestAdminModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setShowRequestAdminModal(false)}>
+      {/* Organization Admin Request Modal */}
+      {showRequestOrgAdminModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setShowRequestOrgAdminModal(false)}>
           <div className="bg-[#16161F] border border-white/10 rounded-2xl w-full max-w-md shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between p-6 border-b border-white/10">
               <div className="flex items-center gap-2">
                 <Crown className="w-5 h-5 text-purple-400" />
-                <h2 className="text-xl font-bold text-white">Request Admin Role</h2>
+                <h2 className="text-xl font-bold text-white">Request Organization Admin Role</h2>
               </div>
-              <button onClick={() => setShowRequestAdminModal(false)} className="p-1 hover:bg-white/5 rounded-lg">
+              <button onClick={() => setShowRequestOrgAdminModal(false)} className="p-1 hover:bg-white/5 rounded-lg">
                 <X className="w-5 h-5 text-[#A0A0B5]" />
               </button>
             </div>
             <div className="p-6 space-y-4">
               <p className="text-[#A0A0B5] text-sm">
-                Admin privileges allow you to manage organizations, users, and platform settings. Your request will be reviewed by our team.
+                Select the organization where you'd like to become an admin. Your request will be sent to the organization admin for approval.
               </p>
+              <div>
+                <Label className="text-sm font-medium text-[#A0A0B5] mb-2 block">Organization</Label>
+                <select
+                  value={selectedOrgId || ""}
+                  onChange={(e) => setSelectedOrgId(Number(e.target.value))}
+                  className="w-full bg-[#12121A] border border-white/10 text-white rounded-xl h-12 px-4"
+                >
+                  <option value="">Select an organization</option>
+                  {mockOrganizations.map(org => (
+                    <option key={org.id} value={org.id}>{org.name}</option>
+                  ))}
+                </select>
+              </div>
               <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-xl">
                 <p className="text-xs text-blue-400">
-                  You'll be contacted via email for verification. Admin approval may take 1-2 business days.
+                  Organization admin privileges allow you to manage members, courses, and organization settings.
+                  Your request will be reviewed by the current organization admin.
                 </p>
               </div>
               <div className="flex gap-3 pt-4">
-                <GlowButton variant="ghost" onClick={() => setShowRequestAdminModal(false)} className="flex-1">
+                <GlowButton variant="ghost" onClick={() => setShowRequestOrgAdminModal(false)} className="flex-1">
                   Cancel
                 </GlowButton>
                 <GlowButton 
                   variant="primary" 
-                  onClick={handleRequestAdmin} 
+                  onClick={handleRequestOrgAdmin} 
                   isLoading={isRequesting}
+                  disabled={!selectedOrgId}
                   className="flex-1"
                 >
                   Submit Request

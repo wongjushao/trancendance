@@ -13,7 +13,10 @@ import {
   BarChart3,
   Settings,
   ChevronLeft,
-  Menu,
+  Menu, 
+  Users,
+  Crown,
+  Shield
 } from "lucide-react";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 import { useAvatar } from "@/lib/useAvatar";
@@ -21,14 +24,15 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 import { useRole } from "@/components/providers/RoleProvider";
 
 const navItems = [
-  { path: "/dashboard",      label: "Dashboard",     icon: LayoutDashboard, roles: ['student', 'teacher', 'admin', 'pending_admin', 'pending_teacher'] },
-  { path: "/organizations",  label: "Organizations", icon: Building2, roles: ['student', 'teacher', 'admin', 'pending_admin', 'pending_teacher'] },
-  { path: "/courses",        label: "Courses",       icon: BookOpen, roles: ['student', 'teacher', 'admin', 'pending_admin', 'pending_teacher'] },
-  { path: "/assignments",    label: "Assignments",   icon: FileText, roles: ['student', 'teacher', 'admin', 'pending_admin', 'pending_teacher'] },
-  { path: "/analytics",      label: "Analytics",     icon: BarChart3, roles: ['student', 'teacher', 'admin', 'pending_admin', 'pending_teacher'] },
-  { path: "/admin",          label: "Admin",         icon: Settings, roles: ['admin'] },
+  { path: "/dashboard",      label: "Dashboard",     icon: LayoutDashboard, roles: ['student', 'teacher', 'org_admin', 'system_admin', 'pending_org_admin', 'pending_teacher'] },
+  { path: "/courses",        label: "Courses",       icon: BookOpen,        roles: ['student', 'teacher', 'org_admin', 'system_admin', 'pending_org_admin', 'pending_teacher'] },
+  { path: "/assignments",    label: "Assignments",   icon: FileText,        roles: ['student', 'teacher', 'org_admin', 'system_admin', 'pending_org_admin', 'pending_teacher'] },
+  { path: "/analytics",      label: "Analytics",     icon: BarChart3,       roles: ['student', 'teacher', 'org_admin', 'system_admin', 'pending_org_admin', 'pending_teacher'] },
+  { path: "/student",        label: "My Learning",   icon: BookOpen,        roles: ['student'] },
+  { path: "/teacher",        label: "Teacher Hub",   icon: Users,           roles: ['teacher', 'org_admin', 'system_admin'] },
+  { path: "/organizations",  label: "Organizations", icon: Building2,       roles: ['student', 'teacher', 'org_admin', 'system_admin', 'pending_org_admin', 'pending_teacher'] },
   // Special links for pending roles
-  { path: "/organization-setup", label: "Setup Organization", icon: Building2, roles: ['pending_admin'] },
+  { path: "/organization-setup", label: "Setup Organization", icon: Building2, roles: ['pending_org_admin'] },
   { path: "/teacher-request", label: "Teacher Request", icon: Building2, roles: ['pending_teacher'] },
 ];
 
@@ -44,8 +48,8 @@ export function Sidebar({ user: initialUser }: SidebarProps) {
   const { avatarUrl, refreshAvatar } = useAvatar();
   const [user, setUser] = useState(initialUser);
   const [profileData, setProfileData] = useState<any>(null);
-  const [isCollapsed, setIsCollapsed] = useState(false); // Default to false for SSR
-  const [isMounted, setIsMounted] = useState(false); // Track mounted state
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
   const { roleData } = useRole();
 
   // Load sidebar state from localStorage only after mount (client-side only)
@@ -87,21 +91,15 @@ export function Sidebar({ user: initialUser }: SidebarProps) {
   // Listen for profile updates to refresh avatar and user data
   useEffect(() => {
     const handleProfileUpdate = async () => {
-      // Refresh avatar
       await refreshAvatar();
-      
-      // Refresh user data from Supabase
       const supabase = getSupabaseBrowserClient();
       const { data: { user: updatedUser } } = await supabase.auth.getUser();
       if (updatedUser) {
         setUser(updatedUser);
       }
-      
-      // Refresh profile data
       await fetchProfileData();
     };
 
-    // Initial fetch
     fetchProfileData();
 
     if (typeof window !== 'undefined') {
@@ -120,7 +118,6 @@ export function Sidebar({ user: initialUser }: SidebarProps) {
 
   const email: string = user.email ?? "";
 
-  // Get initials from profile data first, fallback to user metadata
   const getInitials = () => {
     if (profileData?.first_name && profileData?.last_name) {
       return `${profileData.first_name[0]}${profileData.last_name[0]}`.toUpperCase();
@@ -133,20 +130,44 @@ export function Sidebar({ user: initialUser }: SidebarProps) {
       .toUpperCase();
   };
 
-  // Get display name from profile data first
   const displayName = profileData?.first_name && profileData?.last_name
     ? `${profileData.first_name} ${profileData.last_name}`
     : fullName;
 
   const initials = getInitials();
 
-  // Filter nav items based on role
-  const filteredNavItems = navItems.filter(item => 
+  // Build dynamic nav items with admin links based on role
+  const getNavItems = () => {
+    let items = [...navItems];
+    
+    // Add organization admin link for org_admin users
+    if (roleData.role === 'org_admin' && roleData.organizationId) {
+      items.push({ 
+        path: `/organizations/${roleData.organizationId}/admin`, 
+        label: "Organization Admin", 
+        icon: Crown, 
+        roles: ['org_admin'] 
+      });
+    }
+    
+    // Add system admin link for system_admin users
+    if (roleData.role === 'system_admin') {
+      items.push({ 
+        path: "/admin", 
+        label: "System Admin", 
+        icon: Shield, 
+        roles: ['system_admin'] 
+      });
+    }
+    
+    return items;
+  };
+
+  const filteredNavItems = getNavItems().filter(item => 
     item.roles.includes(roleData.role)
   );
 
   // Don't render until after mount to prevent hydration mismatch
-  // This ensures server and client render the same initial state (expanded)
   if (!isMounted) {
     return (
       <aside 
@@ -191,23 +212,6 @@ export function Sidebar({ user: initialUser }: SidebarProps) {
               </Link>
             );
           })}
-          
-          {/* Admin Dashboard Link */}
-          {roleData.role === 'admin' && roleData.organizationId && (
-            <Link
-              href={`/organizations/${roleData.organizationId}/admin`}
-              className={`
-                flex items-center gap-3 px-4 py-3 rounded-xl transition-all mt-4 border-t border-white/10 pt-4
-                ${pathname === `/organizations/${roleData.organizationId}/admin`
-                  ? "bg-gradient-to-r from-purple-500/20 to-violet-600/20 text-white border border-purple-500/30 shadow-lg shadow-purple-500/20"
-                  : "text-[#A0A0B5] hover:text-white hover:bg-white/5"
-                }
-              `}
-            >
-              <Settings className="w-5 h-5 shrink-0" />
-              <span className="font-medium">Admin Dashboard</span>
-            </Link>
-          )}
         </nav>
 
         {/* User card placeholder */}
@@ -297,25 +301,6 @@ export function Sidebar({ user: initialUser }: SidebarProps) {
             </Link>
           );
         })}
-        
-        {/* Admin Dashboard Link - Shown only for admin users with an organization */}
-        {roleData.role === 'admin' && roleData.organizationId && (
-          <Link
-            href={`/organizations/${roleData.organizationId}/admin`}
-            className={`
-              flex items-center gap-3 px-4 py-3 rounded-xl transition-all mt-4 border-t border-white/10 pt-4
-              ${isCollapsed ? 'justify-center' : ''}
-              ${pathname === `/organizations/${roleData.organizationId}/admin`
-                ? "bg-gradient-to-r from-purple-500/20 to-violet-600/20 text-white border border-purple-500/30 shadow-lg shadow-purple-500/20"
-                : "text-[#A0A0B5] hover:text-white hover:bg-white/5"
-              }
-            `}
-            title={isCollapsed ? "Admin Dashboard" : undefined}
-          >
-            <Settings className="w-5 h-5 shrink-0" />
-            {!isCollapsed && <span className="font-medium">Admin Dashboard</span>}
-          </Link>
-        )}
       </nav>
 
       {/* User card - Only show when not collapsed */}

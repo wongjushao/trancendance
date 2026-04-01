@@ -1,52 +1,17 @@
 // frontend/app/(main)/dashboard/page.tsx
-
-import { createSupabaseServerClient } from "@/lib/supabase/server-client";
 import { redirect } from "next/navigation";
-import DashboardClient from "./DashboardClient";
+import { createSupabaseServerClient } from "@/lib/supabase/server-client";
+import { cookies } from "next/headers";
+import StudentDashboard from "@/components/dashboard/StudentDashboard";
+import TeacherDashboard from "@/components/dashboard/TeacherDashboard";
+import AdminDashboard from "@/components/dashboard/AdminDashboard";
+import SystemAdminDashboard from "@/components/dashboard/SystemAdminDashboard";
 
-// Static mock data - kept for potential future use
-const upcomingAssignments = [
-  { id: 1, title: "React Hooks Deep Dive",    course: "Advanced React",      dueDate: "2026-03-08", status: "pending" },
-  { id: 2, title: "Database Design Project",  course: "Backend Development", dueDate: "2026-03-10", status: "pending" },
-  { id: 3, title: "UI/UX Case Study",         course: "Design Principles",   dueDate: "2026-03-12", status: "in-progress" },
-];
-
-const recentActivity = [
-  { id: 1, text: "Completed lesson: Authentication in Node.js", time: "2 hours ago" },
-  { id: 2, text: "New comment on your submission",              time: "5 hours ago" },
-  { id: 3, text: "Assignment graded: REST API Design",          time: "1 day ago" },
-  { id: 4, text: "Enrolled in Advanced TypeScript",             time: "2 days ago" },
-];
-
-const activeCourses = [
-  {
-    id: 1,
-    title: "Advanced React Development",
-    instructor: "Sarah Johnson",
-    progress: 65,
-    thumbnail: "https://images.unsplash.com/photo-1633356122544-f134324a6cee?w=400",
-    students: 1234,
-    lessons: 24,
-  },
-  {
-    id: 2,
-    title: "Backend with Node.js",
-    instructor: "Michael Chen",
-    progress: 45,
-    thumbnail: "https://images.unsplash.com/photo-1627398242454-45a1465c2479?w=400",
-    students: 892,
-    lessons: 18,
-  },
-  {
-    id: 3,
-    title: "UI/UX Design Fundamentals",
-    instructor: "Emily Rodriguez",
-    progress: 80,
-    thumbnail: "https://images.unsplash.com/photo-1561070791-2526d30994b5?w=400",
-    students: 2341,
-    lessons: 32,
-  },
-];
+interface RoleCookieData {
+  role: string;
+  organizationId: number | null;
+  organizationName: string | null;
+}
 
 export default async function DashboardPage() {
   const supabase = await createSupabaseServerClient();
@@ -54,12 +19,38 @@ export default async function DashboardPage() {
 
   if (!user) redirect("/");
 
-  return (
-    <DashboardClient 
-      user={user} 
-      upcomingAssignments={upcomingAssignments} 
-      recentActivity={recentActivity} 
-      activeCourses={activeCourses} 
-    />
-  );
+  // Get role from cookie
+  const cookieStore = await cookies();
+  const roleCookie = cookieStore.get('user_role_data');
+  
+  let userRole = 'student';
+  let organizationId = null;
+  let organizationName = null;
+  
+  if (roleCookie) {
+    try {
+      const roleData: RoleCookieData = JSON.parse(roleCookie.value);
+      userRole = roleData.role;
+      organizationId = roleData.organizationId;
+      organizationName = roleData.organizationName;
+    } catch (error) {
+      console.error('Error parsing role cookie:', error);
+    }
+  }
+
+  // Render appropriate dashboard based on role
+  if (userRole === 'teacher') {
+    return <TeacherDashboard user={user} organizationId={organizationId} organizationName={organizationName} />;
+  }
+  
+  if (userRole === 'org_admin') {
+    return <AdminDashboard user={user} organizationId={organizationId} organizationName={organizationName} />;
+  }
+  
+  if (userRole === 'system_admin') {
+    return <SystemAdminDashboard user={user} organizationId={organizationId} organizationName={organizationName} />;
+  }
+  
+  // Default to student dashboard
+  return <StudentDashboard user={user} organizationId={organizationId} organizationName={organizationName} />;
 }

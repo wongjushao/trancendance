@@ -1,39 +1,29 @@
-// frontend/app/(main)/dashboard/DashboardClient.tsx
-
+// frontend/components/dashboard/StudentDashboard.tsx
 "use client";
 
 import { useState, useEffect } from "react";
-import { 
-  BookOpen, Clock, Trophy, Target, TrendingUp, 
+import Link from "next/link";
+import {
+  BookOpen, Clock, Trophy, Target, TrendingUp,
   Calendar, Activity, Award, Users, ChevronRight,
   PlayCircle, FileText, MessageCircle, Bell, Star,
   Sparkles, BarChart3, FolderOpen, CheckCircle2,
-  Globe, Zap, Shield
 } from "lucide-react";
 import { GlowCard, StatCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
-import Link from "next/link";
-import type { User as SupabaseUser } from "@supabase/supabase-js";
-import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
-import { useRole } from "@/components/providers/RoleProvider";
 import { motion } from "framer-motion";
-
 import { AchievementsList } from "@/components/dashboard/AchievementsList";
 import { FriendsList } from "@/components/dashboard/FriendsList";
 import { LearningCalendar } from "@/components/dashboard/LearningCalendar";
 import { UpcomingItems } from "@/components/dashboard/UpcomingItems";
 import { RecentItems } from "@/components/dashboard/RecentItems";
 
-const PROFILE_UPDATED_EVENT = 'profile-updated';
-
-interface DashboardClientProps {
-  user: SupabaseUser;
-  upcomingAssignments: any[];
-  recentActivity: any[];
-  activeCourses: any[];
+interface StudentDashboardProps {
+  user: any;
+  organizationId?: number | null;
+  organizationName?: string | null;
 }
 
-// Enhanced mock data for professional dashboard
 const learningMetrics = {
   totalHours: 158,
   weeklyHours: 24,
@@ -56,7 +46,6 @@ const recommendedCourses = [
     students: "12.4k",
     duration: "8 weeks",
     level: "Advanced",
-    image: "https://images.unsplash.com/photo-1516116216624-53e697fedbea?w=400"
   },
   {
     id: 102,
@@ -66,7 +55,6 @@ const recommendedCourses = [
     students: "45.2k",
     duration: "12 weeks",
     level: "Intermediate",
-    image: "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=400"
   },
   {
     id: 103,
@@ -76,7 +64,6 @@ const recommendedCourses = [
     students: "8.9k",
     duration: "6 weeks",
     level: "Advanced",
-    image: "https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=400"
   }
 ];
 
@@ -87,41 +74,12 @@ const recentActivities = [
   { id: 4, type: "achievement", title: "7-Day Learning Streak", date: "2 days ago", points: 25 },
 ];
 
-export default function DashboardClient({ user: initialUser }: DashboardClientProps) {
-  const [user, setUser] = useState(initialUser);
-  const { roleData, isPending, refreshRole } = useRole();
-
-  // Listen for profile updates to refresh user data
-  useEffect(() => {
-    const handleProfileUpdate = async () => {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user: updatedUser } } = await supabase.auth.getUser();
-      if (updatedUser) {
-        setUser(updatedUser);
-      }
-      // Refresh role data as well
-      refreshRole();
-    };
-
-    if (typeof window !== 'undefined') {
-      window.addEventListener(PROFILE_UPDATED_EVENT, handleProfileUpdate);
-      return () => {
-        window.removeEventListener(PROFILE_UPDATED_EVENT, handleProfileUpdate);
-      };
-    }
-  }, [refreshRole]);
-
-  const fullName: string =
-    user.user_metadata?.full_name ||
-    user.user_metadata?.name ||
-    user.email?.split("@")[0] ||
-    "there";
-
-  const firstName = fullName.split(" ")[0];
+export default function StudentDashboard({ user, organizationId, organizationName }: StudentDashboardProps) {
+  const firstName = user.user_metadata?.full_name?.split(" ")[0] || user.email?.split("@")[0] || "there";
 
   return (
     <div className="space-y-8 pb-12">
-      {/* Professional Welcome Header */}
+      {/* Welcome Header */}
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-purple-600 via-purple-500 to-violet-600 p-8">
         <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl" />
         <div className="absolute bottom-0 left-0 w-48 h-48 bg-purple-400/20 rounded-full blur-2xl" />
@@ -129,18 +87,22 @@ export default function DashboardClient({ user: initialUser }: DashboardClientPr
         <div className="relative z-10">
           <div className="flex items-center gap-3 mb-4">
             <div className="px-3 py-1 bg-white/20 rounded-full text-xs font-medium text-white">
-              {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+              Student Dashboard
             </div>
             <div className="px-3 py-1 bg-white/20 rounded-full text-xs font-medium text-white">
               {learningMetrics.streakDays} Day Streak
             </div>
+            {organizationName && (
+              <div className="px-3 py-1 bg-white/20 rounded-full text-xs font-medium text-white">
+                {organizationName}
+              </div>
+            )}
           </div>
           <h1 className="text-4xl font-bold text-white mb-2">
             Welcome back, {firstName}!
           </h1>
-          <p className="text-purple-100 text-lg max-w-2xl">
-            You've learned <span className="font-semibold">{learningMetrics.totalHours}</span> hours this month. 
-            Keep up the great work! 🎯
+          <p className="text-purple-100 text-lg">
+            Continue your learning journey. You've learned <span className="font-semibold">{learningMetrics.totalHours}</span> hours this month.
           </p>
           
           <div className="flex gap-4 mt-6">
@@ -160,50 +122,7 @@ export default function DashboardClient({ user: initialUser }: DashboardClientPr
         </div>
       </div>
 
-      {/* Role-based Banners */}
-      {roleData.role === "pending_admin" && (
-        <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-5">
-          <div className="flex items-start gap-4">
-            <div className="p-2 rounded-lg bg-amber-500/20">
-              <Shield className="w-5 h-5 text-amber-400" />
-            </div>
-            <div className="flex-1">
-              <h3 className="text-white font-semibold mb-1">Complete Your Organization Setup</h3>
-              <p className="text-sm text-amber-300/80 mb-3">
-                You've requested admin access. Complete organization verification to unlock full admin features.
-              </p>
-              <Link href="/organization-setup">
-                <GlowButton variant="primary" size="sm" className="bg-amber-500 hover:bg-amber-600">
-                  Complete Setup
-                </GlowButton>
-              </Link>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {roleData.role === "pending_teacher" && (
-        <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-5">
-          <div className="flex items-start gap-4">
-            <div className="p-2 rounded-lg bg-blue-500/20">
-              <Clock className="w-5 h-5 text-blue-400" />
-            </div>
-            <div className="flex-1">
-              <h3 className="text-white font-semibold mb-1">Teacher Request Under Review</h3>
-              <p className="text-sm text-blue-300/80 mb-3">
-                Your application to become a teacher at {roleData.pendingOrganizationName || "your organization"} is being reviewed.
-              </p>
-              <Link href="/teacher-request">
-                <GlowButton variant="primary" size="sm" className="bg-blue-500 hover:bg-blue-600">
-                  Check Status
-                </GlowButton>
-              </Link>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Stats Grid - Professional Cards */}
+      {/* Stats Grid - Same as before */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0 }}>
           <div className="bg-gradient-to-br from-[#16161F] to-[#12121A] rounded-xl p-5 border border-white/5 hover:border-purple-500/30 transition-all">
@@ -258,11 +177,9 @@ export default function DashboardClient({ user: initialUser }: DashboardClientPr
         </motion.div>
       </div>
 
-      {/* Main Grid Layout - 2 Columns */}
+      {/* Main Grid Layout - Same as before */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column - Learning Progress & Calendar */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Learning Progress Section */}
           <GlowCard className="p-6">
             <div className="flex items-center justify-between mb-6">
               <div>
@@ -275,7 +192,6 @@ export default function DashboardClient({ user: initialUser }: DashboardClientPr
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Weekly Hours Chart */}
               <div className="bg-[#12121A] rounded-xl p-4 border border-white/5">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">
@@ -299,7 +215,6 @@ export default function DashboardClient({ user: initialUser }: DashboardClientPr
                 </div>
               </div>
 
-              {/* Skill Progress */}
               <div className="bg-[#12121A] rounded-xl p-4 border border-white/5">
                 <div className="flex items-center gap-2 mb-4">
                   <Star className="w-4 h-4 text-purple-400" />
@@ -325,7 +240,6 @@ export default function DashboardClient({ user: initialUser }: DashboardClientPr
             </div>
           </GlowCard>
 
-          {/* Learning Calendar */}
           <GlowCard className="p-6">
             <div className="flex items-center justify-between mb-6">
               <div>
@@ -337,9 +251,7 @@ export default function DashboardClient({ user: initialUser }: DashboardClientPr
           </GlowCard>
         </div>
 
-        {/* Right Column - Quick Actions & Activity */}
         <div className="space-y-6">
-          {/* Upcoming Deadlines */}
           <GlowCard className="p-6">
             <div className="flex items-center justify-between mb-6">
               <div>
@@ -353,7 +265,6 @@ export default function DashboardClient({ user: initialUser }: DashboardClientPr
             <UpcomingItems />
           </GlowCard>
 
-          {/* Recent Activity Feed */}
           <GlowCard className="p-6">
             <div className="flex items-center justify-between mb-6">
               <div>
@@ -387,14 +298,8 @@ export default function DashboardClient({ user: initialUser }: DashboardClientPr
                 </div>
               ))}
             </div>
-            <div className="mt-4 pt-4 border-t border-white/5">
-              <Link href="/profile" className="w-full text-center text-sm text-purple-400 hover:text-purple-300 block">
-                View Full Activity
-              </Link>
-            </div>
           </GlowCard>
 
-          {/* Recommended Courses */}
           <GlowCard className="p-6">
             <div className="flex items-center gap-2 mb-6">
               <Sparkles className="w-5 h-5 text-purple-400" />
@@ -427,16 +332,11 @@ export default function DashboardClient({ user: initialUser }: DashboardClientPr
                 </Link>
               ))}
             </div>
-            <div className="mt-4 pt-4 border-t border-white/5">
-              <Link href="/courses" className="w-full text-center text-sm text-purple-400 hover:text-purple-300 block">
-                Browse More Courses
-              </Link>
-            </div>
           </GlowCard>
         </div>
       </div>
 
-      {/* Achievements Section - Full Width */}
+      {/* Achievements & Friends Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <GlowCard className="p-6">
           <div className="flex items-center justify-between mb-6">
@@ -461,7 +361,6 @@ export default function DashboardClient({ user: initialUser }: DashboardClientPr
         </GlowCard>
       </div>
 
-      {/* Recent Items */}
       <GlowCard className="p-6">
         <div className="flex items-center justify-between mb-6">
           <div>
