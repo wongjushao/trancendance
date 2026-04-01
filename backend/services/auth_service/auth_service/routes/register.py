@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import uuid
 from datetime import date
-from typing import List, Optional
 
 import jwt
 import requests
@@ -138,6 +137,12 @@ def register_profile():
         finally:
             session_check.close()
 
+    # Get timezone from payload, default to UTC if not provided
+    timezone = payload.get("timezone", "UTC")
+    
+    # Get job title - support both 'job_title' and 'role' field names
+    job_title = payload.get("job_title") or payload.get("role") or None
+
     # ── Upsert the profile row ────────────────────────────────────────────────
     session = db_session()
     try:
@@ -154,9 +159,9 @@ def register_profile():
         profile.birthday     = birthday                      or profile.birthday
         profile.invited_by   = invited_by                    or profile.invited_by
         profile.bio          = payload.get("bio")            or profile.bio
-        profile.job_title    = payload.get("job_title") or payload.get("role") or profile.job_title
+        profile.job_title    = job_title                     or profile.job_title
         profile.interests    = interests                     or profile.interests
-        profile.timezone     = payload.get("timezone")       or profile.timezone
+        profile.timezone     = timezone                      or profile.timezone
         profile.language     = _validate_language(payload.get("language")) or profile.language
         
         # Mark as onboarded since this is the completion of the onboarding flow

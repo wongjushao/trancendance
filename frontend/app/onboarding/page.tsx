@@ -18,6 +18,7 @@ import { useRole } from "@/components/providers/RoleProvider";
 import { UserRole, Organization, mockOrganizations } from "@/lib/role";
 import { OrganizationAutoDetect } from "@/components/onboarding/OrganizationAutoDetect";
 import { createRoleRequest } from "@/lib/role-requests";
+import { toast } from "sonner";
 
 // Constants
 const TOTAL_STEPS = 4;
@@ -438,10 +439,14 @@ export default function OnboardingPage() {
             }));
           }
         } else {
-          console.error('[onboarding] Avatar upload failed');
+          const errorData = await uploadRes.json();
+          console.error('[onboarding] Avatar upload failed:', errorData.error);
+          // Show a toast notification but don't block onboarding
+          toast.error("Profile created but avatar upload failed. You can upload it later from settings.");
         }
       } catch (err) {
         console.error('[onboarding] Avatar upload error:', err);
+        toast.error("Profile created but avatar upload failed. You can upload it later from settings.");
       }
     }
 

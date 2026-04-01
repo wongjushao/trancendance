@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import uuid
+import logging
 from flask import Blueprint, jsonify, request, current_app
 from werkzeug.utils import secure_filename
 from supabase import create_client
@@ -10,6 +11,9 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from backend.common.models import Profile
 from backend.services.auth_service.auth_service.utils.supabase_jwt import extract_bearer_token, verify_supabase_jwt
+
+# Set up logger
+logger = logging.getLogger(__name__)
 
 avatar_bp = Blueprint("avatar", __name__)
 
@@ -21,6 +25,21 @@ def allowed_file(filename: str) -> bool:
     """Check if file has an allowed extension."""
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def ensure_avatars_bucket(supabase_admin):
+    """Ensure the avatars bucket exists, create it if it doesn't."""
+    try:
+        # Try to get the bucket to see if it exists
+        supabase_admin.storage.get_bucket('avatars')
+        logger.info("Avatars bucket already exists")
+    except Exception as e:
+        # Bucket doesn't exist, create it
+        try:
+            supabase_admin.storage.create_bucket('avatars', {'public': True})
+            logger.info("Created 'avatars' storage bucket")
+        except Exception as create_error:
+            logger.warning(f"Could not create avatars bucket: {create_error}")
+            # Continue anyway - the upload might still work if bucket was created by another process
 
 @avatar_bp.post("/upload-avatar")
 def upload_avatar():
@@ -68,6 +87,9 @@ def upload_avatar():
         
         supabase_admin = create_client(supabase_url, supabase_service_key)
         
+        # Ensure avatars bucket exists
+        ensure_avatars_bucket(supabase_admin)
+        
         # Generate secure filename
         filename = secure_filename(file.filename)
         file_ext = filename.rsplit('.', 1)[1].lower()
@@ -112,4 +134,5 @@ def upload_avatar():
             session.close()
             
     except Exception as e:
+        logger.error(f"Avatar upload error: {str(e)}")
         return jsonify({"error": str(e)}), 500
