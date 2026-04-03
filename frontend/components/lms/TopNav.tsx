@@ -2,23 +2,55 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { Bell, Search, User, ChevronDown, Settings, CreditCard, LogOut, Award, BookOpen, UserCircle } from "lucide-react";
+import { Bell, Search, User, ChevronDown, Settings, CreditCard, LogOut, Award, BookOpen, UserCircle, AlertTriangle, X } from "lucide-react";
 import { Input } from "../ui/input";
 import SignOutButton from "../SignOutButton";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 import { useAvatar } from "@/lib/useAvatar";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 import { useRouter } from "next/navigation";
+import { GlowButton } from "./GlowButton";
 
 interface TopNavProps {
   user: SupabaseUser;
 }
+
+// Confirmation Modal Component
+const ConfirmSignOutModal = ({ isOpen, onClose, onConfirm }: { isOpen: boolean; onClose: () => void; onConfirm: () => void }) => {
+  if (!isOpen) return null;
+  
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+      <div className="bg-gray-900 rounded-lg max-w-md w-full mx-4 border border-gray-700">
+        <div className="p-6">
+          <div className="w-12 h-12 rounded-full bg-yellow-500/20 flex items-center justify-center mx-auto mb-4">
+            <AlertTriangle className="w-6 h-6 text-yellow-500" />
+          </div>
+          <h3 className="text-lg font-semibold text-white text-center mb-2">Sign Out?</h3>
+          <p className="text-sm text-gray-400 text-center mb-6">
+            Are you sure you want to sign out? You'll need to sign in again to access your courses and dashboard.
+          </p>
+          <div className="flex gap-3">
+            <GlowButton variant="outline" onClick={onClose} fullWidth>
+              Cancel
+            </GlowButton>
+            <GlowButton onClick={onConfirm} fullWidth>
+              Sign Out
+            </GlowButton>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 export function TopNav({ user }: TopNavProps) {
   const router = useRouter();
   const { avatarUrl, refreshAvatar } = useAvatar();
   const [notifOpen, setNotifOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [showSignOutModal, setShowSignOutModal] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
   const [profileName, setProfileName] = useState("");
   const [profileData, setProfileData] = useState<{
     first_name: string | null;
@@ -73,6 +105,32 @@ export function TopNav({ user }: TopNavProps) {
     }
   };
 
+  // Handle sign out with confirmation
+  const handleSignOut = async () => {
+    setIsSigningOut(true);
+    try {
+      const supabase = getSupabaseBrowserClient();
+      
+      // Clear any stored data
+      localStorage.removeItem("sidebar_collapsed");
+      localStorage.removeItem("user_role_data");
+      
+      // Sign out from Supabase
+      const { error } = await supabase.auth.signOut();
+      
+      if (error) throw error;
+      
+      // Redirect to login page
+      router.push("/login");
+      router.refresh();
+    } catch (error) {
+      console.error("Error signing out:", error);
+    } finally {
+      setIsSigningOut(false);
+      setShowSignOutModal(false);
+    }
+  };
+
   // Listen for profile updates to refresh avatar and user data
   useEffect(() => {
     const handleProfileUpdate = async () => {
@@ -122,161 +180,152 @@ export function TopNav({ user }: TopNavProps) {
   };
 
   return (
-    <header className="sticky top-0 z-30 bg-gray-900/80 backdrop-blur-sm border-b border-gray-800">
-      <div className="h-16 px-6 flex items-center justify-between">
-        {/* Search Bar */}
-        <div className="flex-1 max-w-md">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <Input
-              type="search"
-              placeholder="Search courses, lessons, or assignments..."
-              className="w-full pl-10 pr-4 py-2 bg-gray-800/50 border-gray-700 rounded-lg text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
-            />
-          </div>
-        </div>
-
-        {/* Actions */}
-        <div className="flex items-center gap-4">
-          {/* Notifications */}
-          <div className="relative" ref={dropdownRef}>
-            <button
-              onClick={() => {
-                setNotifOpen(!notifOpen);
-                setProfileOpen(false);
-              }}
-              className="relative p-2 rounded-lg hover:bg-gray-800 transition-colors"
-            >
-              <Bell className="w-5 h-5 text-gray-400" />
-              <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
-            </button>
-
-            {/* Notifications Dropdown */}
-            {notifOpen && (
-              <div className="absolute right-0 mt-2 w-80 bg-gray-800 rounded-lg shadow-lg border border-gray-700 overflow-hidden z-50">
-                <div className="p-3 border-b border-gray-700">
-                  <h3 className="font-semibold text-white">Notifications</h3>
-                </div>
-                <div className="max-h-96 overflow-y-auto">
-                  <div className="p-3 hover:bg-gray-700/50 transition-colors cursor-pointer">
-                    <p className="text-sm text-white">New assignment available</p>
-                    <p className="text-xs text-gray-400 mt-1">Advanced React Development</p>
-                    <p className="text-xs text-gray-500 mt-1">2 hours ago</p>
-                  </div>
-                  <div className="p-3 hover:bg-gray-700/50 transition-colors cursor-pointer">
-                    <p className="text-sm text-white">Course completed!</p>
-                    <p className="text-xs text-gray-400 mt-1">TypeScript Fundamentals</p>
-                    <p className="text-xs text-gray-500 mt-1">Yesterday</p>
-                  </div>
-                  <div className="p-3 hover:bg-gray-700/50 transition-colors cursor-pointer">
-                    <p className="text-sm text-white">New message from instructor</p>
-                    <p className="text-xs text-gray-400 mt-1">Sarah Johnson</p>
-                    <p className="text-xs text-gray-500 mt-1">2 days ago</p>
-                  </div>
-                </div>
-                <div className="p-3 border-t border-gray-700 text-center">
-                  <Link href="/notifications" className="text-sm text-purple-400 hover:text-purple-300">
-                    View all notifications
-                  </Link>
-                </div>
-              </div>
-            )}
+    <>
+      <header className="sticky top-0 z-30 bg-gray-900/80 backdrop-blur-sm border-b border-gray-800">
+        <div className="h-16 px-6 flex items-center justify-between">
+          {/* Search Bar */}
+          <div className="flex-1 max-w-md">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <Input
+                type="search"
+                placeholder="Search courses, lessons, or assignments..."
+                className="w-full pl-10 pr-4 py-2 bg-gray-800/50 border-gray-700 rounded-lg text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
+              />
+            </div>
           </div>
 
-          {/* Profile Dropdown */}
-          <div className="relative" ref={dropdownRef}>
-            <button
-              onClick={() => {
-                setProfileOpen(!profileOpen);
-                setNotifOpen(false);
-              }}
-              className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-gray-800 transition-colors"
-            >
-              {/* Avatar with image support */}
-              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center overflow-hidden">
-                {avatarUrl ? (
-                  <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
-                ) : (
-                  <span className="text-white text-sm font-semibold">{getInitials()}</span>
-                )}
-              </div>
-              <ChevronDown className="w-4 h-4 text-gray-400" />
-            </button>
+          {/* Actions */}
+          <div className="flex items-center gap-4">
+            {/* Notifications */}
+            <div className="relative" ref={dropdownRef}>
+              <button
+                onClick={() => {
+                  setNotifOpen(!notifOpen);
+                  setProfileOpen(false);
+                }}
+                className="relative p-2 rounded-lg hover:bg-gray-800 transition-colors"
+              >
+                <Bell className="w-5 h-5 text-gray-400" />
+                <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
+              </button>
 
-            {/* Profile Dropdown Menu */}
-            {profileOpen && (
-              <div className="absolute right-0 mt-2 w-64 bg-gray-800 rounded-lg shadow-lg border border-gray-700 overflow-hidden z-50">
-                {/* User Info Header */}
-                <div className="p-4 border-b border-gray-700 bg-gray-800/50">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center overflow-hidden">
-                      {avatarUrl ? (
-                        <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
-                      ) : (
-                        <span className="text-white font-semibold">{getInitials()}</span>
-                      )}
+              {/* Notifications Dropdown */}
+              {notifOpen && (
+                <div className="absolute right-0 mt-2 w-80 bg-gray-800 rounded-lg shadow-lg border border-gray-700 overflow-hidden z-50">
+                  <div className="p-3 border-b border-gray-700">
+                    <h3 className="font-semibold text-white">Notifications</h3>
+                  </div>
+                  <div className="max-h-96 overflow-y-auto">
+                    <div className="p-3 hover:bg-gray-700/50 transition-colors cursor-pointer">
+                      <p className="text-sm text-white">New assignment available</p>
+                      <p className="text-xs text-gray-400 mt-1">Advanced React Development</p>
+                      <p className="text-xs text-gray-500 mt-1">2 hours ago</p>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-white truncate">{profileName}</p>
-                      <p className="text-xs text-gray-400 truncate">{user.email}</p>
+                    <div className="p-3 hover:bg-gray-700/50 transition-colors cursor-pointer">
+                      <p className="text-sm text-white">Course completed!</p>
+                      <p className="text-xs text-gray-400 mt-1">TypeScript Fundamentals</p>
+                      <p className="text-xs text-gray-500 mt-1">Yesterday</p>
+                    </div>
+                    <div className="p-3 hover:bg-gray-700/50 transition-colors cursor-pointer">
+                      <p className="text-sm text-white">New message from instructor</p>
+                      <p className="text-xs text-gray-400 mt-1">Sarah Johnson</p>
+                      <p className="text-xs text-gray-500 mt-1">2 days ago</p>
                     </div>
                   </div>
+                  <div className="p-3 border-t border-gray-700 text-center">
+                    <Link href="/notifications" className="text-sm text-purple-400 hover:text-purple-300">
+                      View all notifications
+                    </Link>
+                  </div>
                 </div>
+              )}
+            </div>
 
-                {/* Menu Items */}
-                <div className="py-2">
-                  <Link
-                    href="/profile"
-                    className="flex items-center gap-3 px-4 py-2 text-sm text-gray-300 hover:bg-gray-700/50 transition-colors"
-                    onClick={() => setProfileOpen(false)}
-                  >
-                    <UserCircle className="w-4 h-4" />
-                    View Profile
-                  </Link>
-                  <Link
-                    href="/dashboard"
-                    className="flex items-center gap-3 px-4 py-2 text-sm text-gray-300 hover:bg-gray-700/50 transition-colors"
-                    onClick={() => setProfileOpen(false)}
-                  >
-                    <BookOpen className="w-4 h-4" />
-                    My Learning
-                  </Link>
-                  <Link
-                    href="/settings"
-                    className="flex items-center gap-3 px-4 py-2 text-sm text-gray-300 hover:bg-gray-700/50 transition-colors"
-                    onClick={() => setProfileOpen(false)}
-                  >
-                    <Settings className="w-4 h-4" />
-                    Settings
-                  </Link>
-                  <Link
-                    href="/analytics"
-                    className="flex items-center gap-3 px-4 py-2 text-sm text-gray-300 hover:bg-gray-700/50 transition-colors"
-                    onClick={() => setProfileOpen(false)}
-                  >
-                    <Award className="w-4 h-4" />
-                    Achievements
-                  </Link>
-                  <div className="border-t border-gray-700 my-1"></div>
-                  <button
-                    onClick={async () => {
-                      setProfileOpen(false);
-                      const supabase = getSupabaseBrowserClient();
-                      await supabase.auth.signOut();
-                      router.push("/auth/login");
-                      router.refresh();
-                    }}
-                    className="w-full flex items-center gap-3 px-4 py-2 text-sm text-red-400 hover:bg-gray-700/50 transition-colors"
-                  >
-                    <LogOut className="w-4 h-4" />
-                    Sign Out
-                  </button>
+            {/* Profile Dropdown */}
+            <div className="relative" ref={dropdownRef}>
+              <button
+                onClick={() => {
+                  setProfileOpen(!profileOpen);
+                  setNotifOpen(false);
+                }}
+                className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-gray-800 transition-colors"
+              >
+                {/* Avatar with image support */}
+                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center overflow-hidden">
+                  {avatarUrl ? (
+                    <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="text-white text-sm font-semibold">{getInitials()}</span>
+                  )}
                 </div>
-              </div>
-            )}
+                <ChevronDown className="w-4 h-4 text-gray-400" />
+              </button>
+
+              {/* Profile Dropdown Menu */}
+              {profileOpen && (
+                <div className="absolute right-0 mt-2 w-64 bg-gray-800 rounded-lg shadow-lg border border-gray-700 overflow-hidden z-50">
+                  {/* User Info Header */}
+                  <div className="p-4 border-b border-gray-700 bg-gray-800/50">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center overflow-hidden">
+                        {avatarUrl ? (
+                          <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                        ) : (
+                          <span className="text-white font-semibold">{getInitials()}</span>
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-white truncate">{profileName}</p>
+                        <p className="text-xs text-gray-400 truncate">{user.email}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Menu Items - Removed "My Learning" option */}
+                  <div className="py-2">
+                    <Link
+                      href="/profile"
+                      className="flex items-center gap-3 px-4 py-2 text-sm text-gray-300 hover:bg-gray-700/50 transition-colors"
+                      onClick={() => setProfileOpen(false)}
+                    >
+                      <UserCircle className="w-4 h-4" />
+                      View Profile
+                    </Link>
+                    <Link
+                      href="/settings"
+                      className="flex items-center gap-3 px-4 py-2 text-sm text-gray-300 hover:bg-gray-700/50 transition-colors"
+                      onClick={() => setProfileOpen(false)}
+                    >
+                      <Settings className="w-4 h-4" />
+                      Settings
+                    </Link>
+                    <div className="border-t border-gray-700 my-1"></div>
+                    <button
+                      onClick={() => {
+                        setProfileOpen(false);
+                        setShowSignOutModal(true);
+                      }}
+                      className="w-full flex items-center gap-3 px-4 py-2 text-sm text-red-400 hover:bg-gray-700/50 transition-colors"
+                      disabled={isSigningOut}
+                    >
+                      <LogOut className="w-4 h-4" />
+                      {isSigningOut ? "Signing out..." : "Sign Out"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
-      </div>
-    </header>
+      </header>
+
+      {/* Sign Out Confirmation Modal */}
+      <ConfirmSignOutModal
+        isOpen={showSignOutModal}
+        onClose={() => setShowSignOutModal(false)}
+        onConfirm={handleSignOut}
+      />
+    </>
   );
 }

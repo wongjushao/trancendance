@@ -1,7 +1,5 @@
 // frontend/components/onboarding/OrganizationAutoDetect.tsx
-"use client";
-
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Building2, CheckCircle, AlertCircle } from "lucide-react";
 import { Organization } from "@/lib/role";
 import { extractDomainFromEmail, findOrganizationByDomain } from "@/lib/domain-utils";
@@ -19,80 +17,105 @@ export function OrganizationAutoDetect({
 }: OrganizationAutoDetectProps) {
   const [detectedOrg, setDetectedOrg] = useState<Organization | null>(null);
   const [status, setStatus] = useState<'checking' | 'found' | 'not-found'>('checking');
+  const hasNotifiedRef = useRef(false);
 
   useEffect(() => {
+    // Skip if no email
     if (!email) {
       setStatus('checking');
       setDetectedOrg(null);
-      onOrganizationDetected(null);
       return;
     }
 
+    // Extract domain from email
     const domain = extractDomainFromEmail(email);
+    
     if (!domain) {
       setStatus('not-found');
       setDetectedOrg(null);
-      onOrganizationDetected(null);
+      if (!hasNotifiedRef.current) {
+        onOrganizationDetected(null);
+        hasNotifiedRef.current = true;
+      }
       return;
     }
 
+    // Find organization by domain
     const org = findOrganizationByDomain(domain, organizations);
     
     if (org) {
       setDetectedOrg(org);
       setStatus('found');
-      onOrganizationDetected(org);
+      if (!hasNotifiedRef.current) {
+        onOrganizationDetected(org);
+        hasNotifiedRef.current = true;
+      }
     } else {
       setDetectedOrg(null);
       setStatus('not-found');
-      onOrganizationDetected(null);
+      if (!hasNotifiedRef.current) {
+        onOrganizationDetected(null);
+        hasNotifiedRef.current = true;
+      }
     }
-  }, [email, organizations, onOrganizationDetected]);
+  }, [email, organizations]); // Removed onOrganizationDetected from dependencies
 
-  if (status === 'checking' || !email) {
+  // Reset notification flag when email changes
+  useEffect(() => {
+    hasNotifiedRef.current = false;
+  }, [email]);
+
+  if (!email) {
     return null;
   }
 
-  if (status === 'found' && detectedOrg) {
-    return (
-      <div className="mt-4 p-4 bg-green-500/10 border border-green-500/20 rounded-xl">
+  return (
+    <div className="mt-2 p-3 rounded-lg border transition-all duration-300 
+      ${status === 'checking' ? 'bg-gray-800/30 border-gray-700' : ''}
+      ${status === 'found' ? 'bg-green-500/10 border-green-500/30' : ''}
+      ${status === 'not-found' ? 'bg-yellow-500/10 border-yellow-500/30' : ''}
+    ">
+      {status === 'checking' && (
+        <div className="flex items-center gap-2 text-gray-400">
+          <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+          <span className="text-sm">Checking organization from email domain...</span>
+        </div>
+      )}
+
+      {status === 'found' && detectedOrg && (
         <div className="flex items-start gap-3">
-          <CheckCircle className="w-5 h-5 text-green-400 shrink-0 mt-0.5" />
+          <div className="flex-shrink-0">
+            <CheckCircle className="w-5 h-5 text-green-400" />
+          </div>
           <div className="flex-1">
-            <p className="text-white font-medium mb-1">
-              Organization Detected!
+            <p className="text-sm font-medium text-green-400">Organization Detected!</p>
+            <p className="text-sm text-white mt-1">
+              Your email domain matches <span className="font-semibold">{detectedOrg.name}</span>
             </p>
-            <p className="text-sm text-[#A0A0B5]">
-              Your email domain ({detectedOrg.domain}) is associated with{' '}
-              <span className="text-green-400 font-medium">{detectedOrg.name}</span>.
-              You'll automatically join this organization as a student.
+            <p className="text-xs text-gray-400 mt-1">
+              You'll be able to join this organization during onboarding.
             </p>
-            <div className="mt-3 flex items-center gap-2 text-xs text-[#6B6B80]">
-              <Building2 className="w-3 h-3" />
-              <span>{detectedOrg.memberCount.toLocaleString()} members</span>
-              <span>•</span>
-              <span>{detectedOrg.verified ? '✓ Verified' : 'Unverified'}</span>
-            </div>
+          </div>
+          <Building2 className="w-5 h-5 text-green-400 flex-shrink-0" />
+        </div>
+      )}
+
+      {status === 'not-found' && (
+        <div className="flex items-start gap-3">
+          <div className="flex-shrink-0">
+            <AlertCircle className="w-5 h-5 text-yellow-400" />
+          </div>
+          <div className="flex-1">
+            <p className="text-sm font-medium text-yellow-400">No Organization Found</p>
+            <p className="text-sm text-white mt-1">
+              Your email domain doesn't match any existing organization.
+            </p>
+            <p className="text-xs text-gray-400 mt-1">
+              You can create a new organization or skip this step.
+            </p>
           </div>
         </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="mt-4 p-4 bg-blue-500/10 border border-blue-500/20 rounded-xl">
-      <div className="flex items-start gap-3">
-        <AlertCircle className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
-        <div className="flex-1">
-          <p className="text-white font-medium mb-1">
-            No Organization Detected
-          </p>
-          <p className="text-sm text-[#A0A0B5]">
-            Your email domain isn't associated with any organization.
-            You can select one below or join an organization later from your dashboard.
-          </p>
-        </div>
-      </div>
+      )}
     </div>
   );
 }

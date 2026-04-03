@@ -33,6 +33,7 @@ class Profile(Base):
     interests: Mapped[list[str] | None] = mapped_column(JSONB)
     onboarded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(server_default=text("now()"), nullable=False)
+    has_password: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
 class ApiKey(Base):
