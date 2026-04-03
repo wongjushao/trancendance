@@ -1,12 +1,10 @@
 // frontend/components/dev/RoleSwitcher.tsx
-"use client";
+'use client';
 
 import { useState, useEffect } from "react";
 import { Shield, ChevronDown, Check, Eye } from "lucide-react";
 import { useRole } from "@/components/providers/RoleProvider";
 import { UserRole } from "@/lib/role";
-
-const IS_DEV = process.env.NODE_ENV === 'development';
 
 interface RoleOption {
   value: UserRole;
@@ -18,185 +16,152 @@ interface RoleOption {
   organizationName?: string | null;
 }
 
-const roles: RoleOption[] = [
-  { 
-    value: 'student', 
-    label: 'Student', 
-    description: 'Focus on learning and courses',
-    icon: '📚',
-    dashboardPreview: 'Shows active courses, learning progress, achievements, and recommended content',
-    organizationId: null,
-    organizationName: null
+const roleOptions: RoleOption[] = [
+  {
+    value: "student",
+    label: "Student",
+    description: "Access courses and learning materials",
+    icon: "📚",
+    dashboardPreview: "Student Dashboard with courses and progress"
   },
-  { 
-    value: 'teacher', 
-    label: 'Teacher', 
-    description: 'Manage courses and grade assignments',
-    icon: '👨‍🏫',
-    dashboardPreview: 'Shows course management, pending submissions, student analytics, and revenue metrics',
-    organizationId: 1,
-    organizationName: 'Tech University'
+  {
+    value: "teacher",
+    label: "Teacher",
+    description: "Create and manage courses",
+    icon: "👨‍🏫",
+    dashboardPreview: "Teacher Dashboard with course management"
   },
-  { 
-    value: 'org_admin', 
-    label: 'Organization Admin', 
-    description: 'Manage your organization\'s members, courses, and settings',
-    icon: '👑',
-    dashboardPreview: 'Shows organization management, member roles, course oversight, and org analytics',
-    organizationId: 1,
-    organizationName: 'Tech University'
+  {
+    value: "org_admin",
+    label: "Organization Admin",
+    description: "Manage organization settings and members",
+    icon: "🏢",
+    dashboardPreview: "Organization Admin Dashboard"
   },
-  { 
-    value: 'system_admin', 
-    label: 'System Admin', 
-    description: 'Full platform control across all organizations',
-    icon: '🛡️',
-    dashboardPreview: 'Shows global user management, system settings, audit logs, and platform analytics',
-    organizationId: null,
-    organizationName: null
+  {
+    value: "system_admin",
+    label: "System Admin",
+    description: "Full system access",
+    icon: "👑",
+    dashboardPreview: "System Admin Dashboard"
   },
-  { 
-    value: 'pending_teacher', 
-    label: 'Pending Teacher', 
-    description: 'Teacher request awaiting approval',
-    icon: '⏳',
-    dashboardPreview: 'Shows pending request status with organization info',
-    organizationId: 1,
-    organizationName: 'Tech University'
+  {
+    value: "pending_teacher",
+    label: "Pending Teacher",
+    description: "Teacher request pending approval",
+    icon: "⏳",
+    dashboardPreview: "Pending approval page"
   },
-  { 
-    value: 'pending_org_admin', 
-    label: 'Pending Org Admin', 
-    description: 'Organization admin request awaiting verification',
-    icon: '⏳',
-    dashboardPreview: 'Shows pending request with organization setup instructions',
-    organizationId: null,
-    organizationName: null
-  },
+  {
+    value: "pending_org_admin",
+    label: "Pending Org Admin",
+    description: "Organization admin request pending",
+    icon: "⏳",
+    dashboardPreview: "Pending approval page"
+  }
 ];
 
 export function RoleSwitcher() {
   const { roleData, setRole, clearRole } = useRole();
   const [isOpen, setIsOpen] = useState(false);
-  const [showPreview, setShowPreview] = useState(false);
-  const [selectedRole, setSelectedRole] = useState<RoleOption | null>(null);
-  const [mounted, setMounted] = useState(false);
+  const [showPreview, setShowPreview] = useState<string | null>(null);
 
-  useEffect(() => {
-    setMounted(true);
-    // Find current role for preview
-    const current = roles.find(r => r.value === roleData.role);
-    setSelectedRole(current || null);
-  }, [roleData.role]);
-
-  if (!IS_DEV || !mounted) return null;
+  const currentRole = roleOptions.find(r => r.value === roleData.role) || roleOptions[0];
 
   const switchRole = (role: RoleOption) => {
     setRole({
       role: role.value,
-      organizationId: role.organizationId,
-      organizationName: role.organizationName,
-      pendingRole: role.value === 'pending_teacher' ? 'teacher' : role.value === 'pending_org_admin' ? 'org_admin' : null,
-      pendingOrganizationId: role.organizationId,
-      pendingOrganizationName: role.organizationName,
+      organizationId: role.organizationId || null,
+      organizationName: role.organizationName || null,
+      pendingRole: null,
     });
-    
-    setSelectedRole(role);
     setIsOpen(false);
-    
     // Reload to refresh the dashboard with new role
     window.location.reload();
   };
 
   const getCurrentRoleIcon = () => {
-    const current = roles.find(r => r.value === roleData.role);
-    return current?.icon || '👤';
+    return currentRole.icon;
   };
 
   const getCurrentRoleLabel = () => {
-    const current = roles.find(r => r.value === roleData.role);
-    return current?.label || roleData.role.replace('_', ' ');
+    return currentRole.label;
   };
 
   return (
-    <div className="fixed bottom-4 left-4 z-50">
-      <div className="relative">
-        <button
-          onClick={() => setIsOpen(!isOpen)}
-          className="flex items-center gap-2 px-3 py-2 bg-purple-600/90 backdrop-blur-sm rounded-lg text-white text-sm font-medium shadow-lg hover:bg-purple-500 transition-colors border border-purple-400/30 group"
-          onMouseEnter={() => setShowPreview(true)}
-          onMouseLeave={() => setShowPreview(false)}
-        >
-          <Shield className="w-4 h-4" />
-          <span className="hidden sm:inline">
-            {getCurrentRoleIcon()} {getCurrentRoleLabel()}
-          </span>
-          <span className="sm:hidden">
-            {getCurrentRoleIcon()}
-          </span>
-          <ChevronDown className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-        </button>
+    <div className="relative">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="flex items-center gap-2 rounded-lg bg-gray-800 px-3 py-2 text-sm text-white shadow-lg hover:bg-gray-700 transition-all border border-gray-700"
+        aria-label="Role switcher"
+      >
+        <Shield className="h-4 w-4" />
+        <span className="font-medium">{getCurrentRoleLabel()}</span>
+        <ChevronDown className={`h-3 w-3 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
 
-        {/* Role Preview Tooltip */}
-        {showPreview && selectedRole && (
-          <div className="absolute bottom-full left-0 mb-2 w-80 bg-[#16161F] border border-white/10 rounded-xl shadow-2xl p-3 pointer-events-none">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-2xl">{selectedRole.icon}</span>
-              <div>
-                <p className="text-white font-semibold text-sm">{selectedRole.label}</p>
-                <p className="text-xs text-[#A0A0B5]">{selectedRole.description}</p>
-              </div>
+      {/* Role Switcher Menu */}
+      {isOpen && (
+        <>
+          {/* Backdrop */}
+          <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
+          
+          {/* Menu */}
+          <div className="absolute bottom-full right-0 mb-2 w-80 rounded-lg bg-gray-800 shadow-xl border border-gray-700 z-50">
+            <div className="p-2 border-b border-gray-700">
+              <p className="text-xs text-gray-400">Switch Role (Development Only)</p>
             </div>
-            <div className="text-xs text-[#6B6B80] mt-2 pt-2 border-t border-white/5">
-              <Eye className="w-3 h-3 inline mr-1" />
-              Dashboard: {selectedRole.dashboardPreview}
-            </div>
-          </div>
-        )}
-
-        {/* Role Switcher Menu */}
-        {isOpen && (
-          <div className="absolute bottom-full left-0 mb-2 w-80 bg-[#16161F] border border-white/10 rounded-xl shadow-2xl overflow-hidden">
-            <div className="p-3 border-b border-white/10 bg-purple-500/10">
-              <p className="text-xs font-semibold text-purple-400">🎮 Developer Tools</p>
-              <p className="text-[10px] text-[#6B6B80]">Switch roles to test different dashboards</p>
-            </div>
-            {roles.map((role) => (
-              <button
-                key={role.value}
-                onClick={() => switchRole(role)}
-                className={`w-full px-4 py-3 text-left hover:bg-white/5 transition-colors flex items-center justify-between group ${
-                  roleData.role === role.value ? 'bg-purple-500/20' : ''
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">{role.icon}</span>
-                  <div>
-                    <p className="text-white text-sm font-medium group-hover:text-purple-400 transition-colors">
-                      {role.label}
-                    </p>
-                    <p className="text-[10px] text-[#6B6B80]">{role.description}</p>
-                  </div>
+            <div className="max-h-96 overflow-y-auto">
+              {roleOptions.map((option) => (
+                <div
+                  key={option.value}
+                  className="relative"
+                  onMouseEnter={() => setShowPreview(option.value)}
+                  onMouseLeave={() => setShowPreview(null)}
+                >
+                  <button
+                    onClick={() => switchRole(option)}
+                    className={`w-full px-3 py-2 text-left hover:bg-gray-700 transition-colors flex items-center justify-between group ${
+                      roleData.role === option.value ? 'bg-gray-700' : ''
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg">{option.icon}</span>
+                      <div>
+                        <div className="text-sm font-medium text-white">{option.label}</div>
+                        <div className="text-xs text-gray-400">{option.description}</div>
+                      </div>
+                    </div>
+                    {roleData.role === option.value && (
+                      <Check className="h-4 w-4 text-green-500" />
+                    )}
+                  </button>
+                  
+                  {/* Preview Tooltip */}
+                  {showPreview === option.value && (
+                    <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 w-64 rounded-lg bg-gray-900 shadow-xl border border-gray-700 p-2 z-50 pointer-events-none">
+                      <div className="text-xs text-gray-400 mb-1">Preview</div>
+                      <div className="text-sm text-white">{option.dashboardPreview}</div>
+                    </div>
+                  )}
                 </div>
-                {roleData.role === role.value && (
-                  <Check className="w-4 h-4 text-purple-400" />
-                )}
-              </button>
-            ))}
-            <div className="p-2 border-t border-white/10 bg-[#12121A]">
+              ))}
+            </div>
+            <div className="p-2 border-t border-gray-700">
               <button
                 onClick={() => {
                   clearRole();
+                  setIsOpen(false);
                   window.location.reload();
                 }}
-                className="w-full text-center text-xs text-red-400 hover:text-red-300 transition-colors py-1"
+                className="w-full text-center text-xs text-red-400 hover:text-red-300 transition-colors"
               >
-                Reset Role to Default
+                Reset to Default
               </button>
             </div>
           </div>
-        )}
-      </div>
+        </>
+      )}
     </div>
   );
 }

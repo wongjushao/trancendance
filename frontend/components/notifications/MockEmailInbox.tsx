@@ -1,5 +1,5 @@
 // frontend/components/notifications/MockEmailInbox.tsx
-"use client";
+'use client';
 
 import { useState, useEffect } from "react";
 import { Mail, X, Trash2, ExternalLink } from "lucide-react";
@@ -14,15 +14,15 @@ export function MockEmailInbox({ isOpen, onClose }: MockEmailInboxProps) {
   const [emails, setEmails] = useState<MockEmail[]>([]);
   const [selectedEmail, setSelectedEmail] = useState<MockEmail | null>(null);
 
+  const loadEmails = () => {
+    setEmails(getMockEmails());
+  };
+
   useEffect(() => {
     if (isOpen) {
       loadEmails();
     }
   }, [isOpen]);
-
-  const loadEmails = () => {
-    setEmails(getMockEmails());
-  };
 
   const handleMarkRead = (id: string) => {
     markEmailAsRead(id);
@@ -30,117 +30,110 @@ export function MockEmailInbox({ isOpen, onClose }: MockEmailInboxProps) {
   };
 
   const handleClearAll = () => {
-    if (confirm("Clear all mock emails?")) {
-      clearMockEmails();
-      loadEmails();
-      setSelectedEmail(null);
-    }
+    clearMockEmails();
+    loadEmails();
+    setSelectedEmail(null);
   };
 
   if (!isOpen) return null;
 
-  const unreadCount = emails.filter(e => !e.read).length;
-
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50" onClick={onClose}>
-      <div 
-        className="bg-[#16161F] border border-white/10 rounded-2xl w-full max-w-4xl h-[600px] shadow-2xl flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-white/10">
-          <div className="flex items-center gap-2">
-            <Mail className="w-5 h-5 text-purple-400" />
-            <h2 className="text-lg font-bold text-white">Mock Email Inbox (Development)</h2>
-            {unreadCount > 0 && (
-              <span className="px-2 py-0.5 bg-purple-500/20 text-purple-400 rounded-full text-xs">
-                {unreadCount} unread
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
+    <div className="fixed bottom-28 right-4 z-50 w-96 rounded-lg bg-gray-900 shadow-xl border border-gray-700 flex flex-col max-h-[500px]">
+      {/* Header */}
+      <div className="flex items-center justify-between p-3 border-b border-gray-700 bg-gray-800 rounded-t-lg">
+        <div className="flex items-center gap-2">
+          <Mail className="h-4 w-4 text-blue-400" />
+          <h3 className="font-semibold text-white">Mock Email Inbox</h3>
+          <span className="text-xs text-gray-400">({emails.length})</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {emails.length > 0 && (
             <button
               onClick={handleClearAll}
-              className="p-2 hover:bg-white/5 rounded-lg transition-colors text-red-400 text-sm"
+              className="text-gray-400 hover:text-red-400 transition-colors"
+              title="Clear all emails"
             >
-              <Trash2 className="w-4 h-4" />
+              <Trash2 className="h-4 w-4" />
             </button>
-            <button
-              onClick={onClose}
-              className="p-2 hover:bg-white/5 rounded-lg transition-colors"
-            >
-              <X className="w-5 h-5 text-[#A0A0B5]" />
-            </button>
-          </div>
+          )}
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-white transition-colors"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="flex h-96">
+        {/* Email List */}
+        <div className="w-1/2 border-r border-gray-700 overflow-y-auto">
+          {emails.length === 0 ? (
+            <div className="p-4 text-center text-gray-400 text-sm">
+              No emails yet
+            </div>
+          ) : (
+            emails.map((email) => (
+              <button
+                key={email.id}
+                onClick={() => {
+                  setSelectedEmail(email);
+                  if (!email.read) handleMarkRead(email.id);
+                }}
+                className={`w-full p-3 text-left hover:bg-gray-800 transition-colors border-b border-gray-700 ${
+                  selectedEmail?.id === email.id ? 'bg-gray-800' : ''
+                } ${!email.read ? 'border-l-4 border-l-blue-500' : ''}`}
+              >
+                <div className="font-medium text-white text-sm truncate">
+                  {email.subject}
+                </div>
+                <div className="text-xs text-gray-400 truncate mt-1">
+                  To: {email.to}
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  {new Date(email.createdAt).toLocaleTimeString()}
+                </div>
+              </button>
+            ))
+          )}
         </div>
 
-        <div className="flex-1 flex overflow-hidden">
-          {/* Email List */}
-          <div className="w-1/3 border-r border-white/10 overflow-y-auto">
-            {emails.length === 0 ? (
-              <div className="text-center py-8 text-[#A0A0B5]">
-                <Mail className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">No mock emails yet</p>
-                <p className="text-xs mt-1">Send invitations to see them here</p>
+        {/* Email Content */}
+        <div className="w-1/2 overflow-y-auto p-3">
+          {selectedEmail ? (
+            <div>
+              <div className="mb-3">
+                <div className="font-semibold text-white text-sm mb-1">
+                  {selectedEmail.subject}
+                </div>
+                <div className="text-xs text-gray-400">
+                  To: {selectedEmail.to}
+                </div>
+                <div className="text-xs text-gray-500">
+                  {new Date(selectedEmail.createdAt).toLocaleString()}
+                </div>
               </div>
-            ) : (
-              emails.map((email) => (
-                <button
-                  key={email.id}
-                  onClick={() => {
-                    setSelectedEmail(email);
-                    if (!email.read) handleMarkRead(email.id);
-                  }}
-                  className={`w-full p-3 text-left border-b border-white/5 hover:bg-white/5 transition-colors ${
-                    selectedEmail?.id === email.id ? 'bg-white/10' : ''
-                  } ${!email.read ? 'border-l-4 border-l-purple-500' : ''}`}
+              <div className="text-sm text-gray-300 whitespace-pre-wrap mb-3">
+                {selectedEmail.body}
+              </div>
+              {selectedEmail.link && (
+                <a
+                  href={selectedEmail.link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors"
                 >
-                  <div className="flex items-center justify-between mb-1">
-                    <p className={`text-sm truncate ${!email.read ? 'text-white font-medium' : 'text-[#A0A0B5]'}`}>
-                      {email.subject}
-                    </p>
-                    <p className="text-[10px] text-[#6B6B80]">
-                      {new Date(email.createdAt).toLocaleTimeString()}
-                    </p>
-                  </div>
-                  <p className="text-xs text-[#6B6B80] truncate">To: {email.to}</p>
-                </button>
-              ))
-            )}
-          </div>
-
-          {/* Email Content */}
-          <div className="flex-1 overflow-y-auto p-4">
-            {selectedEmail ? (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-semibold text-white">{selectedEmail.subject}</h3>
-                  {selectedEmail.link && (
-                    <a
-                      href={selectedEmail.link}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1 px-3 py-1.5 bg-purple-500/20 text-purple-400 rounded-lg text-sm hover:bg-purple-500/30 transition-colors"
-                    >
-                      <ExternalLink className="w-3 h-3" />
-                      Open Link
-                    </a>
-                  )}
-                </div>
-                <div className="text-sm text-[#A0A0B5] whitespace-pre-wrap">
-                  {selectedEmail.body}
-                </div>
-                <div className="pt-4 text-xs text-[#6B6B80] border-t border-white/5">
-                  Sent to: {selectedEmail.to}
-                </div>
-              </div>
-            ) : (
-              <div className="text-center py-12 text-[#A0A0B5]">
-                <Mail className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                <p>Select an email to read</p>
-              </div>
-            )}
-          </div>
+                  <ExternalLink className="h-3 w-3" />
+                  Follow Link
+                </a>
+              )}
+            </div>
+          ) : (
+            <div className="text-center text-gray-400 text-sm mt-8">
+              Select an email to read
+            </div>
+          )}
         </div>
       </div>
     </div>
