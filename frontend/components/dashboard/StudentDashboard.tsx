@@ -11,11 +11,10 @@ import {
 import { GlowCard, StatCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
 import { motion } from "framer-motion";
-import { AchievementsList } from "@/components/dashboard/AchievementsList";
-import { FriendsList } from "@/components/dashboard/FriendsList";
 import { LearningCalendar } from "@/components/dashboard/LearningCalendar";
 import { UpcomingItems } from "@/components/dashboard/UpcomingItems";
 import { RecentItems } from "@/components/dashboard/RecentItems";
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 
 interface StudentDashboardProps {
   user: any;
@@ -23,7 +22,7 @@ interface StudentDashboardProps {
   organizationName?: string | null;
 }
 
-// Mock data for enrolled courses
+// Mock data for enrolled courses (in-progress only)
 const enrolledCourses = [
   {
     id: 1,
@@ -53,60 +52,36 @@ const enrolledCourses = [
     rating: 4.9,
     certificateEarned: false,
   },
-  {
-    id: 3,
-    title: "UI/UX Design Fundamentals",
-    description: "Learn design principles, wireframing, and prototyping",
-    thumbnail: "",
-    instructor: "Emily Rodriguez",
-    instructorAvatar: "ER",
-    progress: 85,
-    lessonsCompleted: 17,
-    totalLessons: 20,
-    lastAccessed: new Date(2024, 0, 16),
-    rating: 4.7,
-    certificateEarned: true,
-    certificateUrl: "#",
-  },
 ];
 
-// Mock data for recent activity
+// Mock data for recent activity (last 5 actions)
 const recentActivity = [
   {
     id: 1,
-    type: "course",
+    type: "course" as const,
     title: "React Hooks Deep Dive",
     courseName: "Advanced React Development",
     progress: 75,
     lastAccessed: new Date(2024, 0, 16, 14, 30),
-    status: "in-progress",
+    status: "in-progress" as const,
   },
   {
     id: 2,
-    type: "assignment",
+    type: "assignment" as const,
     title: "Build a Custom Hook",
     courseName: "Advanced React Development",
     progress: 100,
     lastAccessed: new Date(2024, 0, 15, 10, 0),
-    status: "completed",
-  },
-  {
-    id: 3,
-    type: "course",
-    title: "TypeScript Generics",
-    courseName: "Full-Stack TypeScript",
-    progress: 40,
-    lastAccessed: new Date(2024, 0, 14, 16, 45),
-    status: "in-progress",
+    status: "completed" as const,
   },
 ];
 
-// Mock data for upcoming items
+// Mock data for upcoming deadlines (next 7 days only)
 const upcomingItems = [
   {
     id: 1,
     title: "API Integration Assignment",
-    type: "assignment",
+    type: "assignment" as const,
     courseName: "Backend Development",
     date: new Date(2024, 0, 20, 23, 59),
     dueDate: new Date(2024, 0, 20, 23, 59),
@@ -114,88 +89,9 @@ const upcomingItems = [
   {
     id: 2,
     title: "Final Exam",
-    type: "exam",
+    type: "exam" as const,
     courseName: "Data Structures",
     date: new Date(2024, 0, 25, 14, 0),
-  },
-  {
-    id: 3,
-    title: "Team Project Meeting",
-    type: "live_session",
-    courseName: "Project Management",
-    date: new Date(2024, 0, 18, 15, 0),
-  },
-];
-
-// Mock achievements data
-const achievements = [
-  {
-    id: "1",
-    title: "Quick Learner",
-    description: "Completed 5 lessons in a week",
-    icon: Trophy,
-    isEarned: true,
-    dateEarned: "2024-01-15",
-  },
-  {
-    id: "2",
-    title: "Perfect Attendance",
-    description: "Logged in for 7 consecutive days",
-    icon: Star,
-    isEarned: true,
-    dateEarned: "2024-01-20",
-  },
-  {
-    id: "3",
-    title: "Assignment Master",
-    description: "Submitted 10 assignments on time",
-    icon: Award,
-    isEarned: false,
-    progress: 70,
-  },
-  {
-    id: "4",
-    title: "Course Warrior",
-    description: "Complete 3 full courses",
-    icon: Target,
-    isEarned: false,
-    progress: 33,
-  },
-];
-
-// Mock friends data
-const friends = [
-  {
-    id: "1",
-    name: "Alice Johnson",
-    avatar: "AJ",
-    status: "online" as const,
-    lastActive: "Just now",
-    courseCount: 3,
-  },
-  {
-    id: "2",
-    name: "Bob Smith",
-    avatar: "BS",
-    status: "offline" as const,
-    lastActive: "2 hours ago",
-    courseCount: 2,
-  },
-  {
-    id: "3",
-    name: "Carol Davis",
-    avatar: "CD",
-    status: "online" as const,
-    lastActive: "Just now",
-    courseCount: 4,
-  },
-  {
-    id: "4",
-    name: "David Wilson",
-    avatar: "DW",
-    status: "away" as const,
-    lastActive: "1 hour ago",
-    courseCount: 1,
   },
 ];
 
@@ -205,29 +101,64 @@ export default function StudentDashboard({
   organizationName 
 }: StudentDashboardProps) {
   const [greeting, setGreeting] = useState("");
+  const [displayName, setDisplayName] = useState("");
 
   useEffect(() => {
     const hour = new Date().getHours();
     if (hour < 12) setGreeting("Good morning");
     else if (hour < 18) setGreeting("Good afternoon");
     else setGreeting("Good evening");
-  }, []);
+    
+    // Fetch profile data to get the actual name
+    const fetchProfileName = async () => {
+      try {
+        const supabase = getSupabaseBrowserClient();
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("first_name, last_name, username")
+          .eq("id", user.id)
+          .single();
+        
+        if (!error && data) {
+          // Priority: first_name + last_name > username > email
+          if (data.first_name && data.last_name) {
+            setDisplayName(`${data.first_name} ${data.last_name}`);
+          } else if (data.first_name) {
+            setDisplayName(data.first_name);
+          } else if (data.username) {
+            setDisplayName(data.username);
+          } else {
+            setDisplayName(user.email?.split('@')[0] || "Learner");
+          }
+        } else {
+          // Fallback to user metadata or email
+          const metaFirst = user.user_metadata?.first_name;
+          const metaLast = user.user_metadata?.last_name;
+          if (metaFirst && metaLast) {
+            setDisplayName(`${metaFirst} ${metaLast}`);
+          } else if (metaFirst) {
+            setDisplayName(metaFirst);
+          } else {
+            setDisplayName(user.email?.split('@')[0] || "Learner");
+          }
+        }
+      } catch (error) {
+        console.error("Error fetching profile name:", error);
+        setDisplayName(user.email?.split('@')[0] || "Learner");
+      }
+    };
+    
+    fetchProfileName();
+  }, [user.id, user.email, user.user_metadata]);
 
-  // Calculate stats
+  // Calculate stats (today/week focused)
   const totalCourses = enrolledCourses.length;
   const completedCourses = enrolledCourses.filter(c => c.progress === 100).length;
   const averageProgress = Math.round(
     enrolledCourses.reduce((acc, c) => acc + c.progress, 0) / totalCourses
   );
-  const totalHours = enrolledCourses.reduce(
-    (acc, c) => acc + (c.lessonsCompleted * 45), // 45 minutes per lesson
-    0
-  );
-  const totalHoursRounded = Math.round(totalHours / 60);
-
-  // Calculate streak (mock - in real app would come from backend)
+  const totalHoursToday = 2; // Mock: hours studied today
   const streakDays = 7;
-  const nextMilestone = 10 - streakDays;
 
   return (
     <div className="space-y-6">
@@ -235,7 +166,7 @@ export default function StudentDashboard({
       <div className="flex justify-between items-start">
         <div>
           <h1 className="text-3xl font-bold text-white mb-2">
-            {greeting}, {user?.user_metadata?.first_name || user?.email?.split('@')[0]}! 👋
+            {greeting}, {displayName}! 👋
           </h1>
           <p className="text-gray-400">
             {organizationName 
@@ -255,34 +186,33 @@ export default function StudentDashboard({
         </div>
       </div>
 
-      {/* Stats Grid */}
+      {/* Stats Grid - Today focused */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
-          icon={BookOpen}
-          label="Enrolled Courses"
-          value={totalCourses}
-          trend={`${completedCourses} completed`}
+          icon={Clock}
+          label="Today's Progress"
+          value={`${totalHoursToday} hours`}
+          trend="+30 min from yesterday"
+          trendUp={true}
         />
         <StatCard
           icon={TrendingUp}
-          label="Avg. Progress"
-          value={`${averageProgress}%`}
-          trend={`${completedCourses} courses finished`}
-          trendUp={averageProgress > 50}
-        />
-        <StatCard
-          icon={Clock}
-          label="Learning Hours"
-          value={totalHoursRounded}
-          trend="This month"
-          trendUp={true}
-        />
-        <StatCard
-          icon={Trophy}
-          label="Day Streak"
+          label="Current Streak"
           value={`${streakDays} days`}
-          trend={`${nextMilestone} days to 10`}
+          trend="Keep it up!"
           trendUp={true}
+        />
+        <StatCard
+          icon={Target}
+          label="Tasks Due"
+          value="3"
+          trend="This week"
+        />
+        <StatCard
+          icon={Activity}
+          label="Active Courses"
+          value={totalCourses}
+          trend={`${completedCourses} completed`}
         />
       </div>
 
@@ -300,12 +230,12 @@ export default function StudentDashboard({
         </div>
       </div>
 
-      {/* My Courses Section */}
+      {/* My Courses Section - In Progress Only */}
       <div className="space-y-4">
         <div className="flex justify-between items-center">
           <div>
-            <h2 className="text-xl font-semibold text-white">My Learning</h2>
-            <p className="text-sm text-gray-400 mt-1">Continue where you left off</p>
+            <h2 className="text-xl font-semibold text-white">Continue Learning</h2>
+            <p className="text-sm text-gray-400 mt-1">Pick up where you left off</p>
           </div>
           <Link href="/courses">
             <GlowButton variant="ghost" size="sm" className="gap-1">
@@ -315,7 +245,7 @@ export default function StudentDashboard({
           </Link>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {enrolledCourses.map((course, index) => (
             <motion.div
               key={course.id}
@@ -325,7 +255,6 @@ export default function StudentDashboard({
             >
               <GlowCard className="hover:shadow-lg transition-all duration-300">
                 <div className="p-4">
-                  {/* Course Header */}
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex items-center gap-2">
                       <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white font-semibold">
@@ -338,15 +267,8 @@ export default function StudentDashboard({
                         <p className="text-xs text-gray-400">{course.instructor}</p>
                       </div>
                     </div>
-                    {course.certificateEarned && (
-                      <div className="flex items-center gap-1 text-green-400">
-                        <CheckCircle2 className="w-4 h-4" />
-                        <span className="text-xs">Certified</span>
-                      </div>
-                    )}
                   </div>
 
-                  {/* Progress Bar */}
                   <div className="mb-3">
                     <div className="flex justify-between text-xs text-gray-400 mb-1">
                       <span>Progress</span>
@@ -360,7 +282,6 @@ export default function StudentDashboard({
                     </div>
                   </div>
 
-                  {/* Course Stats */}
                   <div className="flex justify-between text-xs text-gray-400 mb-3">
                     <div className="flex items-center gap-1">
                       <PlayCircle className="w-3 h-3" />
@@ -372,7 +293,6 @@ export default function StudentDashboard({
                     </div>
                   </div>
 
-                  {/* Continue Button */}
                   <Link href={`/courses/${course.id}`}>
                     <GlowButton 
                       variant="outline" 
@@ -390,18 +310,6 @@ export default function StudentDashboard({
         </div>
       </div>
 
-      {/* Achievements & Friends Section */}
-      {(achievements.length > 0 || friends.length > 0) && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {achievements.length > 0 && (
-            <AchievementsList achievements={achievements} />
-          )}
-          {friends.length > 0 && (
-            <FriendsList friends={friends} />
-          )}
-        </div>
-      )}
-
       {/* Quick Actions Section */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Link href="/assignments">
@@ -418,11 +326,11 @@ export default function StudentDashboard({
             <p className="text-xs text-gray-500">2 unread</p>
           </div>
         </Link>
-        <Link href="/notifications">
+        <Link href="/profile">
           <div className="bg-gray-800/50 hover:bg-gray-800 rounded-lg p-3 text-center transition-all cursor-pointer group">
-            <Bell className="w-6 h-6 text-yellow-400 mx-auto mb-2 group-hover:scale-110 transition-transform" />
-            <p className="text-sm text-gray-300">Notifications</p>
-            <p className="text-xs text-gray-500">5 new</p>
+            <Award className="w-6 h-6 text-yellow-400 mx-auto mb-2 group-hover:scale-110 transition-transform" />
+            <p className="text-sm text-gray-300">Achievements</p>
+            <p className="text-xs text-gray-500">View all</p>
           </div>
         </Link>
         <Link href="/analytics">
