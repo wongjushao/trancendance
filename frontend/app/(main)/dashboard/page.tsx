@@ -17,40 +17,55 @@ export default async function DashboardPage() {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  if (!user) redirect("/");
+  if (!user) {
+    redirect("/auth/login");
+  }
 
   // Get role from cookie
   const cookieStore = await cookies();
-  const roleCookie = cookieStore.get('user_role_data');
-  
-  let userRole = 'student';
-  let organizationId = null;
-  let organizationName = null;
-  
-  if (roleCookie) {
+  const roleCookie = cookieStore.get("user_role_data");
+  let roleData: RoleCookieData = {
+    role: "student",
+    organizationId: null,
+    organizationName: null,
+  };
+
+  if (roleCookie?.value) {
     try {
-      const roleData: RoleCookieData = JSON.parse(roleCookie.value);
-      userRole = roleData.role;
-      organizationId = roleData.organizationId;
-      organizationName = roleData.organizationName;
-    } catch (error) {
-      console.error('Error parsing role cookie:', error);
+      roleData = JSON.parse(roleCookie.value);
+    } catch (e) {
+      console.error("Failed to parse role cookie", e);
     }
   }
 
   // Render appropriate dashboard based on role
-  if (userRole === 'teacher') {
-    return <TeacherDashboard user={user} organizationId={organizationId} organizationName={organizationName} />;
+  switch (roleData.role) {
+    case "system_admin":
+      return <SystemAdminDashboard user={user} />;
+    case "org_admin":
+      return (
+        <AdminDashboard 
+          user={user} 
+          organizationId={roleData.organizationId}
+          organizationName={roleData.organizationName}
+        />
+      );
+    case "teacher":
+      return (
+        <TeacherDashboard 
+          user={user} 
+          organizationId={roleData.organizationId}
+          organizationName={roleData.organizationName}
+        />
+      );
+    case "student":
+    default:
+      return (
+        <StudentDashboard 
+          user={user} 
+          organizationId={roleData.organizationId}
+          organizationName={roleData.organizationName}
+        />
+      );
   }
-  
-  if (userRole === 'org_admin') {
-    return <AdminDashboard user={user} organizationId={organizationId} organizationName={organizationName} />;
-  }
-  
-  if (userRole === 'system_admin') {
-    return <SystemAdminDashboard user={user} organizationId={organizationId} organizationName={organizationName} />;
-  }
-  
-  // Default to student dashboard
-  return <StudentDashboard user={user} organizationId={organizationId} organizationName={organizationName} />;
 }

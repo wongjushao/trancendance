@@ -1,20 +1,20 @@
 // frontend/components/dashboard/TeacherDashboard.tsx
 "use client";
-
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { 
   BookOpen, Users, Award, TrendingUp, Plus, Edit, 
   Trash2, Eye, CheckCircle, Clock, FileText,
   MessageSquare, DollarSign, BarChart3, Settings,
-  Star, Calendar, Search, UserPlus, Crown, X
+  Star, Calendar, Search, UserPlus, Crown, X,
+  GraduationCap, Target, Activity, Bell, Filter,
+  Download, Share2, MoreVertical, PlayCircle
 } from "lucide-react";
 import { GlowCard, StatCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
+import { motion } from "framer-motion";
 
 interface TeacherDashboardProps {
   user: any;
@@ -22,403 +22,544 @@ interface TeacherDashboardProps {
   organizationName?: string | null;
 }
 
-const mockCourses = [
+// Mock data for teacher's courses
+const teacherCourses = [
   {
     id: 1,
     title: "Advanced React Development",
-    description: "Master React hooks, context, and advanced patterns",
-    thumbnail: "https://images.unsplash.com/photo-1633356122544-f134324a6cee?w=400",
-    students: 1234,
-    lessons: 24,
+    description: "Master React hooks, context API, and advanced patterns",
+    thumbnail: "",
+    students: 45,
+    lessons: 20,
     rating: 4.8,
     price: 99,
-    status: "published",
-    createdAt: new Date("2024-01-15"),
-    updatedAt: new Date("2024-03-10"),
-    category: "Web Development",
-    level: "advanced",
+    status: "published" as const,
+    createdAt: new Date(2024, 0, 1),
+    updatedAt: new Date(2024, 0, 15),
+    category: "Development",
+    level: "advanced" as const,
   },
   {
     id: 2,
-    title: "Backend with Node.js",
-    description: "Build scalable backend services with Node.js and Express",
-    thumbnail: "https://images.unsplash.com/photo-1627398242454-45a1465c2479?w=400",
-    students: 892,
-    lessons: 18,
-    rating: 4.6,
+    title: "Full-Stack TypeScript",
+    description: "Build scalable applications with TypeScript, Node.js, and React",
+    thumbnail: "",
+    students: 32,
+    lessons: 20,
+    rating: 4.9,
+    price: 89,
+    status: "published" as const,
+    createdAt: new Date(2024, 0, 5),
+    updatedAt: new Date(2024, 0, 10),
+    category: "Development",
+    level: "intermediate" as const,
+  },
+  {
+    id: 3,
+    title: "UI/UX Design Fundamentals",
+    description: "Learn design principles, wireframing, and prototyping",
+    thumbnail: "",
+    students: 28,
+    lessons: 15,
+    rating: 4.7,
     price: 79,
-    status: "published",
-    createdAt: new Date("2024-02-01"),
-    updatedAt: new Date("2024-03-15"),
-    category: "Backend",
-    level: "intermediate",
+    status: "draft" as const,
+    createdAt: new Date(2024, 0, 10),
+    updatedAt: new Date(2024, 0, 12),
+    category: "Design",
+    level: "beginner" as const,
   },
 ];
 
-const mockSubmissions = [
+// Mock data for pending assignments to grade
+const pendingSubmissions = [
   {
     id: 1,
     assignmentId: 1,
+    assignmentTitle: "Build a Custom Hook",
+    courseId: 1,
+    courseTitle: "Advanced React Development",
+    studentId: "S001",
     studentName: "Alice Johnson",
     studentAvatar: "AJ",
-    submittedAt: new Date("2024-03-20"),
+    submittedAt: new Date(2024, 0, 16, 14, 30),
     grade: null,
     feedback: null,
-    status: "pending",
+    content: "https://example.com/submission1",
+    status: "pending" as const,
   },
   {
     id: 2,
-    assignmentId: 1,
+    assignmentId: 2,
+    assignmentTitle: "API Integration",
+    courseId: 2,
+    courseTitle: "Full-Stack TypeScript",
+    studentId: "S002",
     studentName: "Bob Smith",
     studentAvatar: "BS",
-    submittedAt: new Date("2024-03-21"),
+    submittedAt: new Date(2024, 0, 16, 10, 15),
+    grade: null,
+    feedback: null,
+    content: "https://example.com/submission2",
+    status: "pending" as const,
+  },
+  {
+    id: 3,
+    assignmentId: 1,
+    assignmentTitle: "Build a Custom Hook",
+    courseId: 1,
+    courseTitle: "Advanced React Development",
+    studentId: "S003",
+    studentName: "Carol Davis",
+    studentAvatar: "CD",
+    submittedAt: new Date(2024, 0, 15, 16, 45),
     grade: 85,
-    feedback: "Great work! Consider adding more error handling.",
-    status: "graded",
+    feedback: "Great work! Check the comments for improvements.",
+    content: "https://example.com/submission3",
+    status: "graded" as const,
   },
 ];
 
-export default function TeacherDashboard({ user, organizationId, organizationName }: TeacherDashboardProps) {
-  const [activeTab, setActiveTab] = useState("overview");
-  const [isGrading, setIsGrading] = useState(false);
+// Mock data for students
+const students = [
+  {
+    id: "S001",
+    name: "Alice Johnson",
+    email: "alice@example.com",
+    avatar: "AJ",
+    enrolledCourses: 3,
+    completedCourses: 1,
+    averageGrade: 85,
+    lastActive: new Date(2024, 0, 16, 9, 30),
+  },
+  {
+    id: "S002",
+    name: "Bob Smith",
+    email: "bob@example.com",
+    avatar: "BS",
+    enrolledCourses: 2,
+    completedCourses: 0,
+    averageGrade: 78,
+    lastActive: new Date(2024, 0, 15, 14, 20),
+  },
+  {
+    id: "S003",
+    name: "Carol Davis",
+    email: "carol@example.com",
+    avatar: "CD",
+    enrolledCourses: 4,
+    completedCourses: 2,
+    averageGrade: 92,
+    lastActive: new Date(2024, 0, 16, 11, 0),
+  },
+];
+
+// Mock analytics data
+const analyticsData = {
+  totalRevenue: 12450,
+  totalStudents: 105,
+  averageRating: 4.8,
+  completionRate: 72,
+  monthlyGrowth: 15,
+  topPerformingCourse: "Advanced React Development",
+};
+
+export default function TeacherDashboard({ 
+  user, 
+  organizationId, 
+  organizationName 
+}: TeacherDashboardProps) {
+  const [greeting, setGreeting] = useState("");
   const [selectedSubmission, setSelectedSubmission] = useState<any>(null);
-  
-  const firstName = user.user_metadata?.full_name?.split(" ")[0] || user.email?.split("@")[0] || "there";
+  const [showGradingModal, setShowGradingModal] = useState(false);
+  const [grade, setGrade] = useState("");
+  const [feedback, setFeedback] = useState("");
 
-  const stats = {
-    totalStudents: mockCourses.reduce((acc, c) => acc + c.students, 0),
-    totalCourses: mockCourses.length,
-    totalRevenue: mockCourses.reduce((acc, c) => acc + (c.students * c.price), 0),
-    averageRating: mockCourses.reduce((acc, c) => acc + c.rating, 0) / mockCourses.length,
-  };
+  useEffect(() => {
+    const hour = new Date().getHours();
+    if (hour < 12) setGreeting("Good morning");
+    else if (hour < 18) setGreeting("Good afternoon");
+    else setGreeting("Good evening");
+  }, []);
 
-  const handleGradeSubmission = (submission: any) => {
-    setSelectedSubmission(submission);
-    setIsGrading(true);
+  const publishedCourses = teacherCourses.filter(c => c.status === "published").length;
+  const draftCourses = teacherCourses.filter(c => c.status === "draft").length;
+  const pendingGrading = pendingSubmissions.filter(s => s.status === "pending").length;
+  const totalStudents = students.length;
+
+  const handleGradeSubmit = () => {
+    // Handle grading submission
+    console.log("Grading:", { grade, feedback, submissionId: selectedSubmission?.id });
+    setShowGradingModal(false);
+    setGrade("");
+    setFeedback("");
   };
 
   return (
-    <div className="space-y-8 pb-12">
-      {/* Header */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-600 p-8">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl" />
-        <div className="absolute bottom-0 left-0 w-48 h-48 bg-blue-400/20 rounded-full blur-2xl" />
-        
-        <div className="relative z-10">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="px-3 py-1 bg-white/20 rounded-full text-xs font-medium text-white">
-              Teacher Dashboard
-            </div>
-            {organizationName && (
-              <div className="px-3 py-1 bg-white/20 rounded-full text-xs font-medium text-white">
-                {organizationName}
-              </div>
-            )}
-          </div>
-          <h1 className="text-4xl font-bold text-white mb-2">
-            Welcome back, {firstName}!
+    <div className="space-y-6">
+      {/* Welcome Header */}
+      <div className="flex justify-between items-start">
+        <div>
+          <h1 className="text-3xl font-bold text-white mb-2">
+            {greeting}, {user?.user_metadata?.first_name || user?.email?.split('@')[0]}! 👋
           </h1>
-          <p className="text-blue-100 text-lg">
-            Manage your courses, students, and assignments.
+          <p className="text-gray-400">
+            {organizationName 
+              ? `Teaching at ${organizationName} • ${publishedCourses} active courses` 
+              : `Teaching Dashboard • ${publishedCourses} active courses`}
           </p>
-          
-          <div className="flex gap-4 mt-6">
-            <GlowButton variant="primary" className="bg-white text-blue-600 hover:bg-blue-50">
-              <Plus className="w-4 h-4 mr-2" />
-              Create New Course
-            </GlowButton>
-            <Link href="/courses">
-              <GlowButton variant="ghost" className="text-white border-white/30 hover:bg-white/10">
-                <BookOpen className="w-4 h-4 mr-2" />
-                Browse Courses
-              </GlowButton>
-            </Link>
-          </div>
+        </div>
+        <div className="flex gap-3">
+          <GlowButton size="sm" className="gap-2">
+            <Plus className="w-4 h-4" />
+            Create New Course
+          </GlowButton>
         </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <StatCard icon={BookOpen} label="Total Courses" value={stats.totalCourses.toString()} />
-        <StatCard icon={Users} label="Total Students" value={stats.totalStudents.toLocaleString()} />
-        <StatCard icon={DollarSign} label="Total Revenue" value={`$${stats.totalRevenue.toLocaleString()}`} />
-        <StatCard icon={Star} label="Average Rating" value={stats.averageRating.toFixed(1)} />
+      {/* Stats Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          icon={BookOpen}
+          label="Total Courses"
+          value={teacherCourses.length}
+          trend={`${publishedCourses} published, ${draftCourses} draft`}
+        />
+        <StatCard
+          icon={Users}
+          label="Total Students"
+          value={totalStudents}
+          trend="Across all courses"
+          trendUp={true}
+        />
+        <StatCard
+          icon={FileText}
+          label="Pending Grading"
+          value={pendingGrading}
+          trend={`${pendingSubmissions.filter(s => s.status === "graded").length} graded`}
+          trendUp={pendingGrading === 0}
+        />
+        <StatCard
+          icon={Star}
+          label="Avg. Rating"
+          value={analyticsData.averageRating}
+          trend="From 150+ reviews"
+          trendUp={true}
+        />
       </div>
 
       {/* Main Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="bg-[#12121A] border border-white/5 p-1 rounded-2xl mb-8 flex-wrap h-auto">
-          <TabsTrigger value="overview" className="rounded-xl px-6 py-2.5">
-            <BarChart3 className="w-4 h-4 mr-2" />
-            Overview
-          </TabsTrigger>
-          <TabsTrigger value="courses" className="rounded-xl px-6 py-2.5">
-            <BookOpen className="w-4 h-4 mr-2" />
-            My Courses
-          </TabsTrigger>
-          <TabsTrigger value="submissions" className="rounded-xl px-6 py-2.5">
-            <CheckCircle className="w-4 h-4 mr-2" />
-            Pending Submissions
-          </TabsTrigger>
-          <TabsTrigger value="students" className="rounded-xl px-6 py-2.5">
-            <Users className="w-4 h-4 mr-2" />
-            Students
-          </TabsTrigger>
-          <TabsTrigger value="analytics" className="rounded-xl px-6 py-2.5">
-            <TrendingUp className="w-4 h-4 mr-2" />
-            Analytics
-          </TabsTrigger>
+      <Tabs defaultValue="courses" className="space-y-4">
+        <TabsList className="bg-gray-800/50 border border-gray-700">
+          <TabsTrigger value="courses">My Courses</TabsTrigger>
+          <TabsTrigger value="submissions">Submissions to Grade</TabsTrigger>
+          <TabsTrigger value="students">My Students</TabsTrigger>
+          <TabsTrigger value="analytics">Analytics</TabsTrigger>
         </TabsList>
 
-        {/* Overview Tab */}
-        <TabsContent value="overview">
-          <div className="space-y-6">
-            <GlowCard>
-              <h2 className="text-2xl font-bold text-white mb-6">Recent Submissions</h2>
-              <div className="space-y-4">
-                {mockSubmissions.map((submission) => (
-                  <div key={submission.id} className="flex items-center justify-between p-4 bg-[#12121A] rounded-xl">
-                    <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-cyan-600 flex items-center justify-center">
-                        <span className="text-white font-semibold text-sm">{submission.studentAvatar}</span>
-                      </div>
-                      <div>
-                        <p className="text-white font-medium">{submission.studentName}</p>
-                        <p className="text-sm text-[#A0A0B5]">Submitted assignment</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <span className="text-sm text-[#6B6B80]">{submission.submittedAt.toLocaleDateString()}</span>
-                      {submission.status === "pending" ? (
-                        <GlowButton variant="primary" size="sm" onClick={() => handleGradeSubmission(submission)}>
-                          Grade
-                        </GlowButton>
-                      ) : (
-                        <span className="px-3 py-1 bg-green-500/20 text-green-400 rounded-full text-sm">Graded</span>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </GlowCard>
-
-            <GlowCard>
-              <h2 className="text-2xl font-bold text-white mb-6">Top Performing Students</h2>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {[
-                  { name: "Alice Johnson", avatar: "AJ", completed: 8, grade: 92 },
-                  { name: "Bob Smith", avatar: "BS", completed: 6, grade: 88 },
-                  { name: "Carol White", avatar: "CW", completed: 5, grade: 85 },
-                ].map((student, i) => (
-                  <div key={i} className="p-4 bg-[#12121A] rounded-xl text-center">
-                    <div className="w-16 h-16 rounded-full bg-gradient-to-br from-blue-500 to-cyan-600 flex items-center justify-center mx-auto mb-3">
-                      <span className="text-white font-bold text-xl">{student.avatar}</span>
-                    </div>
-                    <h3 className="text-white font-semibold">{student.name}</h3>
-                    <p className="text-sm text-[#A0A0B5]">{student.completed} courses completed</p>
-                    <p className="text-lg font-bold text-blue-400 mt-2">{student.grade}%</p>
-                  </div>
-                ))}
-              </div>
-            </GlowCard>
-          </div>
-        </TabsContent>
-
         {/* Courses Tab */}
-        <TabsContent value="courses">
-          <div className="space-y-4">
-            {mockCourses.map((course) => (
-              <GlowCard key={course.id} className="hover:border-blue-500/30 transition-all">
-                <div className="flex gap-6">
-                  <div className="w-48 h-32 rounded-xl overflow-hidden flex-shrink-0">
-                    <img src={course.thumbnail} alt={course.title} className="w-full h-full object-cover" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-start justify-between mb-2">
+        <TabsContent value="courses" className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {teacherCourses.map((course, index) => (
+              <motion.div
+                key={course.id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: index * 0.1 }}
+              >
+                <GlowCard className="hover:shadow-lg transition-all duration-300">
+                  <div className="p-4">
+                    {/* Course Header */}
+                    <div className="flex items-start justify-between mb-3">
                       <div>
-                        <h3 className="text-xl font-bold text-white">{course.title}</h3>
-                        <p className="text-[#A0A0B5] text-sm mt-1">{course.description}</p>
+                        <h3 className="font-semibold text-white text-lg mb-1">
+                          {course.title}
+                        </h3>
+                        <div className="flex items-center gap-2">
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${
+                            course.status === "published" 
+                              ? "bg-green-500/20 text-green-400" 
+                              : "bg-yellow-500/20 text-yellow-400"
+                          }`}>
+                            {course.status}
+                          </span>
+                          <span className="text-xs text-gray-400">{course.level}</span>
+                        </div>
                       </div>
-                      <div className="flex gap-2">
-                        <GlowButton variant="outline" size="sm">
-                          <Eye className="w-4 h-4 mr-1" />
-                          View
-                        </GlowButton>
-                        <GlowButton variant="outline" size="sm">
-                          <Edit className="w-4 h-4 mr-1" />
-                          Edit
-                        </GlowButton>
+                      <div className="flex gap-1">
+                        <button className="p-1 hover:bg-gray-700 rounded transition-colors">
+                          <Edit className="w-4 h-4 text-gray-400" />
+                        </button>
+                        <button className="p-1 hover:bg-gray-700 rounded transition-colors">
+                          <Eye className="w-4 h-4 text-gray-400" />
+                        </button>
                       </div>
                     </div>
-                    <div className="flex flex-wrap items-center gap-6 mt-4 text-sm">
-                      <span className="flex items-center gap-1 text-[#A0A0B5]">
-                        <Users className="w-4 h-4" />
-                        {course.students} students
-                      </span>
-                      <span className="flex items-center gap-1 text-[#A0A0B5]">
-                        <BookOpen className="w-4 h-4" />
-                        {course.lessons} lessons
-                      </span>
-                      <span className="flex items-center gap-1 text-[#A0A0B5]">
-                        <Star className="w-4 h-4 fill-yellow-500 text-yellow-500" />
-                        {course.rating}
-                      </span>
-                      <span className="flex items-center gap-1 text-[#A0A0B5]">
-                        <DollarSign className="w-4 h-4" />
-                        ${course.price}
-                      </span>
-                      <span className={`px-2 py-1 rounded-full text-xs ${
-                        course.status === "published" ? "bg-green-500/20 text-green-400" :
-                        "bg-yellow-500/20 text-yellow-400"
-                      }`}>
-                        {course.status.charAt(0).toUpperCase() + course.status.slice(1)}
-                      </span>
+
+                    {/* Course Stats */}
+                    <div className="grid grid-cols-2 gap-3 mb-3">
+                      <div className="bg-gray-800/50 rounded-lg p-2 text-center">
+                        <Users className="w-4 h-4 text-blue-400 mx-auto mb-1" />
+                        <p className="text-sm font-semibold text-white">{course.students}</p>
+                        <p className="text-xs text-gray-400">Students</p>
+                      </div>
+                      <div className="bg-gray-800/50 rounded-lg p-2 text-center">
+                        <Star className="w-4 h-4 text-yellow-400 mx-auto mb-1" />
+                        <p className="text-sm font-semibold text-white">{course.rating}</p>
+                        <p className="text-xs text-gray-400">Rating</p>
+                      </div>
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="flex gap-2">
+                      <GlowButton size="sm" variant="outline" className="flex-1 text-sm">
+                        <PlayCircle className="w-4 h-4 mr-1" />
+                        Preview
+                      </GlowButton>
+                      <GlowButton size="sm" className="flex-1 text-sm">
+                        Edit Course
+                      </GlowButton>
                     </div>
                   </div>
-                </div>
-              </GlowCard>
+                </GlowCard>
+              </motion.div>
             ))}
           </div>
         </TabsContent>
 
         {/* Submissions Tab */}
-        <TabsContent value="submissions">
+        <TabsContent value="submissions" className="space-y-4">
           <GlowCard>
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-bold text-white">Pending Submissions</h2>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6B6B80]" />
-                <Input placeholder="Search submissions..." className="pl-10 w-64 bg-[#12121A] border-white/10" />
+            <div className="p-4">
+              <div className="flex justify-between items-center mb-4">
+                <div>
+                  <h3 className="font-semibold text-white">Pending Submissions</h3>
+                  <p className="text-sm text-gray-400 mt-1">Grade student assignments</p>
+                </div>
+                <div className="relative">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                  <Input placeholder="Search submissions..." className="pl-9 w-64" />
+                </div>
               </div>
-            </div>
-            <div className="space-y-4">
-              {mockSubmissions.filter(s => s.status === "pending").map((submission) => (
-                <div key={submission.id} className="flex items-center justify-between p-4 bg-[#12121A] rounded-xl">
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-cyan-600 flex items-center justify-center">
-                      <span className="text-white font-semibold text-sm">{submission.studentAvatar}</span>
-                    </div>
-                    <div>
-                      <p className="text-white font-medium">{submission.studentName}</p>
-                      <p className="text-sm text-[#A0A0B5]">Assignment: React Hooks Implementation</p>
-                      <p className="text-xs text-[#6B6B80]">Submitted: {submission.submittedAt.toLocaleString()}</p>
+
+              <div className="space-y-3">
+                {pendingSubmissions.filter(s => s.status === "pending").map((submission) => (
+                  <div
+                    key={submission.id}
+                    className="flex items-center justify-between p-3 rounded-lg bg-gray-800/30 hover:bg-gray-800/50 transition-colors"
+                  >
+                    <div className="flex items-center gap-3 flex-1">
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white font-semibold">
+                        {submission.studentAvatar}
+                      </div>
+                      <div className="flex-1">
+                        <p className="font-medium text-white">{submission.studentName}</p>
+                        <p className="text-sm text-gray-400">{submission.assignmentTitle}</p>
+                        <p className="text-xs text-gray-500">{submission.courseTitle}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs text-gray-400">
+                          Submitted: {submission.submittedAt.toLocaleDateString()}
+                        </p>
+                        <GlowButton 
+                          size="sm" 
+                          className="mt-2"
+                          onClick={() => {
+                            setSelectedSubmission(submission);
+                            setShowGradingModal(true);
+                          }}
+                        >
+                          Grade Assignment
+                        </GlowButton>
+                      </div>
                     </div>
                   </div>
-                  <GlowButton variant="primary" size="sm" onClick={() => handleGradeSubmission(submission)}>
-                    Grade Submission
-                  </GlowButton>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           </GlowCard>
         </TabsContent>
 
         {/* Students Tab */}
-        <TabsContent value="students">
+        <TabsContent value="students" className="space-y-4">
           <GlowCard>
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-bold text-white">Your Students</h2>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6B6B80]" />
-                <Input placeholder="Search students..." className="pl-10 w-64 bg-[#12121A] border-white/10" />
+            <div className="p-4">
+              <div className="flex justify-between items-center mb-4">
+                <div>
+                  <h3 className="font-semibold text-white">Enrolled Students</h3>
+                  <p className="text-sm text-gray-400 mt-1">Track student progress</p>
+                </div>
+                <GlowButton size="sm" variant="outline" className="gap-2">
+                  <UserPlus className="w-4 h-4" />
+                  Invite Students
+                </GlowButton>
               </div>
-            </div>
-            <div className="space-y-4">
-              {[
-                { name: "Alice Johnson", email: "alice@tech.edu", avatar: "AJ", enrolled: 3, completed: 2, grade: 87 },
-                { name: "Bob Smith", email: "bob@tech.edu", avatar: "BS", enrolled: 2, completed: 1, grade: 78 },
-                { name: "Carol White", email: "carol@gmail.com", avatar: "CW", enrolled: 4, completed: 3, grade: 92 },
-              ].map((student, i) => (
-                <div key={i} className="flex items-center justify-between p-4 bg-[#12121A] rounded-xl">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-cyan-600 flex items-center justify-center">
-                      <span className="text-white font-bold text-lg">{student.avatar}</span>
-                    </div>
-                    <div>
-                      <p className="text-white font-medium">{student.name}</p>
-                      <p className="text-sm text-[#A0A0B5]">{student.email}</p>
-                      <div className="flex gap-4 mt-1 text-xs text-[#6B6B80]">
-                        <span>{student.enrolled} enrolled</span>
-                        <span>{student.completed} completed</span>
-                        <span>Avg: {student.grade}%</span>
+
+              <div className="space-y-3">
+                {students.map((student) => (
+                  <div
+                    key={student.id}
+                    className="flex items-center justify-between p-3 rounded-lg bg-gray-800/30 hover:bg-gray-800/50 transition-colors"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white font-semibold">
+                        {student.avatar}
+                      </div>
+                      <div>
+                        <p className="font-medium text-white">{student.name}</p>
+                        <p className="text-sm text-gray-400">{student.email}</p>
                       </div>
                     </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <GlowButton variant="outline" size="sm">
-                      <MessageSquare className="w-4 h-4 mr-1" />
-                      Message
+                    <div className="grid grid-cols-3 gap-6 text-center">
+                      <div>
+                        <p className="text-sm font-semibold text-white">{student.enrolledCourses}</p>
+                        <p className="text-xs text-gray-400">Enrolled</p>
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-white">{student.completedCourses}</p>
+                        <p className="text-xs text-gray-400">Completed</p>
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-white">{student.averageGrade}%</p>
+                        <p className="text-xs text-gray-400">Avg. Grade</p>
+                      </div>
+                    </div>
+                    <GlowButton size="sm" variant="ghost">
+                      <MessageSquare className="w-4 h-4" />
                     </GlowButton>
-                    <GlowButton variant="outline" size="sm">
-                      View Progress
-                    </GlowButton>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           </GlowCard>
         </TabsContent>
 
         {/* Analytics Tab */}
-        <TabsContent value="analytics">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <TabsContent value="analytics" className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <GlowCard>
-              <h2 className="text-xl font-bold text-white mb-6">Course Performance</h2>
-              <div className="space-y-4">
-                {mockCourses.map((course) => (
-                  <div key={course.id} className="p-4 bg-[#12121A] rounded-xl">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-white font-medium">{course.title}</span>
-                      <span className="text-blue-400">{course.students} students</span>
-                    </div>
-                    <div className="flex items-center gap-4 text-sm text-[#A0A0B5]">
-                      <span>Rating: {course.rating} ★</span>
-                      <span>Revenue: ${(course.students * course.price).toLocaleString()}</span>
-                      <span>Completion: 72%</span>
-                    </div>
+              <div className="p-4">
+                <h3 className="font-semibold text-white mb-3">Revenue Overview</h3>
+                <div className="text-center py-6">
+                  <p className="text-3xl font-bold text-white">${analyticsData.totalRevenue}</p>
+                  <p className="text-sm text-gray-400 mt-1">Total earnings</p>
+                  <div className="mt-3 inline-flex items-center gap-1 text-green-400 text-sm">
+                    <TrendingUp className="w-4 h-4" />
+                    <span>+{analyticsData.monthlyGrowth}% this month</span>
                   </div>
-                ))}
+                </div>
               </div>
             </GlowCard>
 
             <GlowCard>
-              <h2 className="text-xl font-bold text-white mb-6">Revenue Overview</h2>
-              <div className="text-center py-12">
-                <DollarSign className="w-16 h-16 text-blue-400 mx-auto mb-4" />
-                <p className="text-3xl font-bold text-white mb-2">${stats.totalRevenue.toLocaleString()}</p>
-                <p className="text-[#A0A0B5]">Total earnings from course sales</p>
-                <p className="text-sm text-green-400 mt-2">↑ 12% from last month</p>
+              <div className="p-4">
+                <h3 className="font-semibold text-white mb-3">Course Performance</h3>
+                <div className="space-y-3">
+                  <div>
+                    <div className="flex justify-between text-sm mb-1">
+                      <span className="text-gray-300">Completion Rate</span>
+                      <span className="text-white">{analyticsData.completionRate}%</span>
+                    </div>
+                    <div className="w-full bg-gray-700 rounded-full h-2">
+                      <div className="bg-green-500 h-2 rounded-full" style={{ width: `${analyticsData.completionRate}%` }} />
+                    </div>
+                  </div>
+                  <div>
+                    <div className="flex justify-between text-sm mb-1">
+                      <span className="text-gray-300">Student Satisfaction</span>
+                      <span className="text-white">{analyticsData.averageRating}/5.0</span>
+                    </div>
+                    <div className="w-full bg-gray-700 rounded-full h-2">
+                      <div className="bg-yellow-500 h-2 rounded-full" style={{ width: `${(analyticsData.averageRating / 5) * 100}%` }} />
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-4 p-3 bg-purple-500/10 rounded-lg">
+                  <p className="text-sm text-gray-300">🏆 Top Performing Course</p>
+                  <p className="font-semibold text-white mt-1">{analyticsData.topPerformingCourse}</p>
+                </div>
               </div>
             </GlowCard>
           </div>
         </TabsContent>
       </Tabs>
 
+      {/* Quick Actions */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Link href="/courses/new">
+          <div className="bg-gray-800/50 hover:bg-gray-800 rounded-lg p-3 text-center transition-all cursor-pointer group">
+            <Plus className="w-6 h-6 text-purple-400 mx-auto mb-2 group-hover:scale-110 transition-transform" />
+            <p className="text-sm text-gray-300">New Course</p>
+          </div>
+        </Link>
+        <Link href="/analytics">
+          <div className="bg-gray-800/50 hover:bg-gray-800 rounded-lg p-3 text-center transition-all cursor-pointer group">
+            <BarChart3 className="w-6 h-6 text-blue-400 mx-auto mb-2 group-hover:scale-110 transition-transform" />
+            <p className="text-sm text-gray-300">Analytics</p>
+          </div>
+        </Link>
+        <Link href="/messages">
+          <div className="bg-gray-800/50 hover:bg-gray-800 rounded-lg p-3 text-center transition-all cursor-pointer group">
+            <MessageSquare className="w-6 h-6 text-green-400 mx-auto mb-2 group-hover:scale-110 transition-transform" />
+            <p className="text-sm text-gray-300">Messages</p>
+          </div>
+        </Link>
+        <Link href="/settings">
+          <div className="bg-gray-800/50 hover:bg-gray-800 rounded-lg p-3 text-center transition-all cursor-pointer group">
+            <Settings className="w-6 h-6 text-gray-400 mx-auto mb-2 group-hover:scale-110 transition-transform" />
+            <p className="text-sm text-gray-300">Settings</p>
+          </div>
+        </Link>
+      </div>
+
       {/* Grading Modal */}
-      {isGrading && selectedSubmission && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setIsGrading(false)}>
-          <div className="bg-[#16161F] border border-white/10 rounded-2xl w-full max-w-2xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="p-6 border-b border-white/10">
-              <h2 className="text-2xl font-bold text-white">Grade Submission</h2>
-              <p className="text-[#A0A0B5] mt-1">Student: {selectedSubmission.studentName}</p>
+      {showGradingModal && selectedSubmission && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+          <div className="bg-gray-900 rounded-lg p-6 max-w-md w-full mx-4 border border-gray-700">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-semibold text-white">Grade Assignment</h3>
+              <button onClick={() => setShowGradingModal(false)}>
+                <X className="w-5 h-5 text-gray-400" />
+              </button>
             </div>
-            <div className="p-6 space-y-6">
+            <div className="space-y-4">
               <div>
-                <Label className="text-sm font-medium text-[#A0A0B5] mb-2 block">Grade (0-100)</Label>
-                <Input type="number" min="0" max="100" placeholder="Enter grade..." className="bg-[#12121A] border-white/10" />
+                <label className="text-sm text-gray-300 mb-1 block">Student</label>
+                <p className="text-white">{selectedSubmission.studentName}</p>
               </div>
               <div>
-                <Label className="text-sm font-medium text-[#A0A0B5] mb-2 block">Feedback</Label>
-                <Textarea rows={4} placeholder="Provide feedback to the student..." className="bg-[#12121A] border-white/10" />
+                <label className="text-sm text-gray-300 mb-1 block">Assignment</label>
+                <p className="text-white">{selectedSubmission.assignmentTitle}</p>
               </div>
-            </div>
-            <div className="flex gap-3 p-6 border-t border-white/10">
-              <GlowButton variant="ghost" onClick={() => setIsGrading(false)} className="flex-1">
-                Cancel
-              </GlowButton>
-              <GlowButton variant="primary" className="flex-1">
-                Submit Grade
-              </GlowButton>
+              <div>
+                <label className="text-sm text-gray-300 mb-1 block">Grade (0-100)</label>
+                <Input 
+                  type="number" 
+                  placeholder="Enter grade"
+                  value={grade}
+                  onChange={(e) => setGrade(e.target.value)}
+                  min="0"
+                  max="100"
+                />
+              </div>
+              <div>
+                <label className="text-sm text-gray-300 mb-1 block">Feedback</label>
+                <textarea
+                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  rows={4}
+                  placeholder="Provide feedback to the student..."
+                  value={feedback}
+                  onChange={(e) => setFeedback(e.target.value)}
+                />
+              </div>
+              <div className="flex gap-3 pt-4">
+                <GlowButton variant="outline" onClick={() => setShowGradingModal(false)} fullWidth>
+                  Cancel
+                </GlowButton>
+                <GlowButton onClick={handleGradeSubmit} fullWidth>
+                  Submit Grade
+                </GlowButton>
+              </div>
             </div>
           </div>
         </div>
