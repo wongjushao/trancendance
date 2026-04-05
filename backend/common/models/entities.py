@@ -27,6 +27,9 @@ class Profile(Base):
     job_title: Mapped[str | None] = mapped_column(Text)
     avatar_url: Mapped[str | None] = mapped_column(Text)
     bio: Mapped[str | None] = mapped_column(Text)
+    professional_summary: Mapped[str | None] = mapped_column(Text)
+    department: Mapped[str | None] = mapped_column(Text)
+    years_of_experience: Mapped[str | None] = mapped_column(Text)
     timezone: Mapped[str | None] = mapped_column(Text)
     language: Mapped[str | None] = mapped_column(Text)
     social_links: Mapped[dict | None] = mapped_column(JSONB)
@@ -152,6 +155,8 @@ class CourseMember(Base):
     course_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.courses.id"), nullable=False)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
     role: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'student'"))
+    joined_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'active'"))
 
 
 class Module(Base):
@@ -207,6 +212,24 @@ class Submission(Base):
     submitted_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
 
 
+class LessonProgress(Base):
+    __tablename__ = "lesson_progress"
+    __table_args__ = (
+        UniqueConstraint("user_id", "lesson_id", name="uq_lesson_progress_user_lesson"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
+    lesson_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.lessons.id"), nullable=False)
+    # not_started / in_progress / completed
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'not_started'"))
+    progress_percent: Mapped[int | None] = mapped_column(Integer)
+    last_accessed_at: Mapped[datetime | None]
+    completed_at: Mapped[datetime | None]
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+
+
 class Friendship(Base):
     __tablename__ = "friendships"
     __table_args__ = (
@@ -241,6 +264,27 @@ class ChatRoomMember(Base):
     room_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.chat_rooms.id"), nullable=False)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
     joined_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+
+
+class ProfileEducation(Base):
+    __tablename__ = "profile_educations"
+    __table_args__ = {"schema": "public"}
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    profile_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.profiles.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    institution_name: Mapped[str] = mapped_column(Text, nullable=False)
+    degree: Mapped[str | None] = mapped_column(Text)
+    field_of_study: Mapped[str | None] = mapped_column(Text)
+    start_year: Mapped[int | None] = mapped_column(Integer)
+    end_year: Mapped[int | None] = mapped_column(Integer)
+    is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    description: Mapped[str | None] = mapped_column(Text)
+    order_index: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
 
 
 class Message(Base):
