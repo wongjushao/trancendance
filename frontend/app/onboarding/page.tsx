@@ -778,9 +778,10 @@ export default function OnboardingPage() {
                             onChange={setField("bio")}
                             onBlur={() => handleFieldBlur("bio", formData.bio, 1)}
                             placeholder="Tell us about yourself — your background, what you're passionate about..."
-                            rows={3}
+                            rows={8}
                             maxLength={500}
-                            className={`w-full pl-10 pr-4 py-3 ${getInputClassName("bio")} resize-none`}
+                            className={`w-full pl-10 pr-4 py-3 ${getInputClassName("bio")} resize-y`}
+                            style={{ minHeight: '200px' }}
                           />
                         </div>
                         {getFieldError("bio") && (
@@ -836,7 +837,7 @@ export default function OnboardingPage() {
                           value={formData.language}
                           onChange={setField("language")}
                           onBlur={() => handleFieldBlur("language", formData.language, 2)}
-                          className={getInputClassName("language")}
+                          className={`${getInputClassName("language")} pl-4 pr-8`}
                         >
                           <option value="">Select your language</option>
                           {LANGUAGES.map(({ code, label }) => (

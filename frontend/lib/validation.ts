@@ -156,11 +156,11 @@ export const validateBirthday = (birthday: string): ValidationResult => {
   }
   
   const today = new Date();
-  const minAge = new Date(today.getFullYear() - 13, today.getMonth(), today.getDate());
-  const maxAge = new Date(today.getFullYear() - 120, today.getMonth(), today.getDate());
+  const minAge = new Date(today.getFullYear() - 4, today.getMonth(), today.getDate());
+  const maxAge = new Date(today.getFullYear() - 100, today.getMonth(), today.getDate());
   
   if (date > minAge) {
-    return { isValid: false, error: "You must be at least 13 years old to register" };
+    return { isValid: false, error: "Invalid age" };
   }
   
   if (date < maxAge) {
