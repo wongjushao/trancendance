@@ -406,38 +406,70 @@ export default function SettingsPage() {
     const file = event.target.files?.[0];
     if (!file) return;
 
+    // Validate file type
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      toast.error("Please upload a valid image file (JPEG, PNG, GIF, or WEBP)");
+      return;
+    }
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("File size must be less than 5MB");
+      return;
+    }
+
     try {
       const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("No user");
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session?.access_token) {
+        toast.error("You must be logged in to upload an avatar");
+        return;
+      }
 
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${user.id}-${Date.now()}.${fileExt}`;
-      const filePath = `avatars/${fileName}`;
+      // Use the backend API endpoint (same as onboarding)
+      const formData = new FormData();
+      formData.append('avatar', file);
+      
+      const response = await fetch('/api/auth-service/upload-avatar', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: formData,
+      });
 
-      const { error: uploadError } = await supabase.storage
-        .from('avatars')
-        .upload(filePath, file);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to upload avatar');
+      }
 
-      if (uploadError) throw uploadError;
-
-      const { data: { publicUrl } } = supabase.storage
-        .from('avatars')
-        .getPublicUrl(filePath);
-
-      const { error: updateError } = await supabase
-        .from('profiles')
-        .update({ avatar_url: publicUrl })
-        .eq('id', user.id);
-
-      if (updateError) throw updateError;
+      const data = await response.json();
+      const newAvatarUrl = data.avatar_url;
+      
+      // Store in localStorage for quick access
+      if (newAvatarUrl) {
+        localStorage.setItem('avatar_url', newAvatarUrl);
+      } else {
+        localStorage.removeItem('avatar_url');
+      }
+      
+      // Refresh avatar in the useAvatar hook (this will update the avatarUrl state)
+      await refreshAvatar();
+      
+      // Dispatch events for other components to update
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('avatar-updated', { 
+          detail: { avatarUrl: newAvatarUrl } 
+        }));
+        window.dispatchEvent(new CustomEvent('profile-updated'));
+      }
 
       toast.success("Avatar updated successfully");
-      refreshAvatar();
-      window.dispatchEvent(new CustomEvent('avatar-updated', { detail: { url: publicUrl } }));
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error uploading avatar:", error);
-      toast.error("Failed to upload avatar");
+      toast.error(error.message || "Failed to upload avatar");
     }
   };
 
