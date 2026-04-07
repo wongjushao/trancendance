@@ -10,7 +10,11 @@ import {
   Trash2, LogOut, Monitor, Smartphone, Globe2, Crown,
   HelpCircle, MessageCircle, AlertTriangle, Key, Fingerprint,
   Database, Terminal, Server, Activity, Zap, Volume2, VolumeX,
-  BellRing, BellOff, Mail as MailIcon, MessageSquare, AtSign, BookOpen, Trophy
+  BellRing, BellOff, Mail as MailIcon, MessageSquare, AtSign, BookOpen, Trophy,
+  Plus, Edit2, GraduationCap, Building2, Code, Palette, Database as DatabaseIcon,
+  Cloud, Brain, Shield as ShieldIcon, Heart, Music, Camera as CameraIcon,
+  Coffee, Gamepad, Film, Mic, Dumbbell, Target, Award as AwardIcon,
+  ExternalLink, ThumbsUp, MessageCircle as MessageCircleIcon, Linkedin, Github, Twitter, Instagram, Link
 } from "lucide-react";
 import { GlowCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
@@ -32,7 +36,7 @@ import {
   validatePassword,
   validateConfirmPassword,
 } from "@/lib/validation";
-import Link from "next/link";
+//import Link from "next/link";
 
 // Modal Component for confirmation dialogs
 const ConfirmModal = ({ isOpen, onClose, onConfirm, title, message, danger = false }: any) => {
@@ -126,6 +130,20 @@ function detectTimezone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone;
 }
 
+// Available interests options for the interests section
+const availableInterests = [
+  { id: "coding", label: "Coding", icon: Code, color: "blue" },
+  { id: "design", label: "Design", icon: Palette, color: "pink" },
+  { id: "data", label: "Data Science", icon: DatabaseIcon, color: "green" },
+  { id: "cloud", label: "Cloud Computing", icon: Cloud, color: "cyan" },
+  { id: "ai", label: "AI/ML", icon: Brain, color: "purple" },
+  { id: "security", label: "Security", icon: ShieldIcon, color: "red" },
+  { id: "music", label: "Music", icon: Music, color: "yellow" },
+  { id: "gaming", label: "Gaming", icon: Gamepad, color: "orange" },
+  { id: "reading", label: "Reading", icon: BookOpen, color: "emerald" },
+  { id: "fitness", label: "Fitness", icon: Dumbbell, color: "lime" },
+];
+
 export default function SettingsPage() {
   const router = useRouter();
   const { avatarUrl, refreshAvatar } = useAvatar();
@@ -176,14 +194,121 @@ export default function SettingsPage() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [touched, setTouched] = useState<Record<string, boolean>>({});
 
+  // ========== NEW STATE VARIABLES FOR ADDED SECTIONS ==========
+  // Professional Info
+  const [isEditingProfessional, setIsEditingProfessional] = useState(false);
+  const [professionalInfo, setProfessionalInfo] = useState({
+    jobTitle: "",
+    department: "",
+    yearsOfExperience: "",
+  });
+
+  // Education
+  const [educationList, setEducationList] = useState<Array<{ degree: string; institution: string; year: string }>>([]);
+  const [isAddingEducation, setIsAddingEducation] = useState(false);
+  const [editingEducation, setEditingEducation] = useState<{ degree: string; institution: string; year: string; index: number } | null>(null);
+  const [educationForm, setEducationForm] = useState({ degree: "", institution: "", year: "" });
+
+  // Skills
+  const [skills, setSkills] = useState<string[]>([]);
+  const [isAddingSkill, setIsAddingSkill] = useState(false);
+  const [newSkill, setNewSkill] = useState("");
+
+  // Interests
+  const [isEditingInterests, setIsEditingInterests] = useState(false);
+  const [selectedInterests, setSelectedInterests] = useState<string[]>([]);
+
+// Add these with the other state variables (around line where other useState hooks are)
+
+  // Professional Headline & Location
+  const [professionalHeadline, setProfessionalHeadline] = useState("");
+  const [location, setLocation] = useState("");
+  const [pronouns, setPronouns] = useState("");
+
+  // Work Experience
+  const [workExperience, setWorkExperience] = useState<Array<{
+    title: string;
+    company: string;
+    startDate: string;
+    endDate: string;
+    description: string;
+  }>>([]);
+  const [isAddingWork, setIsAddingWork] = useState(false);
+  const [editingWork, setEditingWork] = useState<any>(null);
+  const [editingWorkIndex, setEditingWorkIndex] = useState<number | null>(null);
+  const [workForm, setWorkForm] = useState({
+    title: "",
+    company: "",
+    startDate: "",
+    endDate: "",
+    description: "",
+  });
+
+  // Social Links
+  const [socialLinks, setSocialLinks] = useState({
+    linkedin: "",
+    github: "",
+    twitter: "",
+    website: "",
+  });
+
+
+
+  // ========== END NEW STATE VARIABLES ==========
+
   useEffect(() => {
     fetchProfile();
     checkAuthProvider();
     loadNotificationPrefs();
   }, []);
 
+  // Load saved profile data for the new sections
+  useEffect(() => {
+    const loadProfileData = async () => {
+      const supabase = getSupabaseBrowserClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("job_title, department, years_of_experience, education, skills, interests, professional_headline, location, pronouns, work_experience, social_links")
+        .eq("id", user.id)
+        .single();
+
+      if (!error && data) {
+        // Load professional info
+        setProfessionalInfo({
+          jobTitle: data.job_title || "",
+          department: data.department || "",
+          yearsOfExperience: data.years_of_experience || "",
+        });
+        
+        // Load education
+        if (data.education) setEducationList(data.education);
+        
+        // Load skills
+        if (data.skills) setSkills(data.skills);
+        
+        // Load interests
+        if (data.interests) setSelectedInterests(data.interests);
+        
+        // NEW: Load professional headline, location, pronouns
+        if (data.professional_headline) setProfessionalHeadline(data.professional_headline);
+        if (data.location) setLocation(data.location);
+        if (data.pronouns) setPronouns(data.pronouns);
+        
+        // NEW: Load work experience
+        if (data.work_experience) setWorkExperience(data.work_experience);
+        
+        // NEW: Load social links
+        if (data.social_links) setSocialLinks(data.social_links);
+      }
+    };
+    
+    loadProfileData();
+  }, []);
+
   const loadNotificationPrefs = () => {
-    // Load from localStorage if exists, otherwise use defaults
     const savedPrefs = localStorage.getItem("notification_preferences");
     if (savedPrefs) {
       try {
@@ -215,7 +340,6 @@ export default function SettingsPage() {
       
       if (!session) return;
       
-      // Call backend to get password status
       const response = await fetch('/api/auth-service/password-status', {
         headers: {
           'Authorization': `Bearer ${session.access_token}`,
@@ -227,7 +351,6 @@ export default function SettingsPage() {
         setIsGoogleUser(data.is_google_user);
         setHasSetPassword(data.has_password);
       } else {
-        // Fallback to client-side check
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
           const isGoogle = user.app_metadata?.provider === 'google' || 
@@ -318,6 +441,76 @@ export default function SettingsPage() {
     }
   };
 
+  // Work Experience handlers
+  const saveWork = async () => {
+    if (!workForm.title || !workForm.company) {
+      toast.error("Please fill in title and company");
+      return;
+    }
+
+    let newWorkList = [...workExperience];
+    
+    if (editingWorkIndex !== null) {
+      newWorkList[editingWorkIndex] = workForm;
+      toast.success("Work experience updated");
+    } else {
+      newWorkList.push(workForm);
+      toast.success("Work experience added");
+    }
+    
+    setWorkExperience(newWorkList);
+    setIsAddingWork(false);
+    setEditingWork(null);
+    setEditingWorkIndex(null);
+    setWorkForm({ title: "", company: "", startDate: "", endDate: "", description: "" });
+    
+    await saveWorkToDB(newWorkList);
+  };
+
+  const removeWork = async (index: number) => {
+    const newList = workExperience.filter((_, i) => i !== index);
+    setWorkExperience(newList);
+    await saveWorkToDB(newList);
+    toast.success("Work experience removed");
+  };
+
+  const saveWorkToDB = async (workList: any[]) => {
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("No user");
+
+      const { error } = await supabase
+        .from("profiles")
+        .update({ work_experience: workList })
+        .eq("id", user.id);
+
+      if (error) throw error;
+    } catch (error) {
+      console.error("Error saving work experience:", error);
+    }
+  };
+
+  // Social Links handlers
+  const saveSocialLinks = async () => {
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("No user");
+
+      const { error } = await supabase
+        .from("profiles")
+        .update({ social_links: socialLinks })
+        .eq("id", user.id);
+
+      if (error) throw error;
+      toast.success("Social links updated");
+    } catch (error) {
+      console.error("Error saving social links:", error);
+      toast.error("Failed to save social links");
+    }
+  };
+
   const handleSaveProfile = async () => {
     setSaving(true);
     try {
@@ -336,6 +529,12 @@ export default function SettingsPage() {
           language: formData.language,
           timezone: formData.timezone,
           birthday: formData.birthday || null,
+          // NEW FIELDS
+          //professional_headline: professionalHeadline,
+          //location: location,
+          //pronouns: pronouns,
+          //work_experience: workExperience,
+          //social_links: socialLinks,
         })
         .eq("id", user.id);
 
@@ -352,13 +551,11 @@ export default function SettingsPage() {
   };
 
   const handleChangePassword = async () => {
-    // Validate passwords based on user type
     if (!isGoogleUser && !currentPassword) {
       toast.error("Please enter your current password");
       return;
     }
     
-    // For Google users who have already set a password, require current password
     if (isGoogleUser && hasSetPassword && !currentPassword) {
       toast.error("Please enter your current password");
       return;
@@ -382,7 +579,6 @@ export default function SettingsPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("No user");
 
-      // For Google users with existing password, verify current password first
       if (isGoogleUser && hasSetPassword && currentPassword) {
         const { error: signInError } = await supabase.auth.signInWithPassword({
           email: user.email!,
@@ -395,19 +591,16 @@ export default function SettingsPage() {
         }
       }
 
-      // Update the password
       const { error } = await supabase.auth.updateUser({
         password: newPassword
       });
       
       if (error) throw error;
       
-      // Success message based on context
       if (!hasSetPassword && isGoogleUser) {
         toast.success("Password has been set successfully! You can now sign in with email and password.");
         setHasSetPassword(true);
         
-        // Update the user's identities in the database via backend
         await fetch('/api/auth-service/set-password-status', {
           method: 'POST',
           headers: {
@@ -419,7 +612,6 @@ export default function SettingsPage() {
         toast.success("Password changed successfully!");
       }
 
-      // Clear password fields
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
@@ -518,6 +710,147 @@ export default function SettingsPage() {
     }
   };
 
+  // ========== NEW HANDLER FUNCTIONS FOR ADDED SECTIONS ==========
+  const saveProfessionalInfo = async () => {
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("No user");
+
+      const { error } = await supabase
+        .from("profiles")
+        .update({
+          job_title: professionalInfo.jobTitle,
+          department: professionalInfo.department,
+          years_of_experience: professionalInfo.yearsOfExperience,
+        })
+        .eq("id", user.id);
+
+      if (error) throw error;
+      toast.success("Professional info updated");
+    } catch (error) {
+      console.error("Error saving professional info:", error);
+      toast.error("Failed to save professional info");
+    }
+  };
+
+  const saveEducation = async () => {
+    if (!educationForm.degree || !educationForm.institution) {
+      toast.error("Please fill in degree and institution");
+      return;
+    }
+
+    let newEducationList = [...educationList];
+    
+    if (editingEducation !== null) {
+      newEducationList[editingEducation.index] = educationForm;
+      toast.success("Education updated");
+    } else {
+      newEducationList.push(educationForm);
+      toast.success("Education added");
+    }
+    
+    setEducationList(newEducationList);
+    setIsAddingEducation(false);
+    setEditingEducation(null);
+    setEducationForm({ degree: "", institution: "", year: "" });
+    
+    await saveEducationToDB(newEducationList);
+  };
+
+  const removeEducation = async (index: number) => {
+    const newList = educationList.filter((_, i) => i !== index);
+    setEducationList(newList);
+    await saveEducationToDB(newList);
+    toast.success("Education removed");
+  };
+
+  const startEditingEducation = (edu: any, index: number) => {
+    setEducationForm(edu);
+    setEditingEducation({ ...edu, index });
+    setIsAddingEducation(true);
+  };
+
+  const saveEducationToDB = async (education: any[]) => {
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("No user");
+
+      const { error } = await supabase
+        .from("profiles")
+        .update({ education: education })
+        .eq("id", user.id);
+
+      if (error) throw error;
+    } catch (error) {
+      console.error("Error saving education:", error);
+    }
+  };
+
+  const addSkill = async () => {
+    if (!newSkill.trim()) return;
+    const updatedSkills = [...skills, newSkill.trim()];
+    setSkills(updatedSkills);
+    setNewSkill("");
+    setIsAddingSkill(false);
+    await saveSkillsToDB(updatedSkills);
+    toast.success("Skill added");
+  };
+
+  const removeSkill = async (index: number) => {
+    const updatedSkills = skills.filter((_, i) => i !== index);
+    setSkills(updatedSkills);
+    await saveSkillsToDB(updatedSkills);
+    toast.success("Skill removed");
+  };
+
+  const saveSkillsToDB = async (skillsList: string[]) => {
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("No user");
+
+      const { error } = await supabase
+        .from("profiles")
+        .update({ skills: skillsList })
+        .eq("id", user.id);
+
+      if (error) throw error;
+    } catch (error) {
+      console.error("Error saving skills:", error);
+    }
+  };
+
+  const toggleInterest = (interestId: string) => {
+    setSelectedInterests(prev =>
+      prev.includes(interestId)
+        ? prev.filter(id => id !== interestId)
+        : [...prev, interestId]
+    );
+  };
+
+  const saveInterests = async () => {
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("No user");
+
+      const { error } = await supabase
+        .from("profiles")
+        .update({ interests: selectedInterests })
+        .eq("id", user.id);
+
+      if (error) throw error;
+      setIsEditingInterests(false);
+      toast.success("Interests updated");
+    } catch (error) {
+      console.error("Error saving interests:", error);
+      toast.error("Failed to save interests");
+    }
+  };
+  // ========== END NEW HANDLER FUNCTIONS ==========
+
   const getFieldError = (field: string) => errors[field];
   const getInputClassName = (field: string) => {
     const hasError = getFieldError(field) && touched[field];
@@ -576,8 +909,9 @@ export default function SettingsPage() {
           </TabsTrigger>
         </TabsList>
 
-        {/* Profile Tab */}
+        {/* Profile Tab - WITH ADDED SECTIONS */}
         <TabsContent value="profile" className="space-y-6">
+          {/* Profile Information Section - ORIGINAL, UNCHANGED */}
           <GlowCard>
             <div className="p-6">
               <h2 className="text-xl font-semibold text-white mb-6">Profile Information</h2>
@@ -685,20 +1019,607 @@ export default function SettingsPage() {
                     </select>
                   </div>
                 </div>
-
-              </div>
-
-              <div className="flex justify-end mt-6 pt-4 border-t border-gray-800">
-                <GlowButton onClick={handleSaveProfile} isLoading={saving}>
-                  <Save className="w-4 h-4 mr-2" />
-                  Save Changes
-                </GlowButton>
               </div>
             </div>
           </GlowCard>
+
+          {/* ========== NEW: Social Links Section ========== */}
+          <GlowCard>
+            <div className="p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <Link className="w-5 h-5 text-purple-400" />
+                <h3 className="text-lg font-semibold text-white">Social Links</h3>
+              </div>
+              <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <Linkedin className="w-5 h-5 text-blue-400" />
+                  <Input
+                    value={socialLinks.linkedin}
+                    onChange={(e) => setSocialLinks({ ...socialLinks, linkedin: e.target.value })}
+                    placeholder="LinkedIn URL (e.g., https://linkedin.com/in/username)"
+                    className="flex-1 bg-gray-800 border-gray-700"
+                  />
+                </div>
+                <div className="flex items-center gap-3">
+                  <Github className="w-5 h-5 text-gray-400" />
+                  <Input
+                    value={socialLinks.github}
+                    onChange={(e) => setSocialLinks({ ...socialLinks, github: e.target.value })}
+                    placeholder="GitHub URL (e.g., https://github.com/username)"
+                    className="flex-1 bg-gray-800 border-gray-700"
+                  />
+                </div>
+                <div className="flex items-center gap-3">
+                  <Twitter className="w-5 h-5 text-blue-400" />
+                  <Input
+                    value={socialLinks.twitter}
+                    onChange={(e) => setSocialLinks({ ...socialLinks, twitter: e.target.value })}
+                    placeholder="Twitter/X URL"
+                    className="flex-1 bg-gray-800 border-gray-700"
+                  />
+                </div>
+                <div className="flex items-center gap-3">
+                  <Globe className="w-5 h-5 text-green-400" />
+                  <Input
+                    value={socialLinks.website}
+                    onChange={(e) => setSocialLinks({ ...socialLinks, website: e.target.value })}
+                    placeholder="Personal Website or Portfolio"
+                    className="flex-1 bg-gray-800 border-gray-700"
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-gray-500 mt-3">Your social links will be displayed on your public profile</p>
+            </div>
+          </GlowCard>
+
+          {/* ========== NEW: Professional Headline & Location Section ========== */}
+          <GlowCard>
+            <div className="p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <User className="w-5 h-5 text-purple-400" />
+                <h3 className="text-lg font-semibold text-white">Professional Details</h3>
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <Label className="text-gray-300">Professional Headline</Label>
+                  <Input
+                    value={professionalHeadline}
+                    onChange={(e) => setProfessionalHeadline(e.target.value)}
+                    placeholder="e.g., Senior Software Engineer | AI Enthusiast | Tech Speaker"
+                    className="mt-1 bg-gray-800 border-gray-700"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Appears right below your name on your profile</p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-gray-300">Location</Label>
+                    <Input
+                      value={location}
+                      onChange={(e) => setLocation(e.target.value)}
+                      placeholder="e.g., San Francisco, CA"
+                      className="mt-1 bg-gray-800 border-gray-700"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-gray-300">Pronouns (Optional)</Label>
+                    <Input
+                      value={pronouns}
+                      onChange={(e) => setPronouns(e.target.value)}
+                      placeholder="e.g., He/Him, She/Her, They/Them"
+                      className="mt-1 bg-gray-800 border-gray-700"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </GlowCard>
+
+          {/* ========== NEW: Work Experience Section ========== */}
+          <GlowCard>
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Briefcase className="w-5 h-5 text-purple-400" />
+                  <h3 className="text-lg font-semibold text-white">Work Experience</h3>
+                </div>
+                <GlowButton 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => setIsAddingWork(true)}
+                >
+                  <Plus className="w-4 h-4 mr-1" />
+                  Add Experience
+                </GlowButton>
+              </div>
+              
+              <div className="space-y-4">
+                {workExperience.length === 0 ? (
+                  <p className="text-gray-400 text-sm text-center py-4">No work experience added</p>
+                ) : (
+                  workExperience.map((work, index) => (
+                    <div key={index} className="p-4 bg-gray-800/30 rounded-lg">
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <p className="text-white font-semibold">{work.title}</p>
+                          <p className="text-sm text-purple-400">{work.company}</p>
+                          <p className="text-xs text-gray-500">{work.startDate} - {work.endDate || "Present"}</p>
+                          {work.description && (
+                            <p className="text-sm text-gray-400 mt-2">{work.description}</p>
+                          )}
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => {
+                              setEditingWork(work);
+                              setEditingWorkIndex(index);
+                              setWorkForm({ ...work });
+                              setIsAddingWork(true);
+                            }}
+                            className="p-1 hover:bg-gray-700 rounded transition-colors"
+                          >
+                            <Edit2 className="w-4 h-4 text-gray-400" />
+                          </button>
+                          <button
+                            onClick={() => removeWork(index)}
+                            className="p-1 hover:bg-gray-700 rounded transition-colors"
+                          >
+                            <Trash2 className="w-4 h-4 text-red-400" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Add/Edit Work Experience Modal */}
+              {isAddingWork && (
+                <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+                  <div className="bg-gray-900 rounded-lg max-w-md w-full mx-4 border border-gray-700 p-6">
+                    <h3 className="text-xl font-semibold text-white mb-4">
+                      {editingWork ? "Edit Work Experience" : "Add Work Experience"}
+                    </h3>
+                    <div className="space-y-4">
+                      <div>
+                        <Label className="text-gray-300 mb-1 block">Job Title</Label>
+                        <Input
+                          value={workForm.title}
+                          onChange={(e) => setWorkForm({ ...workForm, title: e.target.value })}
+                          placeholder="e.g., Senior Software Engineer"
+                          className="bg-gray-800 border-gray-700"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-gray-300 mb-1 block">Company</Label>
+                        <Input
+                          value={workForm.company}
+                          onChange={(e) => setWorkForm({ ...workForm, company: e.target.value })}
+                          placeholder="e.g., Google, Microsoft, Startup"
+                          className="bg-gray-800 border-gray-700"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <Label className="text-gray-300 mb-1 block">Start Date</Label>
+                          <Input
+                            type="month"
+                            value={workForm.startDate}
+                            onChange={(e) => setWorkForm({ ...workForm, startDate: e.target.value })}
+                            className="bg-gray-800 border-gray-700"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-gray-300 mb-1 block">End Date</Label>
+                          <Input
+                            type="month"
+                            value={workForm.endDate}
+                            onChange={(e) => setWorkForm({ ...workForm, endDate: e.target.value })}
+                            placeholder="Present or leave empty"
+                            className="bg-gray-800 border-gray-700"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <Label className="text-gray-300 mb-1 block">Description (Optional)</Label>
+                        <textarea
+                          value={workForm.description}
+                          onChange={(e) => setWorkForm({ ...workForm, description: e.target.value })}
+                          rows={3}
+                          placeholder="Describe your responsibilities and achievements..."
+                          className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex gap-3 mt-6">
+                      <GlowButton 
+                        variant="outline" 
+                        onClick={() => {
+                          setIsAddingWork(false);
+                          setEditingWork(null);
+                          setEditingWorkIndex(null);
+                          setWorkForm({ title: "", company: "", startDate: "", endDate: "", description: "" });
+                        }}
+                        fullWidth
+                      >
+                        Cancel
+                      </GlowButton>
+                      <GlowButton 
+                        onClick={saveWork}
+                        disabled={!workForm.title || !workForm.company}
+                        fullWidth
+                      >
+                        {editingWork ? "Update" : "Add"}
+                      </GlowButton>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </GlowCard>
+
+          {/* Professional Info Section - ORIGINAL, UNCHANGED */}
+          <GlowCard>
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Briefcase className="w-5 h-5 text-purple-400" />
+                  <h3 className="text-lg font-semibold text-white">Professional Info</h3>
+                </div>
+                <GlowButton 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => setIsEditingProfessional(!isEditingProfessional)}
+                >
+                  {isEditingProfessional ? <X className="w-4 h-4 mr-1" /> : <Edit2 className="w-4 h-4 mr-1" />}
+                  {isEditingProfessional ? "Cancel" : "Edit"}
+                </GlowButton>
+              </div>
+              
+              {isEditingProfessional ? (
+                <div className="space-y-4">
+                  <div>
+                    <Label className="text-sm text-gray-300 mb-1 block">Job Title</Label>
+                    <Input
+                      value={professionalInfo.jobTitle}
+                      onChange={(e) => setProfessionalInfo({ ...professionalInfo, jobTitle: e.target.value })}
+                      placeholder="e.g., Senior Software Engineer"
+                      className="bg-gray-800 border-gray-700"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-sm text-gray-300 mb-1 block">Department</Label>
+                    <Input
+                      value={professionalInfo.department}
+                      onChange={(e) => setProfessionalInfo({ ...professionalInfo, department: e.target.value })}
+                      placeholder="e.g., Engineering, Product, Design"
+                      className="bg-gray-800 border-gray-700"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-sm text-gray-300 mb-1 block">Years of Experience</Label>
+                    <Input
+                      type="number"
+                      value={professionalInfo.yearsOfExperience}
+                      onChange={(e) => setProfessionalInfo({ ...professionalInfo, yearsOfExperience: e.target.value })}
+                      placeholder="e.g., 5"
+                      className="bg-gray-800 border-gray-700"
+                    />
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <GlowButton 
+                      variant="outline" 
+                      size="sm"
+                      onClick={() => setIsEditingProfessional(false)}
+                    >
+                      Cancel
+                    </GlowButton>
+                    <GlowButton 
+                      size="sm"
+                      onClick={() => {
+                        saveProfessionalInfo();
+                        setIsEditingProfessional(false);
+                      }}
+                    >
+                      Save
+                    </GlowButton>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between py-2 border-b border-gray-800">
+                    <span className="text-gray-400">Job Title</span>
+                    <span className="text-white">{professionalInfo.jobTitle || "Not specified"}</span>
+                  </div>
+                  <div className="flex justify-between py-2 border-b border-gray-800">
+                    <span className="text-gray-400">Department</span>
+                    <span className="text-white">{professionalInfo.department || "Not specified"}</span>
+                  </div>
+                  <div className="flex justify-between py-2">
+                    <span className="text-gray-400">Experience</span>
+                    <span className="text-white">{professionalInfo.yearsOfExperience ? `${professionalInfo.yearsOfExperience} years` : "Not specified"}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </GlowCard>
+
+          {/* Education Section - ORIGINAL, UNCHANGED */}
+          <GlowCard>
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <GraduationCap className="w-5 h-5 text-purple-400" />
+                  <h3 className="text-lg font-semibold text-white">Education</h3>
+                </div>
+                <GlowButton 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => setIsAddingEducation(true)}
+                >
+                  <Plus className="w-4 h-4 mr-1" />
+                  Add
+                </GlowButton>
+              </div>
+              
+              <div className="space-y-3">
+                {educationList.length === 0 ? (
+                  <p className="text-gray-400 text-sm text-center py-4">No education added yet</p>
+                ) : (
+                  educationList.map((edu, index) => (
+                    <div key={index} className="p-3 bg-gray-800/30 rounded-lg">
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <p className="text-white font-medium">{edu.degree}</p>
+                          <p className="text-sm text-gray-400">{edu.institution}</p>
+                          <p className="text-xs text-gray-500">{edu.year}</p>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => startEditingEducation(edu, index)}
+                            className="p-1 hover:bg-gray-700 rounded transition-colors"
+                          >
+                            <Edit2 className="w-4 h-4 text-gray-400" />
+                          </button>
+                          <button
+                            onClick={() => removeEducation(index)}
+                            className="p-1 hover:bg-gray-700 rounded transition-colors"
+                          >
+                            <Trash2 className="w-4 h-4 text-red-400" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Add/Edit Education Modal - ORIGINAL, UNCHANGED */}
+              {(isAddingEducation || editingEducation !== null) && (
+                <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+                  <div className="bg-gray-900 rounded-lg max-w-md w-full mx-4 border border-gray-700 p-6">
+                    <h3 className="text-xl font-semibold text-white mb-4">
+                      {editingEducation ? "Edit Education" : "Add Education"}
+                    </h3>
+                    <div className="space-y-4">
+                      <div>
+                        <Label className="text-gray-300 mb-1 block">Degree / Program</Label>
+                        <Input
+                          value={educationForm.degree}
+                          onChange={(e) => setEducationForm({ ...educationForm, degree: e.target.value })}
+                          placeholder="e.g., Bachelor of Science in Computer Science"
+                          className="bg-gray-800 border-gray-700"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-gray-300 mb-1 block">Institution</Label>
+                        <Input
+                          value={educationForm.institution}
+                          onChange={(e) => setEducationForm({ ...educationForm, institution: e.target.value })}
+                          placeholder="e.g., Stanford University"
+                          className="bg-gray-800 border-gray-700"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-gray-300 mb-1 block">Year</Label>
+                        <Input
+                          value={educationForm.year}
+                          onChange={(e) => setEducationForm({ ...educationForm, year: e.target.value })}
+                          placeholder="e.g., 2020 or 2016-2020"
+                          className="bg-gray-800 border-gray-700"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex gap-3 mt-6">
+                      <GlowButton 
+                        variant="outline" 
+                        onClick={() => {
+                          setIsAddingEducation(false);
+                          setEditingEducation(null);
+                          setEducationForm({ degree: "", institution: "", year: "" });
+                        }}
+                        fullWidth
+                      >
+                        Cancel
+                      </GlowButton>
+                      <GlowButton 
+                        onClick={saveEducation}
+                        fullWidth
+                      >
+                        {editingEducation ? "Update" : "Add"}
+                      </GlowButton>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </GlowCard>
+
+          {/* Top Skills Section - ORIGINAL, UNCHANGED */}
+          <GlowCard>
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Code className="w-5 h-5 text-purple-400" />
+                  <h3 className="text-lg font-semibold text-white">Top Skills</h3>
+                </div>
+                <GlowButton 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => setIsAddingSkill(true)}
+                >
+                  <Plus className="w-4 h-4 mr-1" />
+                  Add Skill
+                </GlowButton>
+              </div>
+              
+              <div className="flex flex-wrap gap-2">
+                {skills.length === 0 ? (
+                  <p className="text-gray-400 text-sm py-4 w-full text-center">No skills added yet</p>
+                ) : (
+                  skills.map((skill, index) => (
+                    <span
+                      key={index}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-purple-500/20 text-purple-400 border border-purple-500/30 text-sm"
+                    >
+                      {skill}
+                      <button
+                        onClick={() => removeSkill(index)}
+                        className="ml-1 hover:text-purple-200 transition-colors"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))
+                )}
+              </div>
+
+              {/* Add Skill Modal - ORIGINAL, UNCHANGED */}
+              {isAddingSkill && (
+                <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+                  <div className="bg-gray-900 rounded-lg max-w-md w-full mx-4 border border-gray-700 p-6">
+                    <h3 className="text-xl font-semibold text-white mb-4">Add Skill</h3>
+                    <div>
+                      <Label className="text-gray-300 mb-1 block">Skill Name</Label>
+                      <Input
+                        value={newSkill}
+                        onChange={(e) => setNewSkill(e.target.value)}
+                        placeholder="e.g., React, TypeScript, Python"
+                        className="bg-gray-800 border-gray-700"
+                        onKeyPress={(e) => {
+                          if (e.key === 'Enter' && newSkill.trim()) {
+                            addSkill();
+                          }
+                        }}
+                      />
+                    </div>
+                    <div className="flex gap-3 mt-6">
+                      <GlowButton 
+                        variant="outline" 
+                        onClick={() => {
+                          setIsAddingSkill(false);
+                          setNewSkill("");
+                        }}
+                        fullWidth
+                      >
+                        Cancel
+                      </GlowButton>
+                      <GlowButton 
+                        onClick={addSkill}
+                        disabled={!newSkill.trim()}
+                        fullWidth
+                      >
+                        Add Skill
+                      </GlowButton>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </GlowCard>
+
+          {/* Interests Section - ORIGINAL, UNCHANGED */}
+          <GlowCard>
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Heart className="w-5 h-5 text-purple-400" />
+                  <h3 className="text-lg font-semibold text-white">Interests</h3>
+                </div>
+                <GlowButton 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => setIsEditingInterests(!isEditingInterests)}
+                >
+                  {isEditingInterests ? <X className="w-4 h-4 mr-1" /> : <Edit2 className="w-4 h-4 mr-1" />}
+                  {isEditingInterests ? "Cancel" : "Edit"}
+                </GlowButton>
+              </div>
+              
+              {isEditingInterests ? (
+                <div className="space-y-4">
+                  <div className="flex flex-wrap gap-2">
+                    {availableInterests.map((interest) => (
+                      <button
+                        key={interest.id}
+                        onClick={() => toggleInterest(interest.id)}
+                        className={`px-3 py-1.5 rounded-lg text-sm transition-all ${
+                          selectedInterests.includes(interest.id)
+                            ? "bg-purple-500 text-white"
+                            : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                        }`}
+                      >
+                        {interest.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <GlowButton 
+                      variant="outline" 
+                      size="sm"
+                      onClick={() => {
+                        setIsEditingInterests(false);
+                      }}
+                    >
+                      Cancel
+                    </GlowButton>
+                    <GlowButton 
+                      size="sm"
+                      onClick={saveInterests}
+                    >
+                      Save Interests
+                    </GlowButton>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {selectedInterests.length === 0 ? (
+                    <p className="text-gray-400 text-sm py-4 w-full text-center">No interests selected</p>
+                  ) : (
+                    selectedInterests.map((interestId) => {
+                      const interest = availableInterests.find(i => i.id === interestId);
+                      if (!interest) return null;
+                      return (
+                        <span key={interest.id} className="px-3 py-1.5 rounded-lg bg-purple-500/20 text-purple-400 border border-purple-500/30 text-sm">
+                          {interest.label}
+                        </span>
+                      );
+                    })
+                  )}
+                </div>
+              )}
+            </div>
+          </GlowCard>
+
+          {/* Save All Changes Button - AT THE BOTTOM */}
+          <div className="flex justify-end">
+            <GlowButton onClick={handleSaveProfile} isLoading={saving}>
+              <Save className="w-4 h-4 mr-2" />
+              Save All Changes
+            </GlowButton>
+          </div>
         </TabsContent>
 
-        {/* Notifications Tab */}
+        {/* Notifications Tab - UNCHANGED */}
         <TabsContent value="notifications" className="space-y-6">
           <GlowCard>
             <div className="p-6">
@@ -711,7 +1632,6 @@ export default function SettingsPage() {
               </p>
 
               <div className="space-y-6">
-                {/* Email Notifications */}
                 <div className="flex items-center justify-between p-4 rounded-lg bg-gray-800/30 border border-gray-700">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
@@ -728,7 +1648,6 @@ export default function SettingsPage() {
                   />
                 </div>
 
-                {/* Push Notifications */}
                 <div className="flex items-center justify-between p-4 rounded-lg bg-gray-800/30 border border-gray-700">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-lg bg-purple-500/20 flex items-center justify-center">
@@ -745,7 +1664,6 @@ export default function SettingsPage() {
                   />
                 </div>
 
-                {/* Assignment Reminders */}
                 <div className="flex items-center justify-between p-4 rounded-lg bg-gray-800/30 border border-gray-700">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-lg bg-yellow-500/20 flex items-center justify-center">
@@ -762,7 +1680,6 @@ export default function SettingsPage() {
                   />
                 </div>
 
-                {/* Course Updates */}
                 <div className="flex items-center justify-between p-4 rounded-lg bg-gray-800/30 border border-gray-700">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-lg bg-green-500/20 flex items-center justify-center">
@@ -779,7 +1696,6 @@ export default function SettingsPage() {
                   />
                 </div>
 
-                {/* Achievement Alerts */}
                 <div className="flex items-center justify-between p-4 rounded-lg bg-gray-800/30 border border-gray-700">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-lg bg-orange-500/20 flex items-center justify-center">
@@ -796,7 +1712,6 @@ export default function SettingsPage() {
                   />
                 </div>
 
-                {/* Message Notifications */}
                 <div className="flex items-center justify-between p-4 rounded-lg bg-gray-800/30 border border-gray-700">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-lg bg-pink-500/20 flex items-center justify-center">
@@ -813,7 +1728,6 @@ export default function SettingsPage() {
                   />
                 </div>
 
-                {/* Marketing Emails */}
                 <div className="flex items-center justify-between p-4 rounded-lg bg-gray-800/30 border border-gray-700">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-lg bg-red-500/20 flex items-center justify-center">
@@ -830,7 +1744,6 @@ export default function SettingsPage() {
                   />
                 </div>
 
-                {/* Digest Emails */}
                 <div className="flex items-center justify-between p-4 rounded-lg bg-gray-800/30 border border-gray-700">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-lg bg-indigo-500/20 flex items-center justify-center">
@@ -857,7 +1770,7 @@ export default function SettingsPage() {
           </GlowCard>
         </TabsContent>
 
-        {/* Security Tab */}
+        {/* Security Tab - UNCHANGED */}
         <TabsContent value="security" className="space-y-6">
           <GlowCard>
             <div className="p-6">
@@ -871,10 +1784,6 @@ export default function SettingsPage() {
               </p>
 
               <div className="space-y-4">
-                {/* Current Password - Shown for:
-                    - Email/password users (always)
-                    - Google users who have already set a password
-                */}
                 {(!isGoogleUser || (isGoogleUser && hasSetPassword)) && (
                   <div>
                     <Label className="text-gray-300">Current Password</Label>
@@ -897,7 +1806,6 @@ export default function SettingsPage() {
                   </div>
                 )}
 
-                {/* Info message for first-time password setup */}
                 {isGoogleUser && !hasSetPassword && (
                   <div className="p-3 bg-blue-500/10 rounded-lg border border-blue-500/30">
                     <p className="text-sm text-blue-400">
@@ -907,7 +1815,6 @@ export default function SettingsPage() {
                   </div>
                 )}
 
-                {/* New Password Field */}
                 <div>
                   <Label className="text-gray-300">New Password</Label>
                   <div className="relative mt-1">
@@ -945,7 +1852,6 @@ export default function SettingsPage() {
                   )}
                 </div>
 
-                {/* Confirm Password Field */}
                 <div>
                   <Label className="text-gray-300">Confirm New Password</Label>
                   <div className="relative mt-1">
@@ -969,7 +1875,6 @@ export default function SettingsPage() {
                   )}
                 </div>
 
-                {/* Submit Button */}
                 <div className="flex justify-end pt-4">
                   <GlowButton 
                     onClick={handleChangePassword} 
@@ -990,7 +1895,7 @@ export default function SettingsPage() {
           </GlowCard>
         </TabsContent>
 
-        {/* Danger Zone Tab */}
+        {/* Danger Zone Tab - UNCHANGED */}
         <TabsContent value="danger" className="space-y-6">
           <GlowCard>
             <div className="p-6">
@@ -1001,7 +1906,6 @@ export default function SettingsPage() {
               <p className="text-sm text-gray-400 mb-6">Irreversible and destructive actions</p>
 
               <div className="space-y-4">
-                {/* Sign out of all devices */}
                 <div className="flex items-center justify-between p-4 bg-red-500/5 rounded-lg border border-red-500/20">
                   <div>
                     <h3 className="font-semibold text-white">Sign out of all devices</h3>
@@ -1017,7 +1921,6 @@ export default function SettingsPage() {
                   </GlowButton>
                 </div>
 
-                {/* Delete Account */}
                 <div className="flex items-center justify-between p-4 bg-red-500/5 rounded-lg border border-red-500/20">
                   <div>
                     <h3 className="font-semibold text-white">Delete Account</h3>
@@ -1033,7 +1936,6 @@ export default function SettingsPage() {
                   </GlowButton>
                 </div>
 
-                {/* Contact Support */}
                 <div className="flex items-center justify-between p-4 bg-blue-500/5 rounded-lg border border-blue-500/20">
                   <div>
                     <h3 className="font-semibold text-white">Contact Support</h3>

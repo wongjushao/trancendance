@@ -294,10 +294,10 @@ export default function ProfileClient({ user }: ProfileClientProps) {
       )}
 
       {/* Two Column Layout - Left (smaller) and Right (larger) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
         
         {/* LEFT COLUMN - 4 columns wide */}
-        <div className="lg:col-span-4 space-y-6">
+        <div className="lg:col-span-4 space-y-6 flex flex-col">
           
           {/* Profile Completion Card - Only show if not 100% */}
           {profileCompletion < 100 && (
@@ -400,14 +400,9 @@ export default function ProfileClient({ user }: ProfileClientProps) {
 
           {/* Interests */}
           <GlowCard>
-            <div className="p-5">
+            <div className="p-5 h-full flex flex-col">
               <div className="flex justify-between items-center mb-3">
                 <h3 className="font-semibold text-white">Interests</h3>
-                <Link href="/settings">
-                  <GlowButton size="sm" variant="ghost" className="h-8 px-2">
-                    <Plus className="w-3 h-3" />
-                  </GlowButton>
-                </Link>
               </div>
               <div className="flex flex-wrap gap-2">
                 {userInterests.map(interestId => {
@@ -421,37 +416,6 @@ export default function ProfileClient({ user }: ProfileClientProps) {
                     </div>
                   );
                 })}
-              </div>
-            </div>
-          </GlowCard>
-          <GlowCard>
-            <div className="p-5">
-              <div className="flex justify-between items-center mb-3">
-                <h3 className="font-semibold text-white">Quick Stats</h3>
-                <TrendingUp className="w-4 h-4 text-green-400" />
-              </div>
-              <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-xs text-gray-400">This Week</span>
-                  <span className="text-sm font-semibold text-white">12 hours</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-xs text-gray-400">Current Streak</span>
-                  <span className="text-sm font-semibold text-white">7 days</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-xs text-gray-400">Completion Rate</span>
-                  <span className="text-sm font-semibold text-green-400">85%</span>
-                </div>
-                <div className="mt-3 pt-2 border-t border-gray-800">
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="text-gray-400">Monthly Goal</span>
-                    <span className="text-purple-400">65%</span>
-                  </div>
-                  <div className="w-full bg-gray-700 rounded-full h-1.5 mt-1">
-                    <div className="bg-purple-500 h-1.5 rounded-full" style={{ width: "65%" }} />
-                  </div>
-                </div>
               </div>
             </div>
           </GlowCard>
