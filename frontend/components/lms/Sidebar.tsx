@@ -48,11 +48,16 @@ export function Sidebar({ user }: SidebarProps) {
     }
   }, []);
 
-  // Save sidebar state
+  // Save sidebar state - ADDED event dispatch (preserves original save logic)
   const toggleSidebar = () => {
     const newState = !isCollapsed;
     setIsCollapsed(newState);
     localStorage.setItem("sidebar_collapsed", String(newState));
+    
+    // ADDED: Dispatch event for layout to listen to
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('sidebar-toggle', { detail: { collapsed: newState } }));
+    }
   };
 
   // Fetch profile data for name display

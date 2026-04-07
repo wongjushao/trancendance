@@ -86,16 +86,40 @@ const activityTimeline = [
   { id: "4", type: "assignment", action: "Submitted", title: "API Integration Project", date: new Date(2024, 0, 3), points: 75 },
 ];
 
+const badgesData = [
+  { id: "1", title: "Early Bird", description: "Joined the platform", icon: Zap, earned: true, dateEarned: "2024-01-01" },
+  { id: "2", title: "First Course", description: "Completed first course", icon: BookOpen, earned: true, dateEarned: "2024-01-15" },
+  { id: "3", title: "Perfect Week", description: "7-day learning streak", icon: Calendar, earned: false, progress: 3 },
+  { id: "4", title: "Community Helper", description: "Answered 10 questions", icon: MessageCircle, earned: false, progress: 2 },
+];
+
 export default function ProfileClient({ user }: ProfileClientProps) {
   const { avatarUrl, refreshAvatar } = useAvatar();
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [loading, setLoading] = useState(true);
   const [userInterests] = useState<string[]>(["coding", "design", "ai"]);
   const [showAllAchievements, setShowAllAchievements] = useState(false);
+  const [profileCompletion, setProfileCompletion] = useState(0);
 
   useEffect(() => {
     fetchProfile();
   }, [user.id]);
+
+  useEffect(() => {
+    if (profile) {
+      const requiredFields = [
+        profile.username,
+        profile.first_name,
+        profile.last_name,
+        profile.bio,
+        profile.birthday,
+        profile.job_title,
+      ];
+      const filledCount = requiredFields.filter(field => field && field.trim() !== "").length;
+      const percentage = Math.round((filledCount / requiredFields.length) * 100);
+      setProfileCompletion(percentage);
+    }
+  }, [profile]);
 
   const fetchProfile = async () => {
     try {
@@ -114,6 +138,7 @@ export default function ProfileClient({ user }: ProfileClientProps) {
     }
   };
 
+  /*
   const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -129,6 +154,55 @@ export default function ProfileClient({ user }: ProfileClientProps) {
       if (updateError) throw updateError;
       toast.success("Avatar updated successfully");
       refreshAvatar();
+    } catch (error) {
+      console.error("Error uploading avatar:", error);
+      toast.error("Failed to upload avatar");
+    }
+  };
+  */
+
+  const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    
+    try {
+      const supabase = getSupabaseBrowserClient();
+      
+      // ✅ Get fresh session
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        toast.error("You must be logged in to upload an avatar");
+        return;
+      }
+      
+      const userId = session.user.id;
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${userId}-${Date.now()}.${fileExt}`;
+      const filePath = `avatars/${fileName}`;
+      
+      // Upload to storage
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, file);
+        
+      if (uploadError) throw uploadError;
+      
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(filePath);
+      
+      // ✅ Update profile with the correct user ID
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ avatar_url: publicUrl })
+        .eq('id', userId);  // Make sure this matches auth.uid()
+        
+      if (updateError) throw updateError;
+      
+      toast.success("Avatar updated successfully");
+      refreshAvatar();
+      
     } catch (error) {
       console.error("Error uploading avatar:", error);
       toast.error("Failed to upload avatar");
@@ -163,27 +237,30 @@ export default function ProfileClient({ user }: ProfileClientProps) {
 
   return (
     <div className="space-y-6">
-      {/* Hero Banner - Stays at top */}
+      {/* Hero Banner - Full width */}
       <div className="relative">
         <div className="relative h-48 md:h-56 rounded-xl overflow-hidden bg-gradient-to-r from-purple-600 via-pink-600 to-blue-600">
           <div className="absolute inset-0 bg-black/30"></div>
           <div className="absolute bottom-0 left-0 right-0 p-6 md:p-8">
             <div className="flex flex-col md:flex-row items-start md:items-end gap-4">
-              <div className="relative -mb-12 md:-mb-16">
-                <div className="w-24 h-24 md:w-28 md:h-28 rounded-2xl bg-gradient-to-br from-purple-500 to-pink-500 p-0.5 shadow-2xl">
-                  <div className="w-full h-full rounded-2xl bg-gray-900 flex items-center justify-center overflow-hidden">
+              
+              {/* Avatar - Simple circle, no cropping */}
+              <div className="relative">
+                <div className="w-24 h-24 md:w-28 md:h-28 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 p-0.5 shadow-2xl">
+                  <div className="w-full h-full rounded-full bg-gray-900 flex items-center justify-center overflow-hidden">
                     {avatarUrl ? (
-                      <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                      <img 
+                        src={avatarUrl} 
+                        alt="Avatar" 
+                        className="w-full h-full rounded-full object-cover" 
+                      />
                     ) : (
                       <span className="text-3xl md:text-4xl font-bold text-white">{getInitials()}</span>
                     )}
                   </div>
                 </div>
-                <label className="absolute bottom-0 right-0 p-1.5 bg-purple-600 rounded-full cursor-pointer hover:bg-purple-700 transition-colors">
-                  <Camera className="w-3 h-3 md:w-4 md:h-4 text-white" />
-                  <input type="file" accept="image/*" className="hidden" onChange={handleAvatarUpload} />
-                </label>
               </div>
+              
               <div className="mt-2 md:mt-0 flex-1">
                 <h1 className="text-2xl md:text-3xl font-bold text-white mb-2">{getFullName()}</h1>
                 <div className="flex flex-wrap items-center gap-3 text-sm text-gray-200">
@@ -191,9 +268,9 @@ export default function ProfileClient({ user }: ProfileClientProps) {
                     <span className="flex items-center gap-1"><Briefcase className="w-3 h-3" />{profile.job_title}</span>
                   )}
                   <span className="flex items-center gap-1"><Mail className="w-3 h-3" />{user.email}</span>
-                  <span className="flex items-center gap-1"><MapPin className="w-3 h-3" />San Francisco, CA</span>
                 </div>
               </div>
+              
               <Link href="/settings">
                 <GlowButton size="sm" variant="outline" className="mt-2 md:mt-0">
                   <Edit className="w-4 h-4 mr-2" />Edit Profile
@@ -203,85 +280,125 @@ export default function ProfileClient({ user }: ProfileClientProps) {
           </div>
         </div>
       </div>
+      
+      {/* About Me Section - Full width */}
+      {profile?.bio && (
+      <GlowCard>
+        <div className="p-6">
+          <h2 className="text-xl font-semibold text-white mb-3">About Me</h2>
+          <p className="text-gray-300 leading-relaxed break-words whitespace-normal break-all max-w-full">
+            {profile.bio}
+          </p>
+        </div>
+      </GlowCard>
+      )}
 
-      {/* Three Column Layout */}
+      {/* Two Column Layout - Left (smaller) and Right (larger) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
-        {/* LEFT COLUMN - Profile Info & Stats (3 columns wide) */}
-        <div className="lg:col-span-3 space-y-6">
-          {/* Profile Completion Card */}
-          <GlowCard>
-            <div className="p-5">
-              <div className="flex justify-between items-center mb-3">
-                <span className="text-sm font-medium text-gray-300">Profile Strength</span>
-                <span className="text-sm font-semibold text-purple-400">75%</span>
-              </div>
-              <div className="w-full bg-gray-700 rounded-full h-2 mb-3">
-                <div className="bg-gradient-to-r from-purple-500 to-pink-500 h-2 rounded-full" style={{ width: "75%" }} />
-              </div>
-              <p className="text-xs text-gray-400">Complete your profile for better recommendations</p>
-            </div>
-          </GlowCard>
-
-          {/* Stats Cards */}
-          <GlowCard>
-            <div className="p-5 space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-purple-500/20 flex items-center justify-center">
-                    <BookOpen className="w-5 h-5 text-purple-400" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold text-white">18</p>
-                    <p className="text-xs text-gray-400">Total Courses</p>
-                  </div>
-                </div>
-                <div className="w-px h-8 bg-gray-700" />
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-green-500/20 flex items-center justify-center">
-                    <Award className="w-5 h-5 text-green-400" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold text-white">8</p>
-                    <p className="text-xs text-gray-400">Certificates</p>
-                  </div>
-                </div>
-              </div>
-              <div className="flex items-center justify-between pt-3 border-t border-gray-800">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-yellow-500/20 flex items-center justify-center">
-                    <Trophy className="w-5 h-5 text-yellow-400" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold text-white">12</p>
-                    <p className="text-xs text-gray-400">Achievements</p>
-                  </div>
-                </div>
-                <div className="w-px h-8 bg-gray-700" />
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-pink-500/20 flex items-center justify-center">
-                    <Users className="w-5 h-5 text-pink-400" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold text-white">24</p>
-                    <p className="text-xs text-gray-400">Connections</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </GlowCard>
-
-          {/* Bio Card */}
-          {profile?.bio && (
+        {/* LEFT COLUMN - 4 columns wide */}
+        <div className="lg:col-span-4 space-y-6">
+          
+          {/* Profile Completion Card - Only show if not 100% */}
+          {profileCompletion < 100 && (
             <GlowCard>
               <div className="p-5">
-                <h3 className="font-semibold text-white mb-2">About</h3>
-                <p className="text-sm text-gray-300 leading-relaxed">{profile.bio}</p>
+                <div className="flex justify-between items-center mb-3">
+                  <span className="text-sm font-medium text-gray-300">Profile Strength</span>
+                  <span className="text-sm font-semibold text-purple-400">{profileCompletion}%</span>
+                </div>
+                <div className="w-full bg-gray-700 rounded-full h-2 mb-3">
+                  <div 
+                    className="bg-gradient-to-r from-purple-500 to-pink-500 h-2 rounded-full transition-all duration-500" 
+                    style={{ width: `${profileCompletion}%` }} 
+                  />
+                </div>
+                <p className="text-xs text-gray-400">Complete your profile for better recommendations</p>
               </div>
             </GlowCard>
           )}
 
-          {/* Interests Card */}
+          {/* Connections Card */}
+          <GlowCard>
+            <div className="p-5">
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="font-semibold text-white">Connections</h3>
+                <GlowButton size="sm" variant="ghost" className="h-8 px-2 text-xs">
+                  View All
+                </GlowButton>
+              </div>
+              <div className="space-y-3">
+                {friendsData.slice(0, 3).map((friend) => (
+                  <div key={friend.id} className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white text-xs font-semibold">
+                      {friend.avatar}
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-white">{friend.name}</p>
+                      <p className="text-xs text-gray-500">{friend.mutualCourses} mutual courses</p>
+                    </div>
+                    <div className={`w-2 h-2 rounded-full ${friend.status === "online" ? "bg-green-400" : "bg-gray-500"}`} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </GlowCard>
+
+          {/* Professional Info */}
+          <GlowCard>
+            <div className="p-5">
+              <h3 className="font-semibold text-white mb-3">Professional</h3>
+              <div className="space-y-3">
+                <div>
+                  <p className="text-xs text-gray-400">Job Title</p>
+                  <p className="text-sm text-white mt-0.5">{profile?.job_title || "Not specified"}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">Department</p>
+                  <p className="text-sm text-white mt-0.5">Engineering</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">Experience</p>
+                  <p className="text-sm text-white mt-0.5">5+ years</p>
+                </div>
+              </div>
+            </div>
+          </GlowCard>
+
+          {/* Education */}
+          <GlowCard>
+            <div className="p-5">
+              <h3 className="font-semibold text-white mb-3">Education</h3>
+              <div className="space-y-3">
+                <div>
+                  <p className="text-sm font-medium text-white">Master's in CS</p>
+                  <p className="text-xs text-gray-400">Stanford University</p>
+                  <p className="text-xs text-gray-500 mt-0.5">2020</p>
+                </div>
+                <div className="pt-2 border-t border-gray-800">
+                  <p className="text-sm font-medium text-white">Bachelor's in IT</p>
+                  <p className="text-xs text-gray-400">UC Berkeley</p>
+                  <p className="text-xs text-gray-500 mt-0.5">2018</p>
+                </div>
+              </div>
+            </div>
+          </GlowCard>
+
+          {/* Top Skills */}
+          <GlowCard>
+            <div className="p-5">
+              <h3 className="font-semibold text-white mb-3">Top Skills</h3>
+              <div className="flex flex-wrap gap-2">
+                {["React", "TypeScript", "Node.js", "Python", "GraphQL", "Docker"].map((skill) => (
+                  <span key={skill} className="px-2 py-1 text-xs rounded-lg bg-purple-500/20 text-purple-400 border border-purple-500/30">
+                    {skill}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </GlowCard>
+
+          {/* Interests */}
           <GlowCard>
             <div className="p-5">
               <div className="flex justify-between items-center mb-3">
@@ -307,36 +424,74 @@ export default function ProfileClient({ user }: ProfileClientProps) {
               </div>
             </div>
           </GlowCard>
-
-          {/* Connections Card - Compact */}
           <GlowCard>
             <div className="p-5">
               <div className="flex justify-between items-center mb-3">
-                <h3 className="font-semibold text-white">Connections</h3>
-                <GlowButton size="sm" variant="ghost" className="h-8 px-2 text-xs">
-                  View All
-                </GlowButton>
+                <h3 className="font-semibold text-white">Quick Stats</h3>
+                <TrendingUp className="w-4 h-4 text-green-400" />
               </div>
               <div className="space-y-3">
-                {friendsData.slice(0, 3).map((friend) => (
-                  <div key={friend.id} className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white text-xs font-semibold">
-                      {friend.avatar}
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-white">{friend.name}</p>
-                      <p className="text-xs text-gray-500">{friend.mutualCourses} mutual courses</p>
-                    </div>
-                    <div className={`w-2 h-2 rounded-full ${friend.status === "online" ? "bg-green-400" : "bg-gray-500"}`} />
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-gray-400">This Week</span>
+                  <span className="text-sm font-semibold text-white">12 hours</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-gray-400">Current Streak</span>
+                  <span className="text-sm font-semibold text-white">7 days</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-gray-400">Completion Rate</span>
+                  <span className="text-sm font-semibold text-green-400">85%</span>
+                </div>
+                <div className="mt-3 pt-2 border-t border-gray-800">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-gray-400">Monthly Goal</span>
+                    <span className="text-purple-400">65%</span>
                   </div>
-                ))}
+                  <div className="w-full bg-gray-700 rounded-full h-1.5 mt-1">
+                    <div className="bg-purple-500 h-1.5 rounded-full" style={{ width: "65%" }} />
+                  </div>
+                </div>
               </div>
             </div>
           </GlowCard>
         </div>
 
-        {/* MIDDLE COLUMN - Activity & Achievements (6 columns wide) */}
-        <div className="lg:col-span-6 space-y-6">
+        {/* RIGHT COLUMN - 8 columns wide */}
+        <div className="lg:col-span-8 space-y-6">
+
+          {/* Stats Cards Row */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <GlowCard className="p-4">
+              <div className="text-center">
+                <BookOpen className="w-6 h-6 text-purple-400 mx-auto mb-2" />
+                <p className="text-2xl font-bold text-white">18</p>
+                <p className="text-xs text-gray-400">Courses</p>
+              </div>
+            </GlowCard>
+            <GlowCard className="p-4">
+              <div className="text-center">
+                <Award className="w-6 h-6 text-green-400 mx-auto mb-2" />
+                <p className="text-2xl font-bold text-white">8</p>
+                <p className="text-xs text-gray-400">Certificates</p>
+              </div>
+            </GlowCard>
+            <GlowCard className="p-4">
+              <div className="text-center">
+                <Trophy className="w-6 h-6 text-yellow-400 mx-auto mb-2" />
+                <p className="text-2xl font-bold text-white">12</p>
+                <p className="text-xs text-gray-400">Achievements</p>
+              </div>
+            </GlowCard>
+            <GlowCard className="p-4">
+              <div className="text-center">
+                <Users className="w-6 h-6 text-pink-400 mx-auto mb-2" />
+                <p className="text-2xl font-bold text-white">24</p>
+                <p className="text-xs text-gray-400">Connections</p>
+              </div>
+            </GlowCard>
+          </div>
+
           {/* Activity Timeline */}
           <GlowCard>
             <div className="p-5">
@@ -372,6 +527,40 @@ export default function ProfileClient({ user }: ProfileClientProps) {
                     </div>
                   </motion.div>
                 ))}
+              </div>
+            </div>
+          </GlowCard>
+
+          {/* Badges Section */}
+          <GlowCard>
+            <div className="p-5">
+              <div className="flex justify-between items-center mb-4">
+                <div>
+                  <h3 className="font-semibold text-white">Badges</h3>
+                  <p className="text-xs text-gray-400 mt-0.5">Special recognition badges</p>
+                </div>
+                <Zap className="w-5 h-5 text-purple-400" />
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {badgesData.map((badge) => {
+                  const Icon = badge.icon;
+                  return (
+                    <div key={badge.id} className={`p-3 rounded-lg text-center ${badge.earned ? "bg-purple-500/10 border border-purple-500/30" : "bg-gray-800/30 border border-gray-700"}`}>
+                      <div className={`w-12 h-12 rounded-full mx-auto mb-2 flex items-center justify-center ${badge.earned ? "bg-purple-500/20" : "bg-gray-700/50"}`}>
+                        <Icon className={`w-6 h-6 ${badge.earned ? "text-purple-400" : "text-gray-500"}`} />
+                      </div>
+                      <h4 className="text-xs font-semibold text-white">{badge.title}</h4>
+                      <p className="text-[10px] text-gray-400 mt-0.5">{badge.description}</p>
+                      {!badge.earned && (
+                        <div className="mt-2">
+                          <div className="w-full bg-gray-700 rounded-full h-1">
+                            <div className="bg-purple-500 h-1 rounded-full" style={{ width: `${(badge.progress || 0) * 25}%` }} />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </GlowCard>
@@ -458,95 +647,6 @@ export default function ProfileClient({ user }: ProfileClientProps) {
               </div>
             </div>
           </GlowCard>
-        </div>
-
-        {/* RIGHT COLUMN - Professional Info & Education (3 columns wide) */}
-        <div className="lg:col-span-3 space-y-6">
-          {/* Professional Info */}
-          <GlowCard>
-            <div className="p-5">
-              <h3 className="font-semibold text-white mb-3">Professional</h3>
-              <div className="space-y-3">
-                <div>
-                  <p className="text-xs text-gray-400">Job Title</p>
-                  <p className="text-sm text-white mt-0.5">{profile?.job_title || "Not specified"}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-gray-400">Department</p>
-                  <p className="text-sm text-white mt-0.5">Engineering</p>
-                </div>
-                <div>
-                  <p className="text-xs text-gray-400">Experience</p>
-                  <p className="text-sm text-white mt-0.5">5+ years</p>
-                </div>
-              </div>
-            </div>
-          </GlowCard>
-
-          {/* Education */}
-          <GlowCard>
-            <div className="p-5">
-              <h3 className="font-semibold text-white mb-3">Education</h3>
-              <div className="space-y-3">
-                <div>
-                  <p className="text-sm font-medium text-white">Master's in CS</p>
-                  <p className="text-xs text-gray-400">Stanford University</p>
-                  <p className="text-xs text-gray-500 mt-0.5">2020</p>
-                </div>
-                <div className="pt-2 border-t border-gray-800">
-                  <p className="text-sm font-medium text-white">Bachelor's in IT</p>
-                  <p className="text-xs text-gray-400">UC Berkeley</p>
-                  <p className="text-xs text-gray-500 mt-0.5">2018</p>
-                </div>
-              </div>
-            </div>
-          </GlowCard>
-
-          {/* Skills */}
-          <GlowCard>
-            <div className="p-5">
-              <h3 className="font-semibold text-white mb-3">Top Skills</h3>
-              <div className="flex flex-wrap gap-2">
-                {["React", "TypeScript", "Node.js", "Python", "GraphQL", "Docker"].map((skill) => (
-                  <span key={skill} className="px-2 py-1 text-xs rounded-lg bg-purple-500/20 text-purple-400 border border-purple-500/30">
-                    {skill}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </GlowCard>
-
-          {/* Languages */}
-          <GlowCard>
-            <div className="p-5">
-              <h3 className="font-semibold text-white mb-3">Languages</h3>
-              <div className="space-y-2">
-                <div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-white">English</span>
-                    <span className="text-gray-400">Fluent</span>
-                  </div>
-                  <div className="w-full bg-gray-700 rounded-full h-1 mt-1">
-                    <div className="bg-purple-500 h-1 rounded-full" style={{ width: "100%" }} />
-                  </div>
-                </div>
-                <div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-white">Spanish</span>
-                    <span className="text-gray-400">Intermediate</span>
-                  </div>
-                  <div className="w-full bg-gray-700 rounded-full h-1 mt-1">
-                    <div className="bg-purple-500 h-1 rounded-full" style={{ width: "60%" }} />
-                  </div>
-                </div>
-              </div>
-            </div>
-          </GlowCard>
-
-          {/* Sign Out Button */}
-          <div className="pt-4">
-            <SignOutButton />
-          </div>
         </div>
       </div>
     </div>
