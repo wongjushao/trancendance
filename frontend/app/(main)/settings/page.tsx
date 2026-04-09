@@ -170,10 +170,9 @@ export default function SettingsPage() {
     pushNotifications: true,
     assignmentReminders: true,
     courseUpdates: true,
-    achievementAlerts: true,
     messageNotifications: true,
     marketingEmails: false,
-    digestEmails: true,
+    //digestEmails: true,
   });
 
   // Password form state
@@ -199,15 +198,38 @@ export default function SettingsPage() {
   const [isEditingProfessional, setIsEditingProfessional] = useState(false);
   const [professionalInfo, setProfessionalInfo] = useState({
     jobTitle: "",
+    professionalSummary: "",
     department: "",
     yearsOfExperience: "",
   });
 
   // Education
-  const [educationList, setEducationList] = useState<Array<{ degree: string; institution: string; year: string }>>([]);
+  const [isReordering, setIsReordering] = useState(false);
+  interface Education {
+    id?: string; // For updates/deletes
+    profile_id?: string;
+    institution_name: string;
+    degree: string;
+    field_of_study: string;
+    start_year: number | null;
+    end_year: number | null;
+    is_current: boolean;
+    description: string;
+    order_index: number;
+  }
+
+  const [educationList, setEducationList] = useState<Education[]>([]);
   const [isAddingEducation, setIsAddingEducation] = useState(false);
-  const [editingEducation, setEditingEducation] = useState<{ degree: string; institution: string; year: string; index: number } | null>(null);
-  const [educationForm, setEducationForm] = useState({ degree: "", institution: "", year: "" });
+  const [editingEducation, setEditingEducation] = useState<Education & { index: number } | null>(null);
+  const [educationForm, setEducationForm] = useState<Omit<Education, 'order_index' | 'id' | 'profile_id'>>({
+    institution_name: "",
+    degree: "",
+    field_of_study: "",
+    start_year: null,
+    end_year: null,
+    is_current: false,
+    description: "",
+  });
 
   // Skills
   const [skills, setSkills] = useState<string[]>([]);
@@ -218,31 +240,6 @@ export default function SettingsPage() {
   const [isEditingInterests, setIsEditingInterests] = useState(false);
   const [selectedInterests, setSelectedInterests] = useState<string[]>([]);
 
-// Add these with the other state variables (around line where other useState hooks are)
-
-  // Professional Headline & Location
-  const [professionalHeadline, setProfessionalHeadline] = useState("");
-  const [location, setLocation] = useState("");
-  const [pronouns, setPronouns] = useState("");
-
-  // Work Experience
-  const [workExperience, setWorkExperience] = useState<Array<{
-    title: string;
-    company: string;
-    startDate: string;
-    endDate: string;
-    description: string;
-  }>>([]);
-  const [isAddingWork, setIsAddingWork] = useState(false);
-  const [editingWork, setEditingWork] = useState<any>(null);
-  const [editingWorkIndex, setEditingWorkIndex] = useState<number | null>(null);
-  const [workForm, setWorkForm] = useState({
-    title: "",
-    company: "",
-    startDate: "",
-    endDate: "",
-    description: "",
-  });
 
   // Social Links
   const [socialLinks, setSocialLinks] = useState({
@@ -252,10 +249,7 @@ export default function SettingsPage() {
     website: "",
   });
 
-
-
   // ========== END NEW STATE VARIABLES ==========
-
   useEffect(() => {
     fetchProfile();
     checkAuthProvider();
@@ -271,7 +265,7 @@ export default function SettingsPage() {
 
       const { data, error } = await supabase
         .from("profiles")
-        .select("job_title, department, years_of_experience, education, skills, interests, professional_headline, location, pronouns, work_experience, social_links")
+        .select("job_title, professional_summary, department, years_of_experience, skills, interests, social_links")
         .eq("id", user.id)
         .single();
 
@@ -279,12 +273,10 @@ export default function SettingsPage() {
         // Load professional info
         setProfessionalInfo({
           jobTitle: data.job_title || "",
+          professionalSummary: data.professional_summary || "", // You can add this field to the DB and load it here if needed
           department: data.department || "",
           yearsOfExperience: data.years_of_experience || "",
         });
-        
-        // Load education
-        if (data.education) setEducationList(data.education);
         
         // Load skills
         if (data.skills) setSkills(data.skills);
@@ -292,20 +284,30 @@ export default function SettingsPage() {
         // Load interests
         if (data.interests) setSelectedInterests(data.interests);
         
-        // NEW: Load professional headline, location, pronouns
-        if (data.professional_headline) setProfessionalHeadline(data.professional_headline);
-        if (data.location) setLocation(data.location);
-        if (data.pronouns) setPronouns(data.pronouns);
-        
-        // NEW: Load work experience
-        if (data.work_experience) setWorkExperience(data.work_experience);
-        
         // NEW: Load social links
         if (data.social_links) setSocialLinks(data.social_links);
       }
     };
-    
+
+    // Load education from profile_educations table
+    const loadEducation = async () => {
+      const supabase = getSupabaseBrowserClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data, error } = await supabase
+        .from("profile_educations")
+        .select("*")
+        .eq("profile_id", user.id)
+        .order("order_index", { ascending: true });
+
+      if (!error && data) {
+        setEducationList(data);
+      }
+    };
+
     loadProfileData();
+    loadEducation();
   }, []);
 
   const loadNotificationPrefs = () => {
@@ -473,55 +475,6 @@ export default function SettingsPage() {
     }
   };
 
-  // Work Experience handlers
-  const saveWork = async () => {
-    if (!workForm.title || !workForm.company) {
-      toast.error("Please fill in title and company");
-      return;
-    }
-
-    let newWorkList = [...workExperience];
-    
-    if (editingWorkIndex !== null) {
-      newWorkList[editingWorkIndex] = workForm;
-      toast.success("Work experience updated");
-    } else {
-      newWorkList.push(workForm);
-      toast.success("Work experience added");
-    }
-    
-    setWorkExperience(newWorkList);
-    setIsAddingWork(false);
-    setEditingWork(null);
-    setEditingWorkIndex(null);
-    setWorkForm({ title: "", company: "", startDate: "", endDate: "", description: "" });
-    
-    await saveWorkToDB(newWorkList);
-  };
-
-  const removeWork = async (index: number) => {
-    const newList = workExperience.filter((_, i) => i !== index);
-    setWorkExperience(newList);
-    await saveWorkToDB(newList);
-    toast.success("Work experience removed");
-  };
-
-  const saveWorkToDB = async (workList: any[]) => {
-    try {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("No user");
-
-      const { error } = await supabase
-        .from("profiles")
-        .update({ work_experience: workList })
-        .eq("id", user.id);
-
-      if (error) throw error;
-    } catch (error) {
-      console.error("Error saving work experience:", error);
-    }
-  };
 
   // Social Links handlers
   const saveSocialLinks = async () => {
@@ -561,12 +514,6 @@ export default function SettingsPage() {
           language: formData.language,
           timezone: formData.timezone,
           birthday: formData.birthday || null,
-          // NEW FIELDS
-          //professional_headline: professionalHeadline,
-          //location: location,
-          //pronouns: pronouns,
-          //work_experience: workExperience,
-          //social_links: socialLinks,
         })
         .eq("id", user.id);
 
@@ -753,6 +700,7 @@ export default function SettingsPage() {
         .from("profiles")
         .update({
           job_title: professionalInfo.jobTitle,
+          professional_summary: professionalInfo.professionalSummary,
           department: professionalInfo.department,
           years_of_experience: professionalInfo.yearsOfExperience,
         })
@@ -766,57 +714,163 @@ export default function SettingsPage() {
     }
   };
 
+  // Save new education
   const saveEducation = async () => {
-    if (!educationForm.degree || !educationForm.institution) {
-      toast.error("Please fill in degree and institution");
+    if (!educationForm.institution_name || !educationForm.degree) {
+      toast.error("Please fill in institution name and degree");
       return;
     }
 
-    let newEducationList = [...educationList];
-    
-    if (editingEducation !== null) {
-      newEducationList[editingEducation.index] = educationForm;
-      toast.success("Education updated");
-    } else {
-      newEducationList.push(educationForm);
-      toast.success("Education added");
-    }
-    
-    setEducationList(newEducationList);
-    setIsAddingEducation(false);
-    setEditingEducation(null);
-    setEducationForm({ degree: "", institution: "", year: "" });
-    
-    await saveEducationToDB(newEducationList);
-  };
-
-  const removeEducation = async (index: number) => {
-    const newList = educationList.filter((_, i) => i !== index);
-    setEducationList(newList);
-    await saveEducationToDB(newList);
-    toast.success("Education removed");
-  };
-
-  const startEditingEducation = (edu: any, index: number) => {
-    setEducationForm(edu);
-    setEditingEducation({ ...edu, index });
-    setIsAddingEducation(true);
-  };
-
-  const saveEducationToDB = async (education: any[]) => {
     try {
       const supabase = getSupabaseBrowserClient();
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("No user");
 
-      const { error } = await supabase
-        .from("profiles")
-        .update({ education: education })
-        .eq("id", user.id);
+      if (editingEducation !== null && editingEducation.id) {
+        // UPDATE existing education
+        const { error } = await supabase
+          .from("profile_educations")
+          .update({
+            institution_name: educationForm.institution_name,
+            degree: educationForm.degree,
+            field_of_study: educationForm.field_of_study,
+            start_year: educationForm.start_year,
+            end_year: educationForm.is_current ? null : educationForm.end_year,
+            is_current: educationForm.is_current,
+            description: educationForm.description,
 
-      if (error) throw error;
+          })
+          .eq("id", editingEducation.id);
+
+        if (error) throw error;
+        toast.success("Education updated");
+      } else {
+        // INSERT new education
+        const { error } = await supabase
+          .from("profile_educations")
+          .insert({
+            profile_id: user.id,
+            institution_name: educationForm.institution_name,
+            degree: educationForm.degree,
+            field_of_study: educationForm.field_of_study,
+            start_year: educationForm.start_year,
+            end_year: educationForm.is_current ? null : educationForm.end_year,
+            is_current: educationForm.is_current,
+            description: educationForm.description,
+            order_index: educationList.length, // Append to end
+          });
+
+        if (error) throw error;
+        toast.success("Education added");
+      }
+
+      // Refresh the list
+      await loadEducation();
+      setIsAddingEducation(false);
+      setEditingEducation(null);
+      resetEducationForm();
     } catch (error) {
       console.error("Error saving education:", error);
+      toast.error("Failed to save education");
+    }
+  };
+
+  // Remove education
+  const removeEducation = async (id: string) => {
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const { error } = await supabase
+        .from("profile_educations")
+        .delete()
+        .eq("id", id);
+
+      if (error) throw error;
+      
+      // Refresh list
+      await loadEducation();
+      toast.success("Education removed");
+    } catch (error) {
+      console.error("Error removing education:", error);
+      toast.error("Failed to remove education");
+    }
+  };
+
+  // Reorder education (drag and drop or up/down buttons)
+  const reorderEducation = async (index: number, direction: 'up' | 'down') => {
+    if (
+      (direction === 'up' && index === 0) || 
+      (direction === 'down' && index === educationList.length - 1)
+    ) return;
+
+    setIsReordering(true);
+    const newList = [...educationList];
+    const swapIndex = direction === 'up' ? index - 1 : index + 1;
+    [newList[index], newList[swapIndex]] = [newList[swapIndex], newList[index]];
+    
+    try {
+      const supabase = getSupabaseBrowserClient();
+      // Update order_index for all items (or just the two swapped)
+      for (let i = 0; i < newList.length; i++) {
+        await supabase
+          .from("profile_educations")
+          .update({ order_index: i })
+          .eq("id", newList[i].id);
+      }
+      setEducationList(newList);
+      toast.success("Order updated");
+    } catch (error) {
+      console.error("Error reordering:", error);
+      toast.error("Failed to update order");
+    } finally {
+      setIsReordering(false);
+    }
+  };
+
+  // Reset form
+  const resetEducationForm = () => {
+    setEducationForm({
+      institution_name: "",
+      degree: "",
+      field_of_study: "",
+      start_year: null,
+      end_year: null,
+      is_current: false,
+      description: "",
+    });
+  };
+
+  // Start editing
+  const startEditingEducation = (edu: Education, index: number) => {
+    setEducationForm({
+      institution_name: edu.institution_name,
+      degree: edu.degree,
+      field_of_study: edu.field_of_study || "",
+      start_year: edu.start_year,
+      end_year: edu.end_year,
+      is_current: edu.is_current,
+      description: edu.description || "",
+    });
+    setEditingEducation({ ...edu, index });
+    setIsAddingEducation(true);
+  };
+
+  // Load education function (called from useEffect)
+  const loadEducation = async () => {
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data, error } = await supabase
+        .from("profile_educations")
+        .select("*")
+        .eq("profile_id", user.id)
+        .order("order_index", { ascending: true });
+
+      if (error) throw error;
+      setEducationList(data || []);
+    } catch (error) {
+      console.error("Error loading education:", error);
     }
   };
 
@@ -919,10 +973,6 @@ export default function SettingsPage() {
           <h1 className="text-3xl font-bold text-white mb-2">Settings</h1>
           <p className="text-gray-400">Manage your account preferences and security</p>
         </div>
-        <GlowButton variant="outline" onClick={() => setShowContactSupport(true)} className="gap-2">
-          <HelpCircle className="w-4 h-4" />
-          Help & Support
-        </GlowButton>
       </div>
 
       <Tabs defaultValue="profile" className="space-y-6">
@@ -1005,16 +1055,6 @@ export default function SettingsPage() {
                 </div>
 
                 <div>
-                  <Label className="text-gray-300">Job Title</Label>
-                  <Input
-                    value={formData.job_title}
-                    onChange={(e) => setFormData({ ...formData, job_title: e.target.value })}
-                    className="mt-1"
-                    placeholder="e.g., Software Engineer"
-                  />
-                </div>
-
-                <div>
                   <Label className="text-gray-300">Bio</Label>
                   <textarea
                     className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500 mt-1"
@@ -1058,9 +1098,19 @@ export default function SettingsPage() {
           {/* ========== NEW: Social Links Section ========== */}
           <GlowCard>
             <div className="p-6">
-              <div className="flex items-center gap-2 mb-4">
-                <Link className="w-5 h-5 text-purple-400" />
-                <h3 className="text-lg font-semibold text-white">Social Links</h3>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Link className="w-5 h-5 text-purple-400" />
+                  <h3 className="text-lg font-semibold text-white">Social Links</h3>
+                </div>
+                <GlowButton 
+                  variant="outline" 
+                  size="sm"
+                  onClick={saveSocialLinks}
+                >
+                  <Save className="w-4 h-4 mr-1" />
+                  Save Links
+                </GlowButton>
               </div>
               <div className="space-y-3">
                 <div className="flex items-center gap-3">
@@ -1104,191 +1154,6 @@ export default function SettingsPage() {
             </div>
           </GlowCard>
 
-          {/* ========== NEW: Professional Headline & Location Section ========== */}
-          <GlowCard>
-            <div className="p-6">
-              <div className="flex items-center gap-2 mb-4">
-                <User className="w-5 h-5 text-purple-400" />
-                <h3 className="text-lg font-semibold text-white">Professional Details</h3>
-              </div>
-              <div className="space-y-4">
-                <div>
-                  <Label className="text-gray-300">Professional Headline</Label>
-                  <Input
-                    value={professionalHeadline}
-                    onChange={(e) => setProfessionalHeadline(e.target.value)}
-                    placeholder="e.g., Senior Software Engineer | AI Enthusiast | Tech Speaker"
-                    className="mt-1 bg-gray-800 border-gray-700"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">Appears right below your name on your profile</p>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <Label className="text-gray-300">Location</Label>
-                    <Input
-                      value={location}
-                      onChange={(e) => setLocation(e.target.value)}
-                      placeholder="e.g., San Francisco, CA"
-                      className="mt-1 bg-gray-800 border-gray-700"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-gray-300">Pronouns (Optional)</Label>
-                    <Input
-                      value={pronouns}
-                      onChange={(e) => setPronouns(e.target.value)}
-                      placeholder="e.g., He/Him, She/Her, They/Them"
-                      className="mt-1 bg-gray-800 border-gray-700"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-          </GlowCard>
-
-          {/* ========== NEW: Work Experience Section ========== */}
-          <GlowCard>
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <Briefcase className="w-5 h-5 text-purple-400" />
-                  <h3 className="text-lg font-semibold text-white">Work Experience</h3>
-                </div>
-                <GlowButton 
-                  variant="outline" 
-                  size="sm"
-                  onClick={() => setIsAddingWork(true)}
-                >
-                  <Plus className="w-4 h-4 mr-1" />
-                  Add Experience
-                </GlowButton>
-              </div>
-              
-              <div className="space-y-4">
-                {workExperience.length === 0 ? (
-                  <p className="text-gray-400 text-sm text-center py-4">No work experience added</p>
-                ) : (
-                  workExperience.map((work, index) => (
-                    <div key={index} className="p-4 bg-gray-800/30 rounded-lg">
-                      <div className="flex justify-between items-start">
-                        <div className="flex-1">
-                          <p className="text-white font-semibold">{work.title}</p>
-                          <p className="text-sm text-purple-400">{work.company}</p>
-                          <p className="text-xs text-gray-500">{work.startDate} - {work.endDate || "Present"}</p>
-                          {work.description && (
-                            <p className="text-sm text-gray-400 mt-2">{work.description}</p>
-                          )}
-                        </div>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => {
-                              setEditingWork(work);
-                              setEditingWorkIndex(index);
-                              setWorkForm({ ...work });
-                              setIsAddingWork(true);
-                            }}
-                            className="p-1 hover:bg-gray-700 rounded transition-colors"
-                          >
-                            <Edit2 className="w-4 h-4 text-gray-400" />
-                          </button>
-                          <button
-                            onClick={() => removeWork(index)}
-                            className="p-1 hover:bg-gray-700 rounded transition-colors"
-                          >
-                            <Trash2 className="w-4 h-4 text-red-400" />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              {/* Add/Edit Work Experience Modal */}
-              {isAddingWork && (
-                <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
-                  <div className="bg-gray-900 rounded-lg max-w-md w-full mx-4 border border-gray-700 p-6">
-                    <h3 className="text-xl font-semibold text-white mb-4">
-                      {editingWork ? "Edit Work Experience" : "Add Work Experience"}
-                    </h3>
-                    <div className="space-y-4">
-                      <div>
-                        <Label className="text-gray-300 mb-1 block">Job Title</Label>
-                        <Input
-                          value={workForm.title}
-                          onChange={(e) => setWorkForm({ ...workForm, title: e.target.value })}
-                          placeholder="e.g., Senior Software Engineer"
-                          className="bg-gray-800 border-gray-700"
-                        />
-                      </div>
-                      <div>
-                        <Label className="text-gray-300 mb-1 block">Company</Label>
-                        <Input
-                          value={workForm.company}
-                          onChange={(e) => setWorkForm({ ...workForm, company: e.target.value })}
-                          placeholder="e.g., Google, Microsoft, Startup"
-                          className="bg-gray-800 border-gray-700"
-                        />
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <Label className="text-gray-300 mb-1 block">Start Date</Label>
-                          <Input
-                            type="month"
-                            value={workForm.startDate}
-                            onChange={(e) => setWorkForm({ ...workForm, startDate: e.target.value })}
-                            className="bg-gray-800 border-gray-700"
-                          />
-                        </div>
-                        <div>
-                          <Label className="text-gray-300 mb-1 block">End Date</Label>
-                          <Input
-                            type="month"
-                            value={workForm.endDate}
-                            onChange={(e) => setWorkForm({ ...workForm, endDate: e.target.value })}
-                            placeholder="Present or leave empty"
-                            className="bg-gray-800 border-gray-700"
-                          />
-                        </div>
-                      </div>
-                      <div>
-                        <Label className="text-gray-300 mb-1 block">Description (Optional)</Label>
-                        <textarea
-                          value={workForm.description}
-                          onChange={(e) => setWorkForm({ ...workForm, description: e.target.value })}
-                          rows={3}
-                          placeholder="Describe your responsibilities and achievements..."
-                          className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-                        />
-                      </div>
-                    </div>
-                    <div className="flex gap-3 mt-6">
-                      <GlowButton 
-                        variant="outline" 
-                        onClick={() => {
-                          setIsAddingWork(false);
-                          setEditingWork(null);
-                          setEditingWorkIndex(null);
-                          setWorkForm({ title: "", company: "", startDate: "", endDate: "", description: "" });
-                        }}
-                        fullWidth
-                      >
-                        Cancel
-                      </GlowButton>
-                      <GlowButton 
-                        onClick={saveWork}
-                        disabled={!workForm.title || !workForm.company}
-                        fullWidth
-                      >
-                        {editingWork ? "Update" : "Add"}
-                      </GlowButton>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </GlowCard>
-
           {/* Professional Info Section - ORIGINAL, UNCHANGED */}
           <GlowCard>
             <div className="p-6">
@@ -1318,6 +1183,18 @@ export default function SettingsPage() {
                       className="bg-gray-800 border-gray-700"
                     />
                   </div>
+
+                  <div>
+                    <Label className="text-sm text-gray-300 mb-1 block">Professional Summary</Label>
+                    <textarea
+                      value={professionalInfo.professionalSummary}
+                      onChange={(e) => setProfessionalInfo({ ...professionalInfo, professionalSummary: e.target.value })}
+                      placeholder="e.g., Experienced software engineer with 8+ years of expertise in full-stack development, leading cross-functional teams, and delivering scalable solutions..."
+                      className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      rows={4}
+                    />
+                  </div>
+
                   <div>
                     <Label className="text-sm text-gray-300 mb-1 block">Department</Label>
                     <Input
@@ -1363,6 +1240,10 @@ export default function SettingsPage() {
                     <span className="text-white">{professionalInfo.jobTitle || "Not specified"}</span>
                   </div>
                   <div className="flex justify-between py-2 border-b border-gray-800">
+                    <span className="text-gray-400">Professional Summary</span>
+                    <span className="text-white whitespace-pre-wrap">{professionalInfo.professionalSummary || "Not specified"}</span>
+                  </div>
+                  <div className="flex justify-between py-2 border-b border-gray-800">
                     <span className="text-gray-400">Department</span>
                     <span className="text-white">{professionalInfo.department || "Not specified"}</span>
                   </div>
@@ -1398,14 +1279,44 @@ export default function SettingsPage() {
                   <p className="text-gray-400 text-sm text-center py-4">No education added yet</p>
                 ) : (
                   educationList.map((edu, index) => (
-                    <div key={index} className="p-3 bg-gray-800/30 rounded-lg">
+                    <div key={edu.id || index} className="p-3 bg-gray-800/30 rounded-lg">
                       <div className="flex justify-between items-start">
                         <div className="flex-1">
-                          <p className="text-white font-medium">{edu.degree}</p>
-                          <p className="text-sm text-gray-400">{edu.institution}</p>
-                          <p className="text-xs text-gray-500">{edu.year}</p>
+                          <p className="text-white font-medium">{edu.degree}{edu.field_of_study && ` in ${edu.field_of_study}`}</p>
+                          <p className="text-sm text-gray-400">{edu.institution_name}</p>
+                          <p className="text-xs text-gray-500">
+                            {edu.start_year && edu.start_year}
+                            {edu.end_year && !edu.is_current && ` - ${edu.end_year}`}
+                            {edu.is_current && " - Present"}
+                          </p>
+                          {edu.description && (
+                            <p className="text-xs text-gray-400 mt-1 line-clamp-2">{edu.description}</p>
+                          )}
                         </div>
                         <div className="flex gap-2">
+                          {/* Add Reorder Buttons */}
+                          <div className="flex flex-col gap-1 mr-2">
+                            {index > 0 && (
+                              <button
+                                onClick={() => reorderEducation(index, 'up')}
+                                disabled={isReordering}
+                                className="p-1 hover:bg-gray-700 rounded transition-colors"
+                                title="Move up"
+                              >
+                                ↑
+                              </button>
+                            )}
+                            {index < educationList.length - 1 && (
+                              <button
+                                onClick={() => reorderEducation(index, 'down')}
+                                className="p-1 hover:bg-gray-700 rounded transition-colors"
+                                title="Move down"
+                              >
+                                ↓
+                              </button>
+                            )}
+                          </div>
+                          {/* Edit and Delete buttons */}
                           <button
                             onClick={() => startEditingEducation(edu, index)}
                             className="p-1 hover:bg-gray-700 rounded transition-colors"
@@ -1413,7 +1324,7 @@ export default function SettingsPage() {
                             <Edit2 className="w-4 h-4 text-gray-400" />
                           </button>
                           <button
-                            onClick={() => removeEducation(index)}
+                            onClick={() => removeEducation(edu.id!)}
                             className="p-1 hover:bg-gray-700 rounded transition-colors"
                           >
                             <Trash2 className="w-4 h-4 text-red-400" />
@@ -1427,37 +1338,89 @@ export default function SettingsPage() {
 
               {/* Add/Edit Education Modal - ORIGINAL, UNCHANGED */}
               {(isAddingEducation || editingEducation !== null) && (
-                <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
-                  <div className="bg-gray-900 rounded-lg max-w-md w-full mx-4 border border-gray-700 p-6">
+                <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 overflow-y-auto">
+                  <div className="bg-gray-900 rounded-lg max-w-2xl w-full mx-4 border border-gray-700 p-6 max-h-[90vh] overflow-y-auto">
                     <h3 className="text-xl font-semibold text-white mb-4">
                       {editingEducation ? "Edit Education" : "Add Education"}
                     </h3>
                     <div className="space-y-4">
                       <div>
-                        <Label className="text-gray-300 mb-1 block">Degree / Program</Label>
+                        <Label className="text-gray-300 mb-1 block">Institution Name *</Label>
                         <Input
-                          value={educationForm.degree}
-                          onChange={(e) => setEducationForm({ ...educationForm, degree: e.target.value })}
-                          placeholder="e.g., Bachelor of Science in Computer Science"
-                          className="bg-gray-800 border-gray-700"
-                        />
-                      </div>
-                      <div>
-                        <Label className="text-gray-300 mb-1 block">Institution</Label>
-                        <Input
-                          value={educationForm.institution}
-                          onChange={(e) => setEducationForm({ ...educationForm, institution: e.target.value })}
+                          value={educationForm.institution_name}
+                          onChange={(e) => setEducationForm({ ...educationForm, institution_name: e.target.value })}
                           placeholder="e.g., Stanford University"
                           className="bg-gray-800 border-gray-700"
                         />
                       </div>
+                      
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <Label className="text-gray-300 mb-1 block">Degree *</Label>
+                          <Input
+                            value={educationForm.degree}
+                            onChange={(e) => setEducationForm({ ...educationForm, degree: e.target.value })}
+                            placeholder="e.g., Bachelor of Science"
+                            className="bg-gray-800 border-gray-700"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-gray-300 mb-1 block">Field of Study</Label>
+                          <Input
+                            value={educationForm.field_of_study}
+                            onChange={(e) => setEducationForm({ ...educationForm, field_of_study: e.target.value })}
+                            placeholder="e.g., Computer Science"
+                            className="bg-gray-800 border-gray-700"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <Label className="text-gray-300 mb-1 block">Start Year</Label>
+                          <Input
+                            type="number"
+                            value={educationForm.start_year || ""}
+                            onChange={(e) => setEducationForm({ ...educationForm, start_year: e.target.value ? parseInt(e.target.value) : null })}
+                            placeholder="e.g., 2020"
+                            className="bg-gray-800 border-gray-700"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-gray-300 mb-1 block">End Year</Label>
+                          <Input
+                            type="number"
+                            value={educationForm.end_year || ""}
+                            onChange={(e) => setEducationForm({ ...educationForm, end_year: e.target.value ? parseInt(e.target.value) : null })}
+                            placeholder="e.g., 2024"
+                            disabled={educationForm.is_current}
+                            className="bg-gray-800 border-gray-700"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          checked={educationForm.is_current}
+                          onCheckedChange={(checked) => {
+                            setEducationForm({ 
+                              ...educationForm, 
+                              is_current: checked,
+                              end_year: checked ? null : educationForm.end_year
+                            });
+                          }}
+                        />
+                        <Label className="text-gray-300">I currently study here</Label>
+                      </div>
+
                       <div>
-                        <Label className="text-gray-300 mb-1 block">Year</Label>
-                        <Input
-                          value={educationForm.year}
-                          onChange={(e) => setEducationForm({ ...educationForm, year: e.target.value })}
-                          placeholder="e.g., 2020 or 2016-2020"
-                          className="bg-gray-800 border-gray-700"
+                        <Label className="text-gray-300 mb-1 block">Description</Label>
+                        <textarea
+                          value={educationForm.description}
+                          onChange={(e) => setEducationForm({ ...educationForm, description: e.target.value })}
+                          placeholder="Describe your studies, achievements, relevant coursework..."
+                          rows={3}
+                          className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
                         />
                       </div>
                     </div>
@@ -1467,7 +1430,7 @@ export default function SettingsPage() {
                         onClick={() => {
                           setIsAddingEducation(false);
                           setEditingEducation(null);
-                          setEducationForm({ degree: "", institution: "", year: "" });
+                          resetEducationForm();
                         }}
                         fullWidth
                       >
@@ -1483,6 +1446,7 @@ export default function SettingsPage() {
                   </div>
                 </div>
               )}
+
             </div>
           </GlowCard>
 
@@ -1730,22 +1694,6 @@ export default function SettingsPage() {
 
                 <div className="flex items-center justify-between p-4 rounded-lg bg-gray-800/30 border border-gray-700">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-orange-500/20 flex items-center justify-center">
-                      <Trophy className="w-5 h-5 text-orange-400" />
-                    </div>
-                    <div>
-                      <h3 className="font-medium text-white">Achievement Alerts</h3>
-                      <p className="text-sm text-gray-400">Celebrate your learning milestones and achievements</p>
-                    </div>
-                  </div>
-                  <Switch
-                    checked={notificationPrefs.achievementAlerts}
-                    onCheckedChange={() => handleNotificationChange('achievementAlerts')}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between p-4 rounded-lg bg-gray-800/30 border border-gray-700">
-                  <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-lg bg-pink-500/20 flex items-center justify-center">
                       <MessageSquare className="w-5 h-5 text-pink-400" />
                     </div>
@@ -1776,7 +1724,8 @@ export default function SettingsPage() {
                   />
                 </div>
 
-                <div className="flex items-center justify-between p-4 rounded-lg bg-gray-800/30 border border-gray-700">
+
+                {/* <div className="flex items-center justify-between p-4 rounded-lg bg-gray-800/30 border border-gray-700">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-lg bg-indigo-500/20 flex items-center justify-center">
                       <CalendarIcon className="w-5 h-5 text-indigo-400" />
@@ -1790,9 +1739,8 @@ export default function SettingsPage() {
                     checked={notificationPrefs.digestEmails}
                     onCheckedChange={() => handleNotificationChange('digestEmails')}
                   />
-                </div>
+                </div> */}
               </div>
-
               <div className="mt-6 pt-4 border-t border-gray-800">
                 <p className="text-xs text-gray-500 text-center">
                   Notification preferences are saved locally. You can change these settings at any time.

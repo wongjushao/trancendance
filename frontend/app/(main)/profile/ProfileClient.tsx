@@ -496,7 +496,7 @@ export default function ProfileClient({ user }: ProfileClientProps) {
           </GlowCard>
 
           {/* Badges Section */}
-          <GlowCard>
+          {/* <GlowCard>
             <div className="p-5">
               <div className="flex justify-between items-center mb-4">
                 <div>
@@ -527,9 +527,9 @@ export default function ProfileClient({ user }: ProfileClientProps) {
                 })}
               </div>
             </div>
-          </GlowCard>
+          </GlowCard> */}
 
-          {/* Achievements Grid */}
+          {/* Achievements Grid
           <GlowCard>
             <div className="p-5">
               <div className="flex justify-between items-center mb-4">
@@ -576,7 +576,7 @@ export default function ProfileClient({ user }: ProfileClientProps) {
                 </button>
               )}
             </div>
-          </GlowCard>
+          </GlowCard> */}
 
           {/* Certificates */}
           <GlowCard>
