@@ -1,13 +1,13 @@
 # backend/services/auth_service/auth_service/routes/profile.py
 from __future__ import annotations
 
-import os
-import uuid
+from datetime import date
 
 from flask import Blueprint, jsonify, request, current_app
 from sqlalchemy.exc import SQLAlchemyError
 
 from backend.common.models import Profile
+from backend.common.models.entities import ProfileEducation
 from backend.services.auth_service.auth_service.utils.supabase_jwt import extract_bearer_token, verify_supabase_jwt
 
 profile_bp = Blueprint("profile", __name__)
@@ -26,12 +26,39 @@ def serialize_profile(profile: Profile) -> dict:
         "invited_by": str(profile.invited_by) if profile.invited_by else None,
         "avatar_url": profile.avatar_url,
         "bio": profile.bio,
+        "professional_summary": getattr(profile, "professional_summary", None),
+        "department": getattr(profile, "department", None),
+        "years_of_experience": getattr(profile, "years_of_experience", None),
         "timezone": profile.timezone,
         "language": profile.language,
         "social_links": profile.social_links,
         "interests": profile.interests,
         "created_at": profile.created_at.isoformat() if profile.created_at else None,
     }
+
+
+def _parse_iso_date(value: object) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        # Accept `YYYY-MM-DD`
+        return date.fromisoformat(value)
+    raise ValueError("Invalid date format")
+
+
+def _validate_educations_payload(value: object) -> list[dict] | None:
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        raise ValueError("educations must be a list")
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError("each education item must be an object")
+        if not item.get("institution_name"):
+            raise ValueError("education.institution_name is required")
+    return value
 
 
 @profile_bp.get("/profile")
@@ -78,12 +105,20 @@ def update_profile():
         return jsonify({"error": "Invalid token"}), 401
 
     data = request.get_json(silent=True) or {}
-    
-    # All fields that can be updated
+
     allowed_fields = [
-        "username", "bio", "timezone", 
-        "language", "social_links", "first_name", 
-        "last_name", "job_title", "birthday"
+        "username",
+        "bio",
+        "professional_summary",
+        "timezone",
+        "language",
+        "social_links",
+        "first_name",
+        "last_name",
+        "job_title",
+        "birthday",
+        "department",
+        "years_of_experience",
     ]
     
     session = db_session()
@@ -91,21 +126,76 @@ def update_profile():
         profile = session.query(Profile).filter(Profile.id == user_id).first()
         if not profile:
             return jsonify({"error": "Profile not found"}), 404
-        
-        # Track if any fields were updated
+
         updated = False
-        
-        # Update allowed fields
+
         for field in allowed_fields:
-            if field in data and data[field] is not None:
+            if field not in data or data[field] is None:
+                continue
+
+            if field == "birthday":
+                profile.birthday = _parse_iso_date(data[field])
+            else:
                 setattr(profile, field, data[field])
-                updated = True
-        
+            updated = True
+
+        educations_payload = None
+        if "educations" in data:
+            educations_payload = _validate_educations_payload(data.get("educations"))
+
+        if educations_payload is not None:
+            session.query(ProfileEducation).filter(ProfileEducation.profile_id == user_id).delete(
+                synchronize_session=False
+            )
+
+            for edu in educations_payload:
+                session.add(
+                    ProfileEducation(
+                        profile_id=user_id,
+                        institution_name=edu.get("institution_name"),
+                        degree=edu.get("degree"),
+                        field_of_study=edu.get("field_of_study"),
+                        start_year=edu.get("start_year"),
+                        end_year=edu.get("end_year"),
+                        is_current=bool(edu.get("is_current", False)),
+                        description=edu.get("description"),
+                        order_index=edu.get("order_index", 0),
+                    )
+                )
+            updated = True
+
         if updated:
             session.commit()
             session.refresh(profile)
-        
-        return jsonify(serialize_profile(profile)), 200
+
+        response = serialize_profile(profile)
+        if educations_payload is not None:
+            edus = (
+                session.query(ProfileEducation)
+                .filter(ProfileEducation.profile_id == user_id)
+                .order_by(ProfileEducation.order_index.asc(), ProfileEducation.id.asc())
+                .all()
+            )
+            response["educations"] = [
+                {
+                    "id": e.id,
+                    "institution_name": e.institution_name,
+                    "degree": e.degree,
+                    "field_of_study": e.field_of_study,
+                    "start_year": e.start_year,
+                    "end_year": e.end_year,
+                    "is_current": e.is_current,
+                    "description": e.description,
+                    "order_index": e.order_index,
+                    "created_at": e.created_at.isoformat() if e.created_at else None,
+                }
+                for e in edus
+            ]
+
+        return jsonify(response), 200
+    except ValueError as exc:
+        session.rollback()
+        return jsonify({"error": str(exc)}), 400
     except SQLAlchemyError as exc:
         session.rollback()
         return jsonify({"error": str(exc)}), 500
