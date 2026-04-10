@@ -266,6 +266,38 @@ class ChatRoomMember(Base):
     joined_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
 
 
+class Skill(Base):
+    __tablename__ = "skills"
+    __table_args__ = (
+        UniqueConstraint("name", name="uq_skills_name"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class UserSkill(Base):
+    __tablename__ = "user_skills"
+    __table_args__ = (
+        PrimaryKeyConstraint("user_id", "skill_id", name="pk_user_skills"),
+        {"schema": "public"},
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.profiles.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    skill_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("public.skills.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    level: Mapped[int] = mapped_column(Integer, nullable=False)
+    years: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
 class ProfileEducation(Base):
     __tablename__ = "profile_educations"
     __table_args__ = {"schema": "public"}

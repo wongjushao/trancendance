@@ -6,7 +6,7 @@ from datetime import date
 from flask import Blueprint, jsonify, request, current_app
 from sqlalchemy.exc import SQLAlchemyError
 
-from backend.common.models import Profile
+from backend.common.models import Profile, Skill
 from backend.common.models.entities import ProfileEducation
 from backend.services.auth_service.auth_service.utils.supabase_jwt import extract_bearer_token, verify_supabase_jwt
 
@@ -198,6 +198,44 @@ def update_profile():
         return jsonify({"error": str(exc)}), 400
     except SQLAlchemyError as exc:
         session.rollback()
+        return jsonify({"error": str(exc)}), 500
+    finally:
+        session.close()
+
+
+@profile_bp.get("/skills")
+def get_skills():
+    """Get all skills. Requires valid bearer token."""
+    db_session = current_app.config.get("DB_SESSION")
+    if db_session is None:
+        return jsonify({"error": "Database is not configured"}), 503
+
+    token = extract_bearer_token()
+    if token is None:
+        return jsonify({"error": "Missing authorization header"}), 401
+
+    user_id, email = verify_supabase_jwt(token)
+    if not user_id:
+        return jsonify({"error": "Invalid token"}), 401
+
+    session = db_session()
+    try:
+        skills = session.query(Skill).order_by(Skill.name.asc(), Skill.id.asc()).all()
+        return (
+            jsonify(
+                {
+                    "skills": [
+                        {
+                            "id": skill.id,
+                            "name": skill.name,
+                        }
+                        for skill in skills
+                    ]
+                }
+            ),
+            200,
+        )
+    except SQLAlchemyError as exc:
         return jsonify({"error": str(exc)}), 500
     finally:
         session.close()
