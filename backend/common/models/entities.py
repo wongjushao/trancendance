@@ -345,6 +345,29 @@ class Notification(Base):
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
 
 
+class NotificationPreference(Base):
+    __tablename__ = "notification_preferences"
+    __table_args__ = {"schema": "public"}
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.profiles.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    # channel controls
+    email_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    push_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+
+    # type controls
+    assignment_reminders: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    course_updates: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    message_notifications: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    marketing_emails: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+
+    updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+
+
 class UserActivityLog(Base):
     __tablename__ = "user_activity_logs"
     __table_args__ = {"schema": "public"}

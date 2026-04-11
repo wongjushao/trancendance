@@ -3,7 +3,6 @@ import os
 from flask import Flask
 
 from backend.common.db import create_engine_and_session
-from backend.services.auth_service.auth_service.middleware import register_bearer_auth_middleware
 from backend.services.auth_service.auth_service.routes import docs_bp, health_bp, metrics_bp, register_bp
 from backend.services.auth_service.auth_service.routes.onboarding import onboarding_bp
 from backend.services.auth_service.auth_service.routes.profile import profile_bp
@@ -32,11 +31,6 @@ def create_app():
         _, db_session = create_engine_and_session(database_url)
 
     app.config["DB_SESSION"] = db_session
-
-    # The register endpoint no longer uses the api_keys bearer middleware.
-    # It verifies Supabase JWTs directly using SUPABASE_JWT_SECRET.
-    # Pass an empty set so the old middleware runs on nothing.
-    register_bearer_auth_middleware(app, protected_endpoints=set())
 
     app.register_blueprint(docs_bp,      url_prefix="/api/auth-service")
     app.register_blueprint(health_bp,    url_prefix="/api/auth-service")
