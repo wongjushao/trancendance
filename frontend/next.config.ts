@@ -16,10 +16,14 @@ const nextConfig: NextConfig = {
         destination: 'http://org-service:5003/:path*',
       },
       {
-        // This is what you call in fetch()
+        // Auth service with full path
         source: '/api/auth-service/:path*',
-        // This is where your Flask app is running
         destination: 'http://auth-service:5001/api/auth-service/:path*',
+      },
+      {
+        // Notification service - FIXED
+        source: '/api/notification-service/:path*',
+        destination: 'http://notification-service:5004/:path*',  // Added full path
       },
     ]
   },
@@ -53,4 +57,4 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig
+export default nextConfig;

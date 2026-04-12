@@ -165,16 +165,6 @@ export default function SettingsPage() {
     birthday: "",
   });
 
-  // Notification preferences state (frontend only)
-  const [notificationPrefs, setNotificationPrefs] = useState({
-    emailNotifications: true,
-    pushNotifications: true,
-    assignmentReminders: true,
-    courseUpdates: true,
-    messageNotifications: true,
-    marketingEmails: false,
-    //digestEmails: true,
-  });
 
   // Password form state
   const [currentPassword, setCurrentPassword] = useState("");
@@ -254,7 +244,7 @@ export default function SettingsPage() {
   useEffect(() => {
     fetchProfile();
     checkAuthProvider();
-    loadNotificationPrefs();
+    fetchNotificationPrefs();
   }, []);
 
   const loadEducation = async () => {
@@ -293,29 +283,229 @@ export default function SettingsPage() {
     }
   }, []);
 
-  const loadNotificationPrefs = () => {
-    const savedPrefs = localStorage.getItem("notification_preferences");
-    if (savedPrefs) {
-      try {
-        setNotificationPrefs(JSON.parse(savedPrefs));
-      } catch (e) {
-        console.error("Error loading notification preferences:", e);
+  const [notificationPrefs, setNotificationPrefs] = useState<{
+    email_enabled: boolean;
+    push_enabled: boolean;
+    assignment_reminders: boolean;
+    course_updates: boolean;
+    message_notifications: boolean;
+    marketing_emails: boolean;
+  } | null>(null); // Start as null
+
+  const [loadingPrefs, setLoadingPrefs] = useState(true);
+
+  // Update fetchNotificationPrefs to handle null state
+  const fetchNotificationPrefs = async () => {
+    setLoadingPrefs(true);
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError || !session?.access_token) {
+        console.log('No session found');
+        setLoadingPrefs(false);
+        return;
       }
+
+      const response = await fetch('/api/notification-service/notification', {
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      console.log('Response status:', response.status);
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('Raw response from backend:', JSON.stringify(data, null, 2));
+        
+        // IMPORTANT: Your backend returns preferences inside a 'preferences' object
+        // The response structure is: { user_id: "...", preferences: { ... } }
+        const preferencesData = data.preferences;
+        
+        // FIX: Check if preferencesData exists and has the expected properties
+        if (preferencesData && typeof preferencesData === 'object') {
+          console.log('Setting notification prefs from database:', preferencesData);
+          setNotificationPrefs({
+            email_enabled: preferencesData.email_enabled ?? true,
+            push_enabled: preferencesData.push_enabled ?? true,
+            assignment_reminders: preferencesData.assignment_reminders ?? true,
+            course_updates: preferencesData.course_updates ?? true,
+            message_notifications: preferencesData.message_notifications ?? true,
+            marketing_emails: preferencesData.marketing_emails ?? false,
+          });
+        } else {
+          console.log('No preferences found in response, creating defaults');
+          // No preferences found, create default
+          await createDefaultNotificationPrefs({
+            email_enabled: true,
+            push_enabled: true,
+            assignment_reminders: true,
+            course_updates: true,
+            message_notifications: true,
+            marketing_emails: false,
+          });
+          // Fetch again after creation
+          await fetchNotificationPrefs();
+          return;
+        }
+      } else if (response.status === 404) {
+        console.log('404 - No preferences exist, creating defaults');
+        // No preferences exist, create defaults
+        await createDefaultNotificationPrefs({
+          email_enabled: true,
+          push_enabled: true,
+          assignment_reminders: true,
+          course_updates: true,
+          message_notifications: true,
+          marketing_emails: false,
+        });
+        // Fetch again after creation
+        await fetchNotificationPrefs();
+        return;
+      } else {
+        const errorText = await response.text();
+        console.error('Failed to fetch notification prefs:', response.status, errorText);
+        // Even on error, set default values so UI doesn't break
+        setNotificationPrefs({
+          email_enabled: true,
+          push_enabled: true,
+          assignment_reminders: true,
+          course_updates: true,
+          message_notifications: true,
+          marketing_emails: false,
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching notification prefs:', error);
+      // Set default values on error
+      setNotificationPrefs({
+        email_enabled: true,
+        push_enabled: true,
+        assignment_reminders: true,
+        course_updates: true,
+        message_notifications: true,
+        marketing_emails: false,
+      });
+    } finally {
+      setLoadingPrefs(false);
     }
   };
 
-  const saveNotificationPrefs = (newPrefs: typeof notificationPrefs) => {
-    setNotificationPrefs(newPrefs);
-    localStorage.setItem("notification_preferences", JSON.stringify(newPrefs));
-    toast.success("Notification preferences saved");
+  const createDefaultNotificationPrefs = async (defaultPrefs: {
+    email_enabled: boolean;
+    push_enabled: boolean;
+    assignment_reminders: boolean;
+    course_updates: boolean;
+    message_notifications: boolean;
+    marketing_emails: boolean;
+  }) => {
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError || !session?.access_token) {
+        console.error('No session found for creating preferences');
+        return;
+      }
+
+      // Send all preferences at once to create the record
+      const params = new URLSearchParams();
+      Object.entries(defaultPrefs).forEach(([key, value]) => {
+        params.append(key, String(value));
+      });
+
+      const response = await fetch(`/api/notification-service/notification?${params.toString()}`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('Failed to create default notification preferences:', errorData);
+      } else {
+        const data = await response.json();
+        console.log('Created default preferences:', data);
+      }
+    } catch (error) {
+      console.error('Error creating default notification prefs:', error);
+    }
   };
 
-  const handleNotificationChange = (key: keyof typeof notificationPrefs) => {
-    const newPrefs = {
-      ...notificationPrefs,
-      [key]: !notificationPrefs[key],
-    };
-    saveNotificationPrefs(newPrefs);
+  const saveNotificationPrefs = async (key: keyof Exclude<typeof notificationPrefs, null>, value: boolean) => {
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError || !session?.access_token) {
+        toast.error('Please sign in to update preferences');
+        return false;
+      }
+
+      // Update optimistic UI first
+      setNotificationPrefs(prev => {
+        if (!prev) return prev;
+        return { ...prev, [key]: value };
+      });
+
+      const response = await fetch(`/api/notification-service/notification?${key}=${value}`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        // Revert on error
+        setNotificationPrefs(prev => {
+          if (!prev) return prev;
+          return { ...prev, [key]: !value };
+        });
+        const errorData = await response.json();
+        toast.error(errorData.error || 'Failed to update notification preferences');
+        return false;
+      }
+
+      const data = await response.json();
+      console.log('Update response:', data);
+      
+      // Update with the actual values from the server response
+      if (data.preferences) {
+        setNotificationPrefs({
+          email_enabled: data.preferences.email_enabled ?? true,
+          push_enabled: data.preferences.push_enabled ?? true,
+          assignment_reminders: data.preferences.assignment_reminders ?? true,
+          course_updates: data.preferences.course_updates ?? true,
+          message_notifications: data.preferences.message_notifications ?? true,
+          marketing_emails: data.preferences.marketing_emails ?? false,
+        });
+      }
+      
+      toast.success('Notification preferences updated');
+      return true;
+    } catch (error) {
+      console.error('Error saving notification prefs:', error);
+      // Revert on error
+      setNotificationPrefs(prev => {
+        if (!prev) return prev;
+        return { ...prev, [key]: !value };
+      });
+      toast.error('Failed to update notification preferences');
+      return false;
+    }
+  };
+
+  // Update the toggle handler
+  const handleNotificationChange = (key: keyof Exclude<typeof notificationPrefs, null>) => {
+    if (!notificationPrefs) return; // Don't allow toggling while loading
+    
+    const newValue = !notificationPrefs[key];
+    saveNotificationPrefs(key, newValue);
   };
 
   const checkAuthProvider = async () => {
@@ -1524,139 +1714,101 @@ export default function SettingsPage() {
           </div>
         </TabsContent>
 
-        {/* Notifications Tab - UNCHANGED */}
+        {/* Notifications Tab */}
         <TabsContent value="notifications" className="space-y-6">
-          <GlowCard>
-            <div className="p-6">
-              <div className="flex items-center gap-2 mb-4">
-                <Bell className="w-5 h-5 text-purple-400" />
-                <h2 className="text-xl font-semibold text-white">Notification Preferences</h2>
-              </div>
-              <p className="text-sm text-gray-400 mb-6">
-                Choose which notifications you want to receive and how you want to receive them.
-              </p>
-
-              <div className="space-y-6">
-                <div className="flex items-center justify-between p-4 rounded-lg bg-gray-800/30 border border-gray-700">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
-                      <MailIcon className="w-5 h-5 text-blue-400" />
-                    </div>
-                    <div>
-                      <h3 className="font-medium text-white">Email Notifications</h3>
-                      <p className="text-sm text-gray-400">Receive notifications via email</p>
-                    </div>
-                  </div>
-                  <Switch
-                    checked={notificationPrefs.emailNotifications}
-                    onCheckedChange={() => handleNotificationChange('emailNotifications')}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between p-4 rounded-lg bg-gray-800/30 border border-gray-700">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-purple-500/20 flex items-center justify-center">
-                      <BellRing className="w-5 h-5 text-purple-400" />
-                    </div>
-                    <div>
-                      <h3 className="font-medium text-white">Push Notifications</h3>
-                      <p className="text-sm text-gray-400">Receive push notifications in your browser</p>
-                    </div>
-                  </div>
-                  <Switch
-                    checked={notificationPrefs.pushNotifications}
-                    onCheckedChange={() => handleNotificationChange('pushNotifications')}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between p-4 rounded-lg bg-gray-800/30 border border-gray-700">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-yellow-500/20 flex items-center justify-center">
-                      <AlertCircle className="w-5 h-5 text-yellow-400" />
-                    </div>
-                    <div>
-                      <h3 className="font-medium text-white">Assignment Reminders</h3>
-                      <p className="text-sm text-gray-400">Get reminders about upcoming assignments and deadlines</p>
-                    </div>
-                  </div>
-                  <Switch
-                    checked={notificationPrefs.assignmentReminders}
-                    onCheckedChange={() => handleNotificationChange('assignmentReminders')}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between p-4 rounded-lg bg-gray-800/30 border border-gray-700">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-green-500/20 flex items-center justify-center">
-                      <BookOpen className="w-5 h-5 text-green-400" />
-                    </div>
-                    <div>
-                      <h3 className="font-medium text-white">Course Updates</h3>
-                      <p className="text-sm text-gray-400">Get notified about new course content and updates</p>
-                    </div>
-                  </div>
-                  <Switch
-                    checked={notificationPrefs.courseUpdates}
-                    onCheckedChange={() => handleNotificationChange('courseUpdates')}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between p-4 rounded-lg bg-gray-800/30 border border-gray-700">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-pink-500/20 flex items-center justify-center">
-                      <MessageSquare className="w-5 h-5 text-pink-400" />
-                    </div>
-                    <div>
-                      <h3 className="font-medium text-white">Message Notifications</h3>
-                      <p className="text-sm text-gray-400">Get notified when you receive new messages</p>
-                    </div>
-                  </div>
-                  <Switch
-                    checked={notificationPrefs.messageNotifications}
-                    onCheckedChange={() => handleNotificationChange('messageNotifications')}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between p-4 rounded-lg bg-gray-800/30 border border-gray-700">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-red-500/20 flex items-center justify-center">
-                      <Mail className="w-5 h-5 text-red-400" />
-                    </div>
-                    <div>
-                      <h3 className="font-medium text-white">Marketing Emails</h3>
-                      <p className="text-sm text-gray-400">Receive promotional offers and newsletters</p>
-                    </div>
-                  </div>
-                  <Switch
-                    checked={notificationPrefs.marketingEmails}
-                    onCheckedChange={() => handleNotificationChange('marketingEmails')}
-                  />
-                </div>
-
-
-                {/* <div className="flex items-center justify-between p-4 rounded-lg bg-gray-800/30 border border-gray-700">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-indigo-500/20 flex items-center justify-center">
-                      <CalendarIcon className="w-5 h-5 text-indigo-400" />
-                    </div>
-                    <div>
-                      <h3 className="font-medium text-white">Weekly Digest</h3>
-                      <p className="text-sm text-gray-400">Receive a weekly summary of your learning progress</p>
-                    </div>
-                  </div>
-                  <Switch
-                    checked={notificationPrefs.digestEmails}
-                    onCheckedChange={() => handleNotificationChange('digestEmails')}
-                  />
-                </div> */}
-              </div>
-              <div className="mt-6 pt-4 border-t border-gray-800">
-                <p className="text-xs text-gray-500 text-center">
-                  Notification preferences are saved locally. You can change these settings at any time.
-                </p>
-              </div>
+          {loadingPrefs ? (
+            <div className="flex justify-center items-center py-12">
+              <Loader2 className="w-8 h-8 animate-spin text-purple-500" />
             </div>
-          </GlowCard>
+          ) : notificationPrefs ? (
+            <>
+              {/* Channel Settings */}
+              <GlowCard>
+                <div className="p-6 space-y-4">
+                  <h3 className="text-lg font-semibold text-white">Notification Channels</h3>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label className="text-white">Email Notifications</Label>
+                        <p className="text-sm text-gray-400">Receive notifications via email</p>
+                      </div>
+                      <Switch
+                        checked={notificationPrefs.email_enabled}
+                        onCheckedChange={() => handleNotificationChange('email_enabled')}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label className="text-white">Push Notifications</Label>
+                        <p className="text-sm text-gray-400">Receive notifications in-app</p>
+                      </div>
+                      <Switch
+                        checked={notificationPrefs.push_enabled}
+                        onCheckedChange={() => handleNotificationChange('push_enabled')}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </GlowCard>
+
+              {/* Notification Types */}
+              <GlowCard>
+                <div className="p-6 space-y-4">
+                  <h3 className="text-lg font-semibold text-white">Notification Types</h3>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label className="text-white">Assignment Reminders</Label>
+                        <p className="text-sm text-gray-400">Get reminders about upcoming assignments</p>
+                      </div>
+                      <Switch
+                        checked={notificationPrefs.assignment_reminders}
+                        onCheckedChange={() => handleNotificationChange('assignment_reminders')}
+                        disabled={!notificationPrefs.email_enabled && !notificationPrefs.push_enabled}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label className="text-white">Course Updates</Label>
+                        <p className="text-sm text-gray-400">Get notified about course changes and announcements</p>
+                      </div>
+                      <Switch
+                        checked={notificationPrefs.course_updates}
+                        onCheckedChange={() => handleNotificationChange('course_updates')}
+                        disabled={!notificationPrefs.email_enabled && !notificationPrefs.push_enabled}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label className="text-white">Message Notifications</Label>
+                        <p className="text-sm text-gray-400">Get notified about new messages</p>
+                      </div>
+                      <Switch
+                        checked={notificationPrefs.message_notifications}
+                        onCheckedChange={() => handleNotificationChange('message_notifications')}
+                        disabled={!notificationPrefs.email_enabled && !notificationPrefs.push_enabled}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label className="text-white">Marketing Emails</Label>
+                        <p className="text-sm text-gray-400">Receive promotional emails and updates</p>
+                      </div>
+                      <Switch
+                        checked={notificationPrefs.marketing_emails}
+                        onCheckedChange={() => handleNotificationChange('marketing_emails')}
+                        disabled={!notificationPrefs.email_enabled}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </GlowCard>
+            </>
+          ) : (
+            <div className="text-center py-12 text-gray-400">
+              Failed to load notification preferences. Please try again later.
+            </div>
+          )}
         </TabsContent>
 
         {/* Security Tab - UNCHANGED */}
