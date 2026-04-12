@@ -36,6 +36,7 @@ import {
   validatePassword,
   validateConfirmPassword,
 } from "@/lib/validation";
+import { SkillsSelector } from "@/components/settings/SkillsSelector";
 //import Link from "next/link";
 
 // Modal Component for confirmation dialogs
@@ -274,6 +275,22 @@ export default function SettingsPage() {
 
   useEffect(() => {
     loadEducation();
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get('tab');
+    if (tab === 'skills') {
+      // Set active tab to profile (where skills section is)
+      const tabsElement = document.querySelector('[value="profile"]');
+      if (tabsElement) {
+        // Trigger tab change
+      }
+      // Scroll to skills section
+      setTimeout(() => {
+        document.getElementById('skills-section')?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
+    }
   }, []);
 
   const loadNotificationPrefs = () => {
@@ -1417,83 +1434,11 @@ export default function SettingsPage() {
           {/* Top Skills Section - ORIGINAL, UNCHANGED */}
           <GlowCard>
             <div className="p-6">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <Code className="w-5 h-5 text-purple-400" />
-                  <h3 className="text-lg font-semibold text-white">Top Skills</h3>
-                </div>
-                <GlowButton 
-                  variant="outline" 
-                  size="sm"
-                  onClick={() => setIsAddingSkill(true)}
-                >
-                  <Plus className="w-4 h-4 mr-1" />
-                  Add Skill
-                </GlowButton>
+              <div className="flex items-center gap-2 mb-4">
+                <Code className="w-5 h-5 text-purple-400" />
+                <h3 className="text-lg font-semibold text-white">Skills</h3>
               </div>
-              
-              <div className="flex flex-wrap gap-2">
-                {skills.length === 0 ? (
-                  <p className="text-gray-400 text-sm py-4 w-full text-center">No skills added yet</p>
-                ) : (
-                  skills.map((skill, index) => (
-                    <span
-                      key={index}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-purple-500/20 text-purple-400 border border-purple-500/30 text-sm"
-                    >
-                      {skill}
-                      <button
-                        onClick={() => removeSkill(index)}
-                        className="ml-1 hover:text-purple-200 transition-colors"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </span>
-                  ))
-                )}
-              </div>
-
-              {/* Add Skill Modal - ORIGINAL, UNCHANGED */}
-              {isAddingSkill && (
-                <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
-                  <div className="bg-gray-900 rounded-lg max-w-md w-full mx-4 border border-gray-700 p-6">
-                    <h3 className="text-xl font-semibold text-white mb-4">Add Skill</h3>
-                    <div>
-                      <Label className="text-gray-300 mb-1 block">Skill Name</Label>
-                      <Input
-                        value={newSkill}
-                        onChange={(e) => setNewSkill(e.target.value)}
-                        placeholder="e.g., React, TypeScript, Python"
-                        className="bg-gray-800 border-gray-700"
-                        onKeyPress={(e) => {
-                          if (e.key === 'Enter' && newSkill.trim()) {
-                            addSkill();
-                          }
-                        }}
-                      />
-                    </div>
-                    <div className="flex gap-3 mt-6">
-                      <GlowButton 
-                        variant="outline" 
-                        onClick={() => {
-                          setIsAddingSkill(false);
-                          setNewSkill("");
-                        }}
-                        fullWidth
-                      >
-                        Cancel
-                      </GlowButton>
-                      <GlowButton 
-                        onClick={addSkill}
-                        disabled={!newSkill.trim()}
-                        fullWidth
-                      >
-                        Add Skill
-                      </GlowButton>
-                    </div>
-                  </div>
-                </div>
-              )}
+              <SkillsSelector />
             </div>
           </GlowCard>
 

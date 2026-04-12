@@ -105,6 +105,7 @@ export default function ProfileClient({ user }: ProfileClientProps) {
   const [showAllAchievements, setShowAllAchievements] = useState(false);
   const [profileCompletion, setProfileCompletion] = useState(0);
   const [educations, setEducations] = useState<any[]>([]);
+  const [userSkills, setUserSkills] = useState<any[]>([]);
 
   // SINGLE fetch function that gets everything
   const fetchProfile = async () => {
@@ -112,26 +113,59 @@ export default function ProfileClient({ user }: ProfileClientProps) {
       setLoading(true);
       const supabase = getSupabaseBrowserClient();
       
-      // Fetch profile data (includes professional fields)
+      // Wait for session to be available
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        console.log("No session found, waiting for auth...");
+        setLoading(false);
+        return;
+      }
+      
+      const userId = session.user.id;
+      if (!userId) {
+        console.log("No user ID found");
+        setLoading(false);
+        return;
+      }
+
+      // Fetch profile data
       const { data: profileData, error: profileError } = await supabase
         .from("profiles")
         .select("*")
-        .eq("id", user.id)
+        .eq("id", userId)
         .single();
         
       if (profileError) throw profileError;
       setProfile(profileData);
-      
+
       // Fetch education data
       const { data: educationData, error: educationError } = await supabase
         .from('profile_educations')
         .select('*')
-        .eq('profile_id', user.id)
+        .eq('profile_id', userId)
         .order('order_index', { ascending: true });
       
       if (educationError) throw educationError;
       setEducations(educationData || []);
+
+      // Fetch user skills with skill names
+      const { data: userSkillsData, error: skillsError } = await supabase
+        .from('user_skills')
+        .select('*, skills(name)')
+        .eq('user_id', userId);
       
+      if (!skillsError && userSkillsData) {
+        const formattedSkills = userSkillsData.map(us => ({
+          id: us.skill_id,
+          name: us.skills?.name || 'Unknown',
+          level: us.level,
+          years: us.years
+        }));
+        setUserSkills(formattedSkills);
+      } else {
+        setUserSkills([]);
+      }
+
     } catch (error) {
       console.error("Error fetching profile:", error);
     } finally {
@@ -140,7 +174,12 @@ export default function ProfileClient({ user }: ProfileClientProps) {
   };
 
   useEffect(() => {
-    fetchProfile();
+    // Small delay to ensure auth is ready
+    const timer = setTimeout(() => {
+      fetchProfile();
+    }, 100);
+    
+    return () => clearTimeout(timer);
   }, [user.id]);
 
   useEffect(() => {
@@ -159,52 +198,67 @@ export default function ProfileClient({ user }: ProfileClientProps) {
     }
   }, [profile]);
 
-// Set up Supabase Realtime subscriptions for automatic updates
-useEffect(() => {
-  const supabase = getSupabaseBrowserClient();
-  
-  // Subscribe to changes on profiles table
-  const profilesSubscription = supabase
-    .channel('profile-changes')
-    .on(
-      'postgres_changes',
-      {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'profiles',
-        filter: `id=eq.${user.id}`
-      },
-      (payload) => {
-        console.log('Profile updated via realtime:', payload);
-        fetchProfile(); // Refresh profile data
-      }
-    )
-    .subscribe();
-  
-  // Subscribe to changes on profile_educations table
-  const educationSubscription = supabase
-    .channel('education-changes')
-    .on(
-      'postgres_changes',
-      {
-        event: '*', // Listen to INSERT, UPDATE, DELETE
-        schema: 'public',
-        table: 'profile_educations',
-        filter: `profile_id=eq.${user.id}`
-      },
-      (payload) => {
-        console.log('Education updated via realtime:', payload);
-        fetchProfile(); // Refresh profile data (which includes education)
-      }
-    )
-    .subscribe();
-  
-  // Cleanup subscriptions when component unmounts
-  return () => {
-    profilesSubscription.unsubscribe();
-    educationSubscription.unsubscribe();
-  };
-}, [user.id]); // Re-run if user.id changes
+  // Set up Supabase Realtime subscriptions for automatic updates
+  useEffect(() => {
+    const supabase = getSupabaseBrowserClient();
+    
+    // Subscribe to changes on profiles table
+    const profilesSubscription = supabase
+      .channel('profile-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'profiles',
+          filter: `id=eq.${user.id}`
+        },
+        () => {
+          fetchProfile();
+        }
+      )
+      .subscribe();
+    
+    // Subscribe to changes on profile_educations table
+    const educationSubscription = supabase
+      .channel('education-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'profile_educations',
+          filter: `profile_id=eq.${user.id}`
+        },
+        () => {
+          fetchProfile();
+        }
+      )
+      .subscribe();
+    
+    // Subscribe to changes on user_skills table
+    const skillsSubscription = supabase
+      .channel('skills-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'user_skills',
+          filter: `user_id=eq.${user.id}`
+        },
+        () => {
+          fetchProfile();
+        }
+      )
+      .subscribe();
+    
+    return () => {
+      profilesSubscription.unsubscribe();
+      educationSubscription.unsubscribe();
+      skillsSubscription.unsubscribe();
+    };
+  }, [user.id]);
 
   const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -515,14 +569,49 @@ useEffect(() => {
           {/* Top Skills */}
           <GlowCard>
             <div className="p-5">
-              <h3 className="font-semibold text-white mb-3">Top Skills</h3>
-              <div className="flex flex-wrap gap-2">
-                {["React", "TypeScript", "Node.js", "Python", "GraphQL", "Docker"].map((skill) => (
-                  <span key={skill} className="px-2 py-1 text-xs rounded-lg bg-purple-500/20 text-purple-400 border border-purple-500/30">
-                    {skill}
-                  </span>
-                ))}
+              <div className="flex justify-between items-center mb-4">
+                <div>
+                  <h3 className="font-semibold text-white">Top Skills</h3>
+                  <p className="text-xs text-gray-400 mt-0.5">Your professional skills and expertise</p>
+                </div>
+                {/* Only show button if NO skills exist */}
+                {(!userSkills || userSkills.length === 0) && (
+                  <button
+                    onClick={() => router.push('/settings?tab=skills')}
+                    className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 rounded-lg text-white text-sm transition-colors"
+                  >
+                    Add Skills
+                  </button>
+                )}
               </div>
+              
+              {/* Has skills - display them */}
+              {userSkills && userSkills.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {userSkills.map((skill, index) => (
+                    <span
+                      key={skill.id || index}
+                      className="px-3 py-1.5 rounded-lg bg-purple-500/20 text-purple-400 border border-purple-500/30 text-sm flex items-center gap-2"
+                    >
+                      {skill.name}
+                      {skill.level && (
+                        <span className="text-xs text-purple-300">
+                          Lv.{skill.level}
+                        </span>
+                      )}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                /* Empty State */
+                <div className="text-center py-8">
+                  <div className="w-16 h-16 rounded-full bg-purple-500/10 flex items-center justify-center mx-auto mb-3">
+                    <Code className="w-8 h-8 text-purple-400" />
+                  </div>
+                  <p className="text-gray-400 text-sm mb-2">No skills added yet</p>
+                  <p className="text-gray-500 text-xs">Click "Add Skills" to showcase your expertise</p>
+                </div>
+              )}
             </div>
           </GlowCard>
 
