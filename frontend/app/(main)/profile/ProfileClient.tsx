@@ -12,7 +12,7 @@ import {
   LogOut, Plus, Heart, Music, Camera as CameraIcon, Coffee, 
   Gamepad, Book, Film, Mic, Dumbbell, Globe2, Target, Award as AwardIcon,
   CheckCircle2, ExternalLink, ThumbsUp, MessageCircle, Activity,
-  Linkedin, Github, Twitter, Instagram
+  Linkedin, Github, Twitter, Instagram, FileText, GraduationCap, 
 } from "lucide-react";
 import { GlowCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
@@ -44,6 +44,9 @@ interface ProfileData {
   interests: string[] | null;
   social_links: any;
   created_at: string | null;
+  department: string | null;
+  years_of_experience: number | null;
+  professional_summary: string | null;
 }
 
 // Mock friends data
@@ -94,12 +97,47 @@ const badgesData = [
 ];
 
 export default function ProfileClient({ user }: ProfileClientProps) {
+  const router = useRouter();
   const { avatarUrl, refreshAvatar } = useAvatar();
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [loading, setLoading] = useState(true);
   const [userInterests] = useState<string[]>(["coding", "design", "ai"]);
   const [showAllAchievements, setShowAllAchievements] = useState(false);
   const [profileCompletion, setProfileCompletion] = useState(0);
+  const [educations, setEducations] = useState<any[]>([]);
+
+  // SINGLE fetch function that gets everything
+  const fetchProfile = async () => {
+    try {
+      setLoading(true);
+      const supabase = getSupabaseBrowserClient();
+      
+      // Fetch profile data (includes professional fields)
+      const { data: profileData, error: profileError } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", user.id)
+        .single();
+        
+      if (profileError) throw profileError;
+      setProfile(profileData);
+      
+      // Fetch education data
+      const { data: educationData, error: educationError } = await supabase
+        .from('profile_educations')
+        .select('*')
+        .eq('profile_id', user.id)
+        .order('order_index', { ascending: true });
+      
+      if (educationError) throw educationError;
+      setEducations(educationData || []);
+      
+    } catch (error) {
+      console.error("Error fetching profile:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     fetchProfile();
@@ -121,45 +159,52 @@ export default function ProfileClient({ user }: ProfileClientProps) {
     }
   }, [profile]);
 
-  const fetchProfile = async () => {
-    try {
-      const supabase = getSupabaseBrowserClient();
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", user.id)
-        .single();
-      if (error) throw error;
-      setProfile(data);
-    } catch (error) {
-      console.error("Error fetching profile:", error);
-    } finally {
-      setLoading(false);
-    }
+// Set up Supabase Realtime subscriptions for automatic updates
+useEffect(() => {
+  const supabase = getSupabaseBrowserClient();
+  
+  // Subscribe to changes on profiles table
+  const profilesSubscription = supabase
+    .channel('profile-changes')
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'profiles',
+        filter: `id=eq.${user.id}`
+      },
+      (payload) => {
+        console.log('Profile updated via realtime:', payload);
+        fetchProfile(); // Refresh profile data
+      }
+    )
+    .subscribe();
+  
+  // Subscribe to changes on profile_educations table
+  const educationSubscription = supabase
+    .channel('education-changes')
+    .on(
+      'postgres_changes',
+      {
+        event: '*', // Listen to INSERT, UPDATE, DELETE
+        schema: 'public',
+        table: 'profile_educations',
+        filter: `profile_id=eq.${user.id}`
+      },
+      (payload) => {
+        console.log('Education updated via realtime:', payload);
+        fetchProfile(); // Refresh profile data (which includes education)
+      }
+    )
+    .subscribe();
+  
+  // Cleanup subscriptions when component unmounts
+  return () => {
+    profilesSubscription.unsubscribe();
+    educationSubscription.unsubscribe();
   };
-
-  /*
-  const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    try {
-      const supabase = getSupabaseBrowserClient();
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${user.id}-${Date.now()}.${fileExt}`;
-      const filePath = `avatars/${fileName}`;
-      const { error: uploadError } = await supabase.storage.from('avatars').upload(filePath, file);
-      if (uploadError) throw uploadError;
-      const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(filePath);
-      const { error: updateError } = await supabase.from('profiles').update({ avatar_url: publicUrl }).eq('id', user.id);
-      if (updateError) throw updateError;
-      toast.success("Avatar updated successfully");
-      refreshAvatar();
-    } catch (error) {
-      console.error("Error uploading avatar:", error);
-      toast.error("Failed to upload avatar");
-    }
-  };
-  */
+}, [user.id]); // Re-run if user.id changes
 
   const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -347,40 +392,123 @@ export default function ProfileClient({ user }: ProfileClientProps) {
           {/* Professional Info */}
           <GlowCard>
             <div className="p-5">
-              <h3 className="font-semibold text-white mb-3">Professional</h3>
-              <div className="space-y-3">
+              <div className="flex justify-between items-center mb-4">
                 <div>
-                  <p className="text-xs text-gray-400">Job Title</p>
-                  <p className="text-sm text-white mt-0.5">{profile?.job_title || "Not specified"}</p>
+                  <h3 className="font-semibold text-white">Professional Info</h3>
+                  <p className="text-xs text-gray-400 mt-0.5">Work experience and professional background</p>
                 </div>
-                <div>
-                  <p className="text-xs text-gray-400">Department</p>
-                  <p className="text-sm text-white mt-0.5">Engineering</p>
-                </div>
-                <div>
-                  <p className="text-xs text-gray-400">Experience</p>
-                  <p className="text-sm text-white mt-0.5">5+ years</p>
-                </div>
+                {/* Only show button if NO professional data exists */}
+                {(!profile?.job_title && !profile?.department && !profile?.professional_summary) && (
+                  <button
+                    onClick={() => router.push('/settings?tab=professional')}
+                    className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 rounded-lg text-white text-sm transition-colors"
+                  >
+                    Add Info
+                  </button>
+                )}
               </div>
+              
+              {/* Has professional data - display it */}
+              {(profile?.job_title || profile?.department || profile?.professional_summary || profile?.years_of_experience) ? (
+                <div className="space-y-3">
+                  {(profile?.job_title || profile?.department) && (
+                    <div>
+                      <div className="flex items-center gap-2 text-gray-400 text-sm mb-1">
+                        <Briefcase className="w-4 h-4" />
+                        <span>Position</span>
+                      </div>
+                      <p className="text-white">
+                        {profile?.job_title || 'Not specified'}
+                        {profile?.department && ` at ${profile.department}`}
+                      </p>
+                    </div>
+                  )}
+                  
+                  {profile?.years_of_experience && (
+                    <div>
+                      <div className="flex items-center gap-2 text-gray-400 text-sm mb-1">
+                        <TrendingUp className="w-4 h-4" />
+                        <span>Experience</span>
+                      </div>
+                      <p className="text-white">{profile.years_of_experience} years</p>
+                    </div>
+                  )}
+                  
+                  {profile?.professional_summary && (
+                    <div>
+                      <div className="flex items-center gap-2 text-gray-400 text-sm mb-1">
+                        <FileText className="w-4 h-4" />
+                        <span>Summary</span>
+                      </div>
+                      <p className="text-gray-300 text-sm leading-relaxed">
+                        {profile.professional_summary}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* Empty State - No professional data */
+                <div className="text-center py-8">
+                  <div className="w-16 h-16 rounded-full bg-purple-500/10 flex items-center justify-center mx-auto mb-3">
+                    <Briefcase className="w-8 h-8 text-purple-400" />
+                  </div>
+                  <p className="text-gray-400 text-sm mb-2">No professional information added</p>
+                  <p className="text-gray-500 text-xs">Click "Add Info" to share your work experience</p>
+                </div>
+              )}
             </div>
           </GlowCard>
 
           {/* Education */}
           <GlowCard>
             <div className="p-5">
-              <h3 className="font-semibold text-white mb-3">Education</h3>
-              <div className="space-y-3">
+              <div className="flex justify-between items-center mb-4">
                 <div>
-                  <p className="text-sm font-medium text-white">Master's in CS</p>
-                  <p className="text-xs text-gray-400">Stanford University</p>
-                  <p className="text-xs text-gray-500 mt-0.5">2020</p>
+                  <h3 className="font-semibold text-white">Education</h3>
+                  <p className="text-xs text-gray-400 mt-0.5">Academic background and qualifications</p>
                 </div>
-                <div className="pt-2 border-t border-gray-800">
-                  <p className="text-sm font-medium text-white">Bachelor's in IT</p>
-                  <p className="text-xs text-gray-400">UC Berkeley</p>
-                  <p className="text-xs text-gray-500 mt-0.5">2018</p>
-                </div>
+                {/* Only show button if NO education entries exist */}
+                {(!educations || educations.length === 0) && (
+                  <button
+                    onClick={() => router.push('/settings?tab=education')}
+                    className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 rounded-lg text-white text-sm transition-colors"
+                  >
+                    Add Education
+                  </button>
+                )}
               </div>
+              
+              {/* Has education data - display it */}
+              {educations && educations.length > 0 ? (
+                <div className="space-y-4">
+                  {educations.map((edu, index) => (
+                    <div key={edu.id || index} className="border-b border-gray-700 last:border-0 pb-3 last:pb-0">
+                      <h4 className="font-medium text-white mb-1">{edu.institution_name}</h4>
+                      <p className="text-sm text-gray-400">
+                        {edu.degree}
+                        {edu.field_of_study && ` in ${edu.field_of_study}`}
+                      </p>
+                      {(edu.start_year || edu.end_year) && (
+                        <p className="text-xs text-gray-500 mt-1">
+                          {edu.start_year} - {edu.is_current ? 'Present' : (edu.end_year || 'Present')}
+                        </p>
+                      )}
+                      {edu.description && (
+                        <p className="text-xs text-gray-400 mt-2">{edu.description}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                /* Empty State - No education data */
+                <div className="text-center py-8">
+                  <div className="w-16 h-16 rounded-full bg-purple-500/10 flex items-center justify-center mx-auto mb-3">
+                    <GraduationCap className="w-8 h-8 text-purple-400" />
+                  </div>
+                  <p className="text-gray-400 text-sm mb-2">No education added yet</p>
+                  <p className="text-gray-500 text-xs">Click "Add Education" to share your academic background</p>
+                </div>
+              )}
             </div>
           </GlowCard>
 

@@ -256,57 +256,23 @@ export default function SettingsPage() {
     loadNotificationPrefs();
   }, []);
 
-  // Load saved profile data for the new sections
+  const loadEducation = async () => {
+    const supabase = getSupabaseBrowserClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { data, error } = await supabase
+      .from("profile_educations")
+      .select("*")
+      .eq("profile_id", user.id)
+      .order("order_index", { ascending: true });
+
+    if (!error && data) {
+      setEducationList(data);
+    }
+  };
+
   useEffect(() => {
-    const loadProfileData = async () => {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("job_title, professional_summary, department, years_of_experience, skills, interests, social_links")
-        .eq("id", user.id)
-        .single();
-
-      if (!error && data) {
-        // Load professional info
-        setProfessionalInfo({
-          jobTitle: data.job_title || "",
-          professionalSummary: data.professional_summary || "", // You can add this field to the DB and load it here if needed
-          department: data.department || "",
-          yearsOfExperience: data.years_of_experience || "",
-        });
-        
-        // Load skills
-        if (data.skills) setSkills(data.skills);
-        
-        // Load interests
-        if (data.interests) setSelectedInterests(data.interests);
-        
-        // NEW: Load social links
-        if (data.social_links) setSocialLinks(data.social_links);
-      }
-    };
-
-    // Load education from profile_educations table
-    const loadEducation = async () => {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const { data, error } = await supabase
-        .from("profile_educations")
-        .select("*")
-        .eq("profile_id", user.id)
-        .order("order_index", { ascending: true });
-
-      if (!error && data) {
-        setEducationList(data);
-      }
-    };
-
-    loadProfileData();
     loadEducation();
   }, []);
 
@@ -372,37 +338,47 @@ export default function SettingsPage() {
     }
   };
 
+
   const fetchProfile = async () => {
-    try {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("No user");
+  try {
+    const supabase = getSupabaseBrowserClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error("No user");
 
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", user.id)
-        .single();
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", user.id)
+      .single();
 
-      if (error) throw error;
+    if (error) throw error;
 
-      setFormData({
-        username: data.username || "",
-        first_name: data.first_name || "",
-        last_name: data.last_name || "",
-        job_title: data.job_title || "",
-        bio: data.bio || "",
-        language: data.language || "en",
-        timezone: data.timezone || detectTimezone(),
-        birthday: data.birthday || "",
-      });
-    } catch (error) {
-      console.error("Error fetching profile:", error);
-      toast.error("Failed to load profile");
-    } finally {
-      setLoading(false);
-    }
-  };
+    setFormData({
+      username: data.username || "",
+      first_name: data.first_name || "",
+      last_name: data.last_name || "",
+      job_title: data.job_title || "",
+      bio: data.bio || "",
+      language: data.language || "en",
+      timezone: data.timezone || detectTimezone(),
+      birthday: data.birthday || "",
+    });
+
+    // ADD THIS: Also populate professionalInfo
+    setProfessionalInfo({
+      jobTitle: data.job_title || "",
+      professionalSummary: data.professional_summary || "",
+      department: data.department || "",
+      yearsOfExperience: data.years_of_experience?.toString() || "",
+    });
+
+  } catch (error) {
+    console.error("Error fetching profile:", error);
+    toast.error("Failed to load profile");
+  } finally {
+    setLoading(false);
+  }
+};
 
   const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -520,7 +496,6 @@ export default function SettingsPage() {
       if (error) throw error;
 
       toast.success("Profile updated successfully");
-      window.dispatchEvent(new CustomEvent('profile-updated'));
     } catch (error) {
       console.error("Error saving profile:", error);
       toast.error("Failed to save profile");
@@ -707,7 +682,15 @@ export default function SettingsPage() {
         .eq("id", user.id);
 
       if (error) throw error;
+      
+      // ADD THIS: Update formData.job_title to keep them in sync
+      setFormData(prev => ({
+        ...prev,
+        job_title: professionalInfo.jobTitle
+      }));
+      
       toast.success("Professional info updated");
+      
     } catch (error) {
       console.error("Error saving professional info:", error);
       toast.error("Failed to save professional info");
@@ -854,25 +837,6 @@ export default function SettingsPage() {
     setIsAddingEducation(true);
   };
 
-  // Load education function (called from useEffect)
-  const loadEducation = async () => {
-    try {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const { data, error } = await supabase
-        .from("profile_educations")
-        .select("*")
-        .eq("profile_id", user.id)
-        .order("order_index", { ascending: true });
-
-      if (error) throw error;
-      setEducationList(data || []);
-    } catch (error) {
-      console.error("Error loading education:", error);
-    }
-  };
 
   const addSkill = async () => {
     if (!newSkill.trim()) return;
