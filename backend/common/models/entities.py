@@ -266,6 +266,38 @@ class ChatRoomMember(Base):
     joined_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
 
 
+class Skill(Base):
+    __tablename__ = "skills"
+    __table_args__ = (
+        UniqueConstraint("name", name="uq_skills_name"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class UserSkill(Base):
+    __tablename__ = "user_skills"
+    __table_args__ = (
+        PrimaryKeyConstraint("user_id", "skill_id", name="pk_user_skills"),
+        {"schema": "public"},
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.profiles.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    skill_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("public.skills.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    level: Mapped[int] = mapped_column(Integer, nullable=False)
+    years: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
 class ProfileEducation(Base):
     __tablename__ = "profile_educations"
     __table_args__ = {"schema": "public"}
@@ -311,6 +343,29 @@ class Notification(Base):
     link: Mapped[str | None] = mapped_column(Text)
     read_at: Mapped[datetime | None]
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+
+
+class NotificationPreference(Base):
+    __tablename__ = "notification_preferences"
+    __table_args__ = {"schema": "public"}
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.profiles.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    # channel controls
+    email_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    push_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+
+    # type controls
+    assignment_reminders: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    course_updates: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    message_notifications: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    marketing_emails: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+
+    updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
 
 
 class UserActivityLog(Base):

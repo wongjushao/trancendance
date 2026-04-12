@@ -33,6 +33,15 @@ services:
     environment:
       - DATABASE_URL=${SUPABASE_DB_URL}
 
+  notification-service:
+    image: trancendance-notification-service:latest
+    build:
+      context: .
+      dockerfile: backend/services/notification_service/Dockerfile
+    ports:
+      - "5004:5004"
+    environment:
+      - DATABASE_URL=${SUPABASE_DB_URL}
   frontend:
     image: node:20.19-alpine
     working_dir: /app

@@ -4,9 +4,10 @@ from __future__ import annotations
 from datetime import date
 
 from flask import Blueprint, jsonify, request, current_app
+from sqlalchemy import func
 from sqlalchemy.exc import SQLAlchemyError
 
-from backend.common.models import Profile
+from backend.common.models import Profile, Skill, UserSkill
 from backend.common.models.entities import ProfileEducation
 from backend.services.auth_service.auth_service.utils.supabase_jwt import extract_bearer_token, verify_supabase_jwt
 
@@ -61,6 +62,100 @@ def _validate_educations_payload(value: object) -> list[dict] | None:
     return value
 
 
+def _validate_interests_payload(value: object) -> list[str] | None:
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        raise ValueError("interests must be a list")
+
+    normalized: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise ValueError("each interest must be a string")
+        interest = item.strip()
+        if not interest:
+            raise ValueError("interest must not be empty")
+        normalized.append(interest)
+
+    return normalized
+
+
+def _validate_skills_payload(value: object) -> list[dict] | None:
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        raise ValueError("skills must be a list")
+
+    normalized: list[dict] = []
+    seen_names: set[str] = set()
+
+    for item in value:
+        if isinstance(item, str):
+            raw_name = item
+            level = 1
+            years = 0
+        elif isinstance(item, dict):
+            raw_name = item.get("name")
+            # level = item.get("level", 1)
+            # years = item.get("years", 0)
+        else:
+            raise ValueError("each skill must be a string or an object")
+
+        if not isinstance(raw_name, str):
+            raise ValueError("skill.name is required")
+
+        name = raw_name.strip()
+        if not name:
+            raise ValueError("skill.name must not be empty")
+
+        # try:
+            # level_value = int(level)
+            # years_value = int(years)
+        # except (TypeError, ValueError) as exc:
+        #     raise ValueError("skill level and years must be integers") from exc
+
+        # if level_value < 1 or level_value > 5:
+        #     raise ValueError("skill level must be between 1 and 5")
+        # if years_value < 0:
+        #     raise ValueError("skill years must be greater than or equal to 0")
+
+        dedupe_key = name.lower()
+        if dedupe_key in seen_names:
+            continue
+
+        seen_names.add(dedupe_key)
+        normalized.append(
+            {
+                "name": name,
+                "name_lower": dedupe_key,
+                "level": level,
+                "years": years,
+            }
+        )
+
+    return normalized
+
+
+def _serialize_profile_skills(session, user_id) -> list[dict]:
+    user_skills = (
+        session.query(UserSkill, Skill)
+        .join(Skill, Skill.id == UserSkill.skill_id)
+        .filter(UserSkill.user_id == user_id)
+        .order_by(Skill.name.asc(), Skill.id.asc())
+        .all()
+    )
+
+    return [
+        {
+            "id": skill.id,
+            "name": skill.name,
+            "level": user_skill.level,
+            "years": user_skill.years,
+        }
+        for user_skill, skill in user_skills
+    ]
+
+
 @profile_bp.get("/profile")
 def get_profile():
     """Get current user's profile."""
@@ -81,8 +176,10 @@ def get_profile():
         profile = session.query(Profile).filter(Profile.id == user_id).first()
         if not profile:
             return jsonify({"error": "Profile not found"}), 404
-        
-        return jsonify(serialize_profile(profile)), 200
+
+        response = serialize_profile(profile)
+        response["skills"] = _serialize_profile_skills(session, user_id)
+        return jsonify(response), 200
     except SQLAlchemyError as exc:
         return jsonify({"error": str(exc)}), 500
     finally:
@@ -113,6 +210,7 @@ def update_profile():
         "timezone",
         "language",
         "social_links",
+        "interests",
         "first_name",
         "last_name",
         "job_title",
@@ -129,12 +227,18 @@ def update_profile():
 
         updated = False
 
+        interests_payload = None
+        if "interests" in data:
+            interests_payload = _validate_interests_payload(data.get("interests"))
+
         for field in allowed_fields:
             if field not in data or data[field] is None:
                 continue
 
             if field == "birthday":
                 profile.birthday = _parse_iso_date(data[field])
+            elif field == "interests":
+                profile.interests = interests_payload
             else:
                 setattr(profile, field, data[field])
             updated = True
@@ -164,11 +268,46 @@ def update_profile():
                 )
             updated = True
 
+        skills_payload = None
+        if "skills" in data:
+            skills_payload = _validate_skills_payload(data.get("skills"))
+
+        if skills_payload is not None:
+            session.query(UserSkill).filter(UserSkill.user_id == user_id).delete(synchronize_session=False)
+
+            if skills_payload:
+                skill_names_lower = [item["name_lower"] for item in skills_payload]
+                existing_skills = (
+                    session.query(Skill)
+                    .filter(func.lower(Skill.name).in_(skill_names_lower))
+                    .all()
+                )
+                skills_by_name_lower = {skill.name.lower(): skill for skill in existing_skills}
+
+                for item in skills_payload:
+                    skill = skills_by_name_lower.get(item["name_lower"])
+                    if skill is None:
+                        skill = Skill(name=item["name"])
+                        session.add(skill)
+                        session.flush()
+                        skills_by_name_lower[item["name_lower"]] = skill
+
+                    session.add(
+                        UserSkill(
+                            user_id=user_id,
+                            skill_id=skill.id,
+                            level=item["level"],
+                            years=item["years"],
+                        )
+                    )
+            updated = True
+
         if updated:
             session.commit()
             session.refresh(profile)
 
         response = serialize_profile(profile)
+        response["skills"] = _serialize_profile_skills(session, user_id)
         if educations_payload is not None:
             edus = (
                 session.query(ProfileEducation)
@@ -198,6 +337,44 @@ def update_profile():
         return jsonify({"error": str(exc)}), 400
     except SQLAlchemyError as exc:
         session.rollback()
+        return jsonify({"error": str(exc)}), 500
+    finally:
+        session.close()
+
+
+@profile_bp.get("/skills")
+def get_skills():
+    """Get all skills. Requires valid bearer token."""
+    db_session = current_app.config.get("DB_SESSION")
+    if db_session is None:
+        return jsonify({"error": "Database is not configured"}), 503
+
+    token = extract_bearer_token()
+    if token is None:
+        return jsonify({"error": "Missing authorization header"}), 401
+
+    user_id, email = verify_supabase_jwt(token)
+    if not user_id:
+        return jsonify({"error": "Invalid token"}), 401
+
+    session = db_session()
+    try:
+        skills = session.query(Skill).order_by(Skill.name.asc(), Skill.id.asc()).all()
+        return (
+            jsonify(
+                {
+                    "skills": [
+                        {
+                            "id": skill.id,
+                            "name": skill.name,
+                        }
+                        for skill in skills
+                    ]
+                }
+            ),
+            200,
+        )
+    except SQLAlchemyError as exc:
         return jsonify({"error": str(exc)}), 500
     finally:
         session.close()

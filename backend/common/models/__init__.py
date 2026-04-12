@@ -19,11 +19,13 @@ from .entities import (
     OrganizationMember,
     Permission,
     Profile,
+    Skill,
     Role,
     RolePermission,
     Submission,
     UserActivityLog,
     UserConsent,
+    UserSkill,
     UserRole,
 )
 
@@ -38,6 +40,8 @@ __all__ = [
     "Permission",
     "RolePermission",
     "UserRole",
+    "Skill",
+    "UserSkill",
     "Course",
     "CourseMember",
     "Module",
