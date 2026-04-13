@@ -96,8 +96,8 @@ def _validate_skills_payload(value: object) -> list[dict] | None:
             years = 0
         elif isinstance(item, dict):
             raw_name = item.get("name")
-            # level = item.get("level", 1)
-            # years = item.get("years", 0)
+            level = item.get("level", 1)
+            years = item.get("years", 0)
         else:
             raise ValueError("each skill must be a string or an object")
 
@@ -108,16 +108,16 @@ def _validate_skills_payload(value: object) -> list[dict] | None:
         if not name:
             raise ValueError("skill.name must not be empty")
 
-        # try:
-            # level_value = int(level)
-            # years_value = int(years)
-        # except (TypeError, ValueError) as exc:
-        #     raise ValueError("skill level and years must be integers") from exc
+        try:
+            level_value = int(level)
+            years_value = int(years)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("skill level and years must be integers") from exc
 
-        # if level_value < 1 or level_value > 5:
-        #     raise ValueError("skill level must be between 1 and 5")
-        # if years_value < 0:
-        #     raise ValueError("skill years must be greater than or equal to 0")
+        if level_value < 1 or level_value > 5:
+            raise ValueError("skill level must be between 1 and 5")
+        if years_value < 0:
+            raise ValueError("skill years must be greater than or equal to 0")
 
         dedupe_key = name.lower()
         if dedupe_key in seen_names:
@@ -134,6 +134,19 @@ def _validate_skills_payload(value: object) -> list[dict] | None:
         )
 
     return normalized
+
+
+def _validate_avatar_url_payload(value: object) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("avatar_url must be a string")
+    url = value.strip()
+    if not url:
+        return ""
+    if not (url.startswith("http://") or url.startswith("https://")):
+        raise ValueError("avatar_url must start with http:// or https://")
+    return url
 
 
 def _serialize_profile_skills(session, user_id) -> list[dict]:
@@ -153,6 +166,32 @@ def _serialize_profile_skills(session, user_id) -> list[dict]:
             "years": user_skill.years,
         }
         for user_skill, skill in user_skills
+    ]
+
+
+def _serialize_profile_educations(session, user_id) -> list[dict]:
+    edus = (
+        session.query(ProfileEducation)
+        .filter(ProfileEducation.profile_id == user_id)
+        .order_by(ProfileEducation.order_index.asc(), ProfileEducation.id.asc())
+        .all()
+    )
+
+    return [
+        {
+            "id": e.id,
+            "profile_id": str(e.profile_id),
+            "institution_name": e.institution_name,
+            "degree": e.degree,
+            "field_of_study": e.field_of_study,
+            "start_year": e.start_year,
+            "end_year": e.end_year,
+            "is_current": e.is_current,
+            "description": e.description,
+            "order_index": e.order_index,
+            "created_at": e.created_at.isoformat() if e.created_at else None,
+        }
+        for e in edus
     ]
 
 
@@ -179,6 +218,7 @@ def get_profile():
 
         response = serialize_profile(profile)
         response["skills"] = _serialize_profile_skills(session, user_id)
+        response["educations"] = _serialize_profile_educations(session, user_id)
         return jsonify(response), 200
     except SQLAlchemyError as exc:
         return jsonify({"error": str(exc)}), 500
@@ -206,6 +246,7 @@ def update_profile():
     allowed_fields = [
         "username",
         "bio",
+    "avatar_url",
         "professional_summary",
         "timezone",
         "language",
@@ -231,6 +272,10 @@ def update_profile():
         if "interests" in data:
             interests_payload = _validate_interests_payload(data.get("interests"))
 
+        avatar_url_payload = None
+        if "avatar_url" in data:
+            avatar_url_payload = _validate_avatar_url_payload(data.get("avatar_url"))
+
         for field in allowed_fields:
             if field not in data or data[field] is None:
                 continue
@@ -239,6 +284,8 @@ def update_profile():
                 profile.birthday = _parse_iso_date(data[field])
             elif field == "interests":
                 profile.interests = interests_payload
+            elif field == "avatar_url":
+                profile.avatar_url = avatar_url_payload
             else:
                 setattr(profile, field, data[field])
             updated = True
