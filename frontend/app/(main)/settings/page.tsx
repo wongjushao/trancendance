@@ -131,20 +131,6 @@ function detectTimezone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone;
 }
 
-// Available interests options for the interests section
-const availableInterests = [
-  { id: "coding", label: "Coding", icon: Code, color: "blue" },
-  { id: "design", label: "Design", icon: Palette, color: "pink" },
-  { id: "data", label: "Data Science", icon: DatabaseIcon, color: "green" },
-  { id: "cloud", label: "Cloud Computing", icon: Cloud, color: "cyan" },
-  { id: "ai", label: "AI/ML", icon: Brain, color: "purple" },
-  { id: "security", label: "Security", icon: ShieldIcon, color: "red" },
-  { id: "music", label: "Music", icon: Music, color: "yellow" },
-  { id: "gaming", label: "Gaming", icon: Gamepad, color: "orange" },
-  { id: "reading", label: "Reading", icon: BookOpen, color: "emerald" },
-  { id: "fitness", label: "Fitness", icon: Dumbbell, color: "lime" },
-];
-
 export default function SettingsPage() {
   const router = useRouter();
   const { avatarUrl, refreshAvatar } = useAvatar();
@@ -226,11 +212,6 @@ export default function SettingsPage() {
   const [skills, setSkills] = useState<string[]>([]);
   const [isAddingSkill, setIsAddingSkill] = useState(false);
   const [newSkill, setNewSkill] = useState("");
-
-  // Interests
-  const [isEditingInterests, setIsEditingInterests] = useState(false);
-  const [selectedInterests, setSelectedInterests] = useState<string[]>([]);
-
 
   // Social Links
   const [socialLinks, setSocialLinks] = useState({
@@ -579,6 +560,24 @@ export default function SettingsPage() {
       yearsOfExperience: data.years_of_experience?.toString() || "",
     });
 
+    // ADD THIS: Load social links from database
+    if (data.social_links) {
+      setSocialLinks({
+        linkedin: data.social_links.linkedin || "",
+        github: data.social_links.github || "",
+        twitter: data.social_links.twitter || "",
+        website: data.social_links.website || "",
+      });
+    } else {
+      // Reset to empty if no social links exist
+      setSocialLinks({
+        linkedin: "",
+        github: "",
+        twitter: "",
+        website: "",
+      });
+    }
+
   } catch (error) {
     console.error("Error fetching profile:", error);
     toast.error("Failed to load profile");
@@ -672,7 +671,11 @@ export default function SettingsPage() {
         .eq("id", user.id);
 
       if (error) throw error;
+      
       toast.success("Social links updated");
+      
+      // Optional: Refresh the profile to ensure data is synced
+      await fetchProfile();
     } catch (error) {
       console.error("Error saving social links:", error);
       toast.error("Failed to save social links");
@@ -1079,33 +1082,6 @@ export default function SettingsPage() {
     }
   };
 
-  const toggleInterest = (interestId: string) => {
-    setSelectedInterests(prev =>
-      prev.includes(interestId)
-        ? prev.filter(id => id !== interestId)
-        : [...prev, interestId]
-    );
-  };
-
-  const saveInterests = async () => {
-    try {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("No user");
-
-      const { error } = await supabase
-        .from("profiles")
-        .update({ interests: selectedInterests })
-        .eq("id", user.id);
-
-      if (error) throw error;
-      setIsEditingInterests(false);
-      toast.success("Interests updated");
-    } catch (error) {
-      console.error("Error saving interests:", error);
-      toast.error("Failed to save interests");
-    }
-  };
   // ========== END NEW HANDLER FUNCTIONS ==========
 
   const getFieldError = (field: string) => errors[field];
@@ -1629,79 +1605,6 @@ export default function SettingsPage() {
                 <h3 className="text-lg font-semibold text-white">Skills</h3>
               </div>
               <SkillsSelector />
-            </div>
-          </GlowCard>
-
-          {/* Interests Section - ORIGINAL, UNCHANGED */}
-          <GlowCard>
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <Heart className="w-5 h-5 text-purple-400" />
-                  <h3 className="text-lg font-semibold text-white">Interests</h3>
-                </div>
-                <GlowButton 
-                  variant="outline" 
-                  size="sm"
-                  onClick={() => setIsEditingInterests(!isEditingInterests)}
-                >
-                  {isEditingInterests ? <X className="w-4 h-4 mr-1" /> : <Edit2 className="w-4 h-4 mr-1" />}
-                  {isEditingInterests ? "Cancel" : "Edit"}
-                </GlowButton>
-              </div>
-              
-              {isEditingInterests ? (
-                <div className="space-y-4">
-                  <div className="flex flex-wrap gap-2">
-                    {availableInterests.map((interest) => (
-                      <button
-                        key={interest.id}
-                        onClick={() => toggleInterest(interest.id)}
-                        className={`px-3 py-1.5 rounded-lg text-sm transition-all ${
-                          selectedInterests.includes(interest.id)
-                            ? "bg-purple-500 text-white"
-                            : "bg-gray-800 text-gray-400 hover:bg-gray-700"
-                        }`}
-                      >
-                        {interest.label}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="flex justify-end gap-2">
-                    <GlowButton 
-                      variant="outline" 
-                      size="sm"
-                      onClick={() => {
-                        setIsEditingInterests(false);
-                      }}
-                    >
-                      Cancel
-                    </GlowButton>
-                    <GlowButton 
-                      size="sm"
-                      onClick={saveInterests}
-                    >
-                      Save Interests
-                    </GlowButton>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  {selectedInterests.length === 0 ? (
-                    <p className="text-gray-400 text-sm py-4 w-full text-center">No interests selected</p>
-                  ) : (
-                    selectedInterests.map((interestId) => {
-                      const interest = availableInterests.find(i => i.id === interestId);
-                      if (!interest) return null;
-                      return (
-                        <span key={interest.id} className="px-3 py-1.5 rounded-lg bg-purple-500/20 text-purple-400 border border-purple-500/30 text-sm">
-                          {interest.label}
-                        </span>
-                      );
-                    })
-                  )}
-                </div>
-              )}
             </div>
           </GlowCard>
 

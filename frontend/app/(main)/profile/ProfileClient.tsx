@@ -12,7 +12,7 @@ import {
   LogOut, Plus, Heart, Music, Camera as CameraIcon, Coffee, 
   Gamepad, Book, Film, Mic, Dumbbell, Globe2, Target, Award as AwardIcon,
   CheckCircle2, ExternalLink, ThumbsUp, MessageCircle, Activity,
-  Linkedin, Github, Twitter, Instagram, FileText, GraduationCap, 
+  Linkedin, Github, Twitter, Instagram, FileText, GraduationCap,
 } from "lucide-react";
 import { GlowCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
@@ -599,6 +599,11 @@ export default function ProfileClient({ user }: ProfileClientProps) {
                           Lv.{skill.level}
                         </span>
                       )}
+                      {skill.years !== undefined && skill.years !== null && (
+                        <span className="text-xs text-purple-300/70">
+                          {skill.years} yr{skill.years !== 1 ? 's' : ''}
+                        </span>
+                      )}
                     </span>
                   ))}
                 </div>
@@ -615,29 +620,121 @@ export default function ProfileClient({ user }: ProfileClientProps) {
             </div>
           </GlowCard>
 
-          {/* Interests */}
+          {/* Interests - Only show if user has interests */}
+          {profile?.interests && profile.interests.length > 0 && (
+            <GlowCard>
+              <div className="p-5">
+                <div className="flex justify-between items-center mb-4">
+                  <div>
+                    <h3 className="font-semibold text-white">Interests</h3>
+                    <p className="text-xs text-gray-400 mt-0.5">What you're passionate about</p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {profile.interests.map((interest, idx) => (
+                    <span key={idx} className="px-3 py-1 text-sm bg-purple-500/10 border border-purple-500/30 rounded-full text-purple-300">
+                      {interest}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </GlowCard>
+          )}
+
+          {/* Social Links Section */}
           <GlowCard>
-            <div className="p-5 h-full flex flex-col">
-              <div className="flex justify-between items-center mb-3">
-                <h3 className="font-semibold text-white">Interests</h3>
+            <div className="p-5">
+              <div className="flex justify-between items-center mb-4">
+                <div>
+                  <h3 className="font-semibold text-white">Social Links</h3>
+                  <p className="text-xs text-gray-400 mt-0.5">Connect with me</p>
+                </div>
+                {(!profile?.social_links || 
+                  (typeof profile.social_links === 'object' && Object.keys(profile.social_links).length === 0)) && (
+                  <GlowButton
+                    variant="outline"
+                    size="sm"
+                    onClick={() => router.push('/settings')}
+                    className="text-xs"
+                  >
+                    Add
+                  </GlowButton>
+                )}
               </div>
-              <div className="flex flex-wrap gap-2">
-                {userInterests.map(interestId => {
-                  const interest = availableInterests.find(i => i.id === interestId);
-                  if (!interest) return null;
-                  const Icon = interest.icon;
-                  return (
-                    <div key={interest.id} className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs bg-${interest.color}-500/20 text-${interest.color}-400 border border-${interest.color}-500/30`}>
-                      <Icon className="w-3 h-3" />
-                      <span>{interest.label}</span>
-                    </div>
-                  );
-                })}
-              </div>
+              {profile?.social_links && 
+              typeof profile.social_links === 'object' && 
+              Object.keys(profile.social_links).length > 0 ? (
+                <div className="flex flex-wrap gap-3">
+                  {profile.social_links.github && (
+                    <a
+                      href={profile.social_links.github.startsWith('http') ? profile.social_links.github : `https://github.com/${profile.social_links.github}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 px-3 py-2 bg-gray-800/50 rounded-lg hover:bg-gray-700/50 transition-colors group"
+                    >
+                      <Github className="w-4 h-4 text-gray-400 group-hover:text-white" />
+                      <span className="text-sm text-gray-400 group-hover:text-white">GitHub</span>
+                    </a>
+                  )}
+                  {profile.social_links.twitter && (
+                    <a
+                      href={profile.social_links.twitter.startsWith('http') ? profile.social_links.twitter : `https://twitter.com/${profile.social_links.twitter}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 px-3 py-2 bg-gray-800/50 rounded-lg hover:bg-gray-700/50 transition-colors group"
+                    >
+                      <Twitter className="w-4 h-4 text-gray-400 group-hover:text-white" />
+                      <span className="text-sm text-gray-400 group-hover:text-white">Twitter</span>
+                    </a>
+                  )}
+                  {profile.social_links.instagram && (
+                    <a
+                      href={profile.social_links.instagram.startsWith('http') ? profile.social_links.instagram : `https://instagram.com/${profile.social_links.instagram}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 px-3 py-2 bg-gray-800/50 rounded-lg hover:bg-gray-700/50 transition-colors group"
+                    >
+                      <Instagram className="w-4 h-4 text-gray-400 group-hover:text-white" />
+                      <span className="text-sm text-gray-400 group-hover:text-white">Instagram</span>
+                    </a>
+                  )}
+                  {profile.social_links.linkedin && (
+                    <a
+                      href={profile.social_links.linkedin.startsWith('http') ? profile.social_links.linkedin : `https://linkedin.com/in/${profile.social_links.linkedin}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 px-3 py-2 bg-gray-800/50 rounded-lg hover:bg-gray-700/50 transition-colors group"
+                    >
+                      <Linkedin className="w-4 h-4 text-gray-400 group-hover:text-white" />
+                      <span className="text-sm text-gray-400 group-hover:text-white">LinkedIn</span>
+                    </a>
+                  )}
+                  {profile.social_links.website && (
+                    <a
+                      href={profile.social_links.website.startsWith('http') ? profile.social_links.website : `https://${profile.social_links.website}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 px-3 py-2 bg-gray-800/50 rounded-lg hover:bg-gray-700/50 transition-colors group"
+                    >
+                      <Globe className="w-4 h-4 text-gray-400 group-hover:text-white" />
+                      <span className="text-sm text-gray-400 group-hover:text-white">Website</span>
+                    </a>
+                  )}
+                </div>
+              ) : (
+                <div className="text-center py-6">
+                  <p className="text-gray-400 text-sm">No social links added yet</p>
+                  <button
+                    onClick={() => router.push('/settings')}
+                    className="mt-2 text-purple-400 text-sm hover:text-purple-300 transition-colors"
+                  >
+                    Add your social links →
+                  </button>
+                </div>
+              )}
             </div>
           </GlowCard>
         </div>
-
         {/* RIGHT COLUMN - 8 columns wide */}
         <div className="lg:col-span-8 space-y-6">
 
