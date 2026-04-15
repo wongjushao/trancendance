@@ -7,10 +7,12 @@ import {
   Camera, ArrowRight, ArrowLeft,
   Check, Calendar, FileText, AlertCircle,
   Briefcase, Search, Building2, Users,
+  CheckCircle, // [ADDED] For selected organization checkmark
 } from "lucide-react";
 import { GlowButton } from "@/components/lms/GlowButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { motion, AnimatePresence } from "framer-motion";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 import { clearOnboardingCache } from "@/lib/onboarding";
@@ -151,6 +153,13 @@ export default function OnboardingPage() {
     selectedOrganizationId: null,
     interests: [],
   });
+
+  // [ADDED] Debug logging for teacher organization selection
+  useEffect(() => {
+    if (formData.desiredRole === 'teacher') {
+      console.log('[Debug] Teacher role selected, current organization ID:', formData.selectedOrganizationId);
+    }
+  }, [formData.desiredRole, formData.selectedOrganizationId]);
 
   // Filter organizations based on search
   const filteredOrganizations = mockOrganizations.filter(org =>
@@ -532,9 +541,27 @@ export default function OnboardingPage() {
       window.dispatchEvent(new CustomEvent('profile-updated'));
     }
     
-    // Final redirect to dashboard
-    console.log('[onboarding] Redirecting to dashboard...');
-    router.push("/dashboard");
+    // Final redirect based on role
+    console.log('[onboarding] Final role after onboarding:', role);
+    console.log('[onboarding] Pending role:', pendingRole);
+
+    await new Promise(resolve => setTimeout(resolve, 500));
+    // Determine redirect path based on user's role after onboarding
+    let redirectPath = "/dashboard";
+
+    if (role === 'pending_teacher') {
+      redirectPath = "/teacher-request";
+      console.log('[onboarding] Teacher pending - redirecting to teacher-request page');
+    } else if (role === 'pending_org_admin') {
+      redirectPath = "/organization-setup";
+      console.log('[onboarding] Org admin pending - redirecting to organization-setup page');
+    } else if (role === 'student') {
+      redirectPath = "/dashboard";
+      console.log('[onboarding] Student - redirecting to dashboard');
+    }
+
+    console.log('[onboarding] Redirecting to:', redirectPath);
+    router.push(redirectPath);
   };
 
   // Form helpers
@@ -778,9 +805,10 @@ export default function OnboardingPage() {
                             onChange={setField("bio")}
                             onBlur={() => handleFieldBlur("bio", formData.bio, 1)}
                             placeholder="Tell us about yourself — your background, what you're passionate about..."
-                            rows={3}
+                            rows={8}
                             maxLength={500}
-                            className={`w-full pl-10 pr-4 py-3 ${getInputClassName("bio")} resize-none`}
+                            className={`w-full pl-10 pr-4 py-3 ${getInputClassName("bio")} resize-y`}
+                            style={{ minHeight: '200px' }}
                           />
                         </div>
                         {getFieldError("bio") && (
@@ -836,7 +864,7 @@ export default function OnboardingPage() {
                           value={formData.language}
                           onChange={setField("language")}
                           onBlur={() => handleFieldBlur("language", formData.language, 2)}
-                          className={getInputClassName("language")}
+                          className={`${getInputClassName("language")} pl-4 pr-8`}
                         >
                           <option value="">Select your language</option>
                           {LANGUAGES.map(({ code, label }) => (
@@ -931,7 +959,7 @@ export default function OnboardingPage() {
                           ))}
                         </div>
                         
-                        {formData.desiredRole === "admin" && (
+                        {formData.desiredRole === "org_admin" && (
                           <div className="mt-3 p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl">
                             <p className="text-xs text-blue-400">
                               After completing onboarding, you'll be asked to set up your organization.
@@ -951,7 +979,7 @@ export default function OnboardingPage() {
                         <p className="text-[#A0A0B5]">
                           {formData.desiredRole === "teacher" 
                             ? "Select the organization where you'd like to teach. Your request will be sent to the organization admin for approval."
-                            : formData.desiredRole === "admin"
+                            : formData.desiredRole === "org_admin"
                             ? "You'll create a new organization after onboarding. Admin privileges will be activated after verification."
                             : "You can join organizations later from your dashboard."}
                         </p>
@@ -1027,32 +1055,54 @@ export default function OnboardingPage() {
                                       </span>
                                     </div>
                                   </div>
+                                  {/* [ADDED] Checkmark for selected organization */}
                                   {formData.selectedOrganizationId === org.id && (
-                                    <Check className="w-5 h-5 text-purple-400 shrink-0" />
+                                    <CheckCircle className="w-5 h-5 text-purple-400 shrink-0" />
                                   )}
                                 </div>
                               </button>
                             ))}
                           </div>
 
+                          {/* [ADDED] "No organizations found" state */}
                           {filteredOrganizations.length === 0 && (
                             <div className="text-center py-8">
                               <Building2 className="w-12 h-12 text-[#6B6B80] mx-auto mb-3" />
                               <p className="text-white font-medium mb-1">No organizations found</p>
-                              <p className="text-sm text-[#6B6B80]">Try a different search term</p>
+                              <p className="text-sm text-[#A0A0B5]">Try a different search term</p>
+                              {searchQuery && (
+                                <button
+                                  onClick={() => setSearchQuery("")}
+                                  className="mt-3 text-sm text-purple-400 hover:text-purple-300 transition-colors"
+                                >
+                                  Clear search
+                                </button>
+                              )}
                             </div>
                           )}
 
+                          {/* [ADDED] Selected organization summary */}
                           {formData.selectedOrganizationId && (
-                            <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl">
-                              <p className="text-xs text-blue-400">
-                                A request will be sent to the organization admin to approve your teacher role.
-                                You'll have student access until your request is approved.
-                              </p>
+                            <div className="mt-4 p-4 bg-purple-500/5 border border-purple-500/20 rounded-xl">
+                              <div className="flex items-start gap-3">
+                                <div className="p-2 rounded-lg bg-purple-500/20">
+                                  <Building2 className="w-5 h-5 text-purple-400" />
+                                </div>
+                                <div className="flex-1">
+                                  <p className="text-sm font-medium text-purple-400 mb-1">Selected Organization</p>
+                                  <p className="text-white font-semibold">
+                                    {mockOrganizations.find(o => o.id === formData.selectedOrganizationId)?.name}
+                                  </p>
+                                  <p className="text-xs text-[#A0A0B5] mt-1">
+                                    Your request to join as a teacher will be sent to the organization admin for approval.
+                                    You'll have student access until approved.
+                                  </p>
+                                </div>
+                              </div>
                             </div>
                           )}
                         </div>
-                      ) : formData.desiredRole === "admin" ? (
+                      ) : formData.desiredRole === "org_admin" ? (
                         <div className="p-6 bg-purple-500/5 border border-purple-500/20 rounded-xl text-center">
                           <Building2 className="w-12 h-12 text-purple-400 mx-auto mb-3" />
                           <p className="text-white font-medium mb-2">You'll create a new organization</p>

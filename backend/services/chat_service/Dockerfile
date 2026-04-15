@@ -10,4 +10,4 @@ RUN /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
 
 COPY backend /app/backend
 
-CMD ["/opt/venv/bin/gunicorn", "-b", "0.0.0.0:5002", "backend.services.chat_service.app:app"]
+CMD ["/opt/venv/bin/gunicorn", "--worker-class", "gthread", "--threads", "8", "--bind", "0.0.0.0:5002", "backend.services.chat_service.wsgi:app"]

@@ -1,4 +1,5 @@
 // frontend/components/dashboard/StudentDashboard.tsx
+
 "use client";
 
 import { useState, useEffect } from "react";
@@ -8,15 +9,16 @@ import {
   Calendar, Activity, Award, Users, ChevronRight,
   PlayCircle, FileText, MessageCircle, Bell, Star,
   Sparkles, BarChart3, FolderOpen, CheckCircle2,
+  Building2,
 } from "lucide-react";
 import { GlowCard, StatCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
 import { motion } from "framer-motion";
-import { AchievementsList } from "@/components/dashboard/AchievementsList";
-import { FriendsList } from "@/components/dashboard/FriendsList";
 import { LearningCalendar } from "@/components/dashboard/LearningCalendar";
 import { UpcomingItems } from "@/components/dashboard/UpcomingItems";
 import { RecentItems } from "@/components/dashboard/RecentItems";
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
+import { useRole } from "@/components/providers/RoleProvider";
 
 interface StudentDashboardProps {
   user: any;
@@ -24,355 +26,352 @@ interface StudentDashboardProps {
   organizationName?: string | null;
 }
 
-const learningMetrics = {
-  totalHours: 158,
-  weeklyHours: 24,
-  streakDays: 12,
-  completionRate: 78,
-  skillProgress: [
-    { name: "React", progress: 85, color: "#6A5CFF" },
-    { name: "TypeScript", progress: 70, color: "#9B6CFF" },
-    { name: "Node.js", progress: 65, color: "#5CFF9B" },
-    { name: "Python", progress: 60, color: "#FFD75C" },
-  ]
-};
-
-const recommendedCourses = [
+// Mock data for enrolled courses (in-progress only)
+const mockEnrolledCourses = [
   {
-    id: 101,
-    title: "Advanced System Design",
-    instructor: "Dr. Sarah Chen",
-    rating: 4.9,
-    students: "12.4k",
-    duration: "8 weeks",
-    level: "Advanced",
-  },
-  {
-    id: 102,
-    title: "Machine Learning Fundamentals",
-    instructor: "Prof. Andrew Ng",
+    id: 1,
+    title: "Advanced React Development",
+    description: "Master React with hooks, context, and advanced patterns",
+    thumbnail: "https://images.unsplash.com/photo-1633356122544-f134324a6cee?w=400&h=240&fit=crop",
+    instructor: "Sarah Johnson",
+    instructorAvatar: "SJ",
+    progress: 65,
+    lessonsCompleted: 26,
+    totalLessons: 40,
+    lastAccessed: new Date(2024, 0, 15),
     rating: 4.8,
-    students: "45.2k",
-    duration: "12 weeks",
-    level: "Intermediate",
+    certificateEarned: false,
   },
   {
-    id: 103,
-    title: "Cloud Architecture",
-    instructor: "James Wilson",
-    rating: 4.7,
-    students: "8.9k",
-    duration: "6 weeks",
-    level: "Advanced",
-  }
+    id: 2,
+    title: "UI/UX Design Fundamentals",
+    description: "Learn the principles of user-centered design",
+    thumbnail: "https://images.unsplash.com/photo-1586717791821-3f44a563fa4c?w=400&h=240&fit=crop",
+    instructor: "Michael Chen",
+    instructorAvatar: "MC",
+    progress: 30,
+    lessonsCompleted: 12,
+    totalLessons: 40,
+    lastAccessed: new Date(2024, 0, 14),
+    rating: 4.9,
+    certificateEarned: false,
+  },
 ];
 
-const recentActivities = [
-  { id: 1, type: "completed", title: "React Hooks Deep Dive", date: "2 hours ago", points: 50 },
-  { id: 2, type: "submitted", title: "Database Design Project", date: "5 hours ago", points: 100 },
-  { id: 3, type: "enrolled", title: "Advanced TypeScript", date: "1 day ago", points: 0 },
-  { id: 4, type: "achievement", title: "7-Day Learning Streak", date: "2 days ago", points: 25 },
+// Mock data for recent activity (last 5 actions)
+const mockRecentActivity = [
+  {
+    id: 1,
+    title: "Completed React Hooks module",
+    type: "course" as const,
+    courseName: "Advanced React Development",
+    progress: 100,
+    lastAccessed: new Date(2024, 0, 15, 14, 30),
+    status: "completed" as const,
+  },
+  {
+    id: 2,
+    title: "Submitted Week 3 Assignment",
+    type: "assignment" as const,
+    courseName: "Advanced React Development",
+    lastAccessed: new Date(2024, 0, 14, 10, 15),
+    status: "completed" as const,
+  },
+  {
+    id: 3,
+    title: "Started Design Systems module",
+    type: "course" as const,
+    courseName: "UI/UX Design Fundamentals",
+    progress: 15,
+    lastAccessed: new Date(2024, 0, 13, 16, 45),
+    status: "in-progress" as const,
+  },
 ];
 
-export default function StudentDashboard({ user, organizationId, organizationName }: StudentDashboardProps) {
-  const firstName = user.user_metadata?.full_name?.split(" ")[0] || user.email?.split("@")[0] || "there";
+// Mock data for upcoming deadlines (next 7 days only)
+const mockUpcomingItems = [
+  {
+    id: 1,
+    title: "Week 4 Assignment: Build a Dashboard",
+    type: "assignment" as const,
+    courseName: "Advanced React Development",
+    date: new Date(2024, 0, 20, 23, 59),
+  },
+  {
+    id: 2,
+    title: "Design Critique Session",
+    type: "live_session" as const,
+    courseName: "UI/UX Design Fundamentals",
+    date: new Date(2024, 0, 18, 15, 0),
+  },
+];
+
+export default function StudentDashboard({ 
+  user, 
+  organizationId, 
+  organizationName 
+}: StudentDashboardProps) {
+  const { roleData, refreshRole } = useRole();
+  const [displayName, setDisplayName] = useState<string>("");
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Listen for role changes
+  useEffect(() => {
+    const handleRoleChange = () => {
+      refreshRole(); // Refresh role data when changes occur
+    };
+
+    window.addEventListener('roleChanged', handleRoleChange);
+    
+    return () => {
+      window.removeEventListener('roleChanged', handleRoleChange);
+    };
+  }, [refreshRole]);
+
+  // Fetch profile data to get the actual name
+  const fetchProfileName = async () => {
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('first_name, last_name, username')
+        .eq('id', user.id)
+        .single();
+      
+      if (error) throw error;
+      
+      // Priority: first_name + last_name > username > email
+      if (data?.first_name && data?.last_name) {
+        setDisplayName(`${data.first_name} ${data.last_name}`);
+      } else if (data?.first_name) {
+        setDisplayName(data.first_name);
+      } else if (data?.username) {
+        setDisplayName(data.username);
+      } else {
+        // Fallback to user metadata or email
+        setDisplayName(user.user_metadata?.full_name || user.email?.split('@')[0] || "Student");
+      }
+    } catch (error) {
+      console.error("Error fetching profile name:", error);
+      setDisplayName(user.email?.split('@')[0] || "Student");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchProfileName();
+  }, [user.id]);
+
+  // Calculate stats (today/week focused)
+  const totalHoursToday = 2; // Mock: hours studied today
+  const coursesInProgress = mockEnrolledCourses.length;
+  const assignmentsDue = mockUpcomingItems.filter(item => item.type === 'assignment').length;
+  const currentStreak = 5; // Mock: 5 day streak
+
+  // Check if user has a pending teacher request
+  const isPendingTeacher = roleData?.role === 'pending_teacher';
+  const isPendingOrgAdmin = roleData?.role === 'pending_org_admin';
 
   return (
-    <div className="space-y-8 pb-12">
+    <div className="space-y-6">
       {/* Welcome Header */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-purple-600 via-purple-500 to-violet-600 p-8">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl" />
-        <div className="absolute bottom-0 left-0 w-48 h-48 bg-purple-400/20 rounded-full blur-2xl" />
-        
-        <div className="relative z-10">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="px-3 py-1 bg-white/20 rounded-full text-xs font-medium text-white">
-              Student Dashboard
-            </div>
-            <div className="px-3 py-1 bg-white/20 rounded-full text-xs font-medium text-white">
-              {learningMetrics.streakDays} Day Streak
-            </div>
-            {organizationName && (
-              <div className="px-3 py-1 bg-white/20 rounded-full text-xs font-medium text-white">
-                {organizationName}
-              </div>
-            )}
-          </div>
-          <h1 className="text-4xl font-bold text-white mb-2">
-            Welcome back, {firstName}!
+      <div className="flex justify-between items-start">
+        <div>
+          <h1 className="text-3xl font-bold text-white">
+            Welcome back, {displayName || "Student"}! 👋
           </h1>
-          <p className="text-purple-100 text-lg">
-            Continue your learning journey. You've learned <span className="font-semibold">{learningMetrics.totalHours}</span> hours this month.
+          <p className="text-gray-400 mt-1">
+            Keep up the great work! You're making excellent progress.
           </p>
-          
-          <div className="flex gap-4 mt-6">
-            <Link href="/courses">
-              <GlowButton variant="primary" className="bg-white text-purple-600 hover:bg-purple-50">
-                <PlayCircle className="w-4 h-4 mr-2" />
-                Continue Learning
-              </GlowButton>
-            </Link>
-            <Link href="/analytics">
-              <GlowButton variant="ghost" className="text-white border-white/30 hover:bg-white/10">
-                <BarChart3 className="w-4 h-4 mr-2" />
-                View Analytics
-              </GlowButton>
-            </Link>
-          </div>
+        </div>
+        <div className="flex gap-3">
+          <GlowButton variant="outline" size="sm">
+            <Bell className="w-4 h-4 mr-2" />
+            Notifications
+          </GlowButton>
+          <GlowButton variant="primary" size="sm">
+            <MessageCircle className="w-4 h-4 mr-2" />
+            Messages
+          </GlowButton>
         </div>
       </div>
 
-      {/* Stats Grid - Same as before */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0 }}>
-          <div className="bg-gradient-to-br from-[#16161F] to-[#12121A] rounded-xl p-5 border border-white/5 hover:border-purple-500/30 transition-all">
-            <div className="flex items-center justify-between mb-3">
-              <div className="p-2 rounded-lg bg-purple-500/10">
-                <BookOpen className="w-5 h-5 text-purple-400" />
-              </div>
-              <span className="text-xs text-green-400 bg-green-500/10 px-2 py-1 rounded-full">+2 this month</span>
+      {/* [FIXED] Pending Teacher Banner - Now with key to force re-render on role change */}
+      {isPendingTeacher && (
+        <motion.div
+          key="pending-teacher-banner" // Add key for proper re-rendering
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4"
+        >
+          <div className="flex items-start gap-3">
+            <div className="p-2 bg-amber-500/20 rounded-lg">
+              <Clock className="w-5 h-5 text-amber-400" />
             </div>
-            <p className="text-3xl font-bold text-white mb-1">3</p>
-            <p className="text-sm text-[#6B6B80]">Active Courses</p>
+            <div className="flex-1">
+              <h3 className="font-semibold text-amber-400">Teacher Request Pending</h3>
+              <p className="text-sm text-gray-300 mt-1">
+                Your request to become a teacher is being reviewed by an administrator.
+                You'll be notified once it's approved.
+              </p>
+            </div>
+            <Link href="/teacher-request">
+              <GlowButton variant="outline" size="sm">
+                View Status
+                <ChevronRight className="w-4 h-4 ml-1" />
+              </GlowButton>
+            </Link>
           </div>
         </motion.div>
+      )}
 
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
-          <div className="bg-gradient-to-br from-[#16161F] to-[#12121A] rounded-xl p-5 border border-white/5 hover:border-purple-500/30 transition-all">
-            <div className="flex items-center justify-between mb-3">
-              <div className="p-2 rounded-lg bg-green-500/10">
-                <Target className="w-5 h-5 text-green-400" />
-              </div>
-              <span className="text-xs text-green-400 bg-green-500/10 px-2 py-1 rounded-full">+12 this week</span>
+      {/* [FIXED] Pending Organization Admin Banner - Now with key to force re-render on role change */}
+      {isPendingOrgAdmin && (
+        <motion.div
+          key="pending-org-admin-banner" // Add key for proper re-rendering
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4"
+        >
+          <div className="flex items-start gap-3">
+            <div className="p-2 bg-blue-500/20 rounded-lg">
+              <Building2 className="w-5 h-5 text-blue-400" />
             </div>
-            <p className="text-3xl font-bold text-white mb-1">48</p>
-            <p className="text-sm text-[#6B6B80]">Lessons Completed</p>
+            <div className="flex-1">
+              <h3 className="font-semibold text-blue-400">Organization Admin Request Pending</h3>
+              <p className="text-sm text-gray-300 mt-1">
+                Your request to become an organization administrator is being reviewed.
+                You'll be notified once it's approved.
+              </p>
+            </div>
+            <Link href="/organization-setup">
+              <GlowButton variant="outline" size="sm">
+                View Status
+                <ChevronRight className="w-4 h-4 ml-1" />
+              </GlowButton>
+            </Link>
           </div>
         </motion.div>
+      )}
 
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
-          <div className="bg-gradient-to-br from-[#16161F] to-[#12121A] rounded-xl p-5 border border-white/5 hover:border-purple-500/30 transition-all">
-            <div className="flex items-center justify-between mb-3">
-              <div className="p-2 rounded-lg bg-yellow-500/10">
-                <Trophy className="w-5 h-5 text-yellow-400" />
-              </div>
-              <span className="text-xs text-green-400 bg-green-500/10 px-2 py-1 rounded-full">+3 new</span>
-            </div>
-            <p className="text-3xl font-bold text-white mb-1">15</p>
-            <p className="text-sm text-[#6B6B80]">Achievements Earned</p>
-          </div>
-        </motion.div>
-
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
-          <div className="bg-gradient-to-br from-[#16161F] to-[#12121A] rounded-xl p-5 border border-white/5 hover:border-purple-500/30 transition-all">
-            <div className="flex items-center justify-between mb-3">
-              <div className="p-2 rounded-lg bg-orange-500/10">
-                <TrendingUp className="w-5 h-5 text-orange-400" />
-              </div>
-              <span className="text-xs text-green-400 bg-green-500/10 px-2 py-1 rounded-full">Keep going!</span>
-            </div>
-            <p className="text-3xl font-bold text-white mb-1">{learningMetrics.streakDays}</p>
-            <p className="text-sm text-[#6B6B80]">Day Streak</p>
-          </div>
-        </motion.div>
+      {/* Stats Grid - Today focused */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          icon={Clock}
+          label="Hours Today"
+          value={totalHoursToday}
+          trend="+2 from yesterday"
+          trendUp={true}
+        />
+        <StatCard
+          icon={BookOpen}
+          label="Courses In Progress"
+          value={coursesInProgress}
+          trend="On track"
+          trendUp={true}
+        />
+        <StatCard
+          icon={Calendar}
+          label="Due This Week"
+          value={assignmentsDue}
+          trend="2 assignments"
+          trendUp={false}
+        />
+        <StatCard
+          icon={Target}
+          label="Current Streak"
+          value={`${currentStreak} days`}
+          trend="Keep it up!"
+          trendUp={true}
+        />
       </div>
 
-      {/* Main Grid Layout - Same as before */}
+      {/* Main Grid Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-6">
-          <GlowCard className="p-6">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h2 className="text-xl font-bold text-white">Learning Progress</h2>
-                <p className="text-sm text-[#6B6B80]">Weekly activity and skill development</p>
-              </div>
-              <Link href="/analytics" className="text-sm text-purple-400 hover:text-purple-300 flex items-center gap-1">
-                View Details <ChevronRight className="w-4 h-4" />
-              </Link>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="bg-[#12121A] rounded-xl p-4 border border-white/5">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <Activity className="w-4 h-4 text-purple-400" />
-                    <p className="text-sm font-medium text-white">Weekly Activity</p>
-                  </div>
-                  <span className="text-xs text-[#6B6B80]">This week</span>
-                </div>
-                <p className="text-2xl font-bold text-white mb-1">{learningMetrics.weeklyHours}h</p>
-                <p className="text-xs text-green-400 mb-3">+8h from last week</p>
-                <div className="flex items-end gap-1 h-24">
-                  {[12, 18, 24, 32, 28, 35, 30].map((hours, i) => (
-                    <div key={i} className="flex-1 flex flex-col items-center gap-1">
-                      <div 
-                        className="w-full bg-gradient-to-t from-purple-500 to-violet-500 rounded-t"
-                        style={{ height: `${(hours / 40) * 80}px` }}
-                      />
-                      <span className="text-[10px] text-[#6B6B80]">{['M','T','W','T','F','S','S'][i]}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="bg-[#12121A] rounded-xl p-4 border border-white/5">
-                <div className="flex items-center gap-2 mb-4">
-                  <Star className="w-4 h-4 text-purple-400" />
-                  <p className="text-sm font-medium text-white">Skills in Progress</p>
-                </div>
-                <div className="space-y-3">
-                  {learningMetrics.skillProgress.map((skill, i) => (
-                    <div key={i}>
-                      <div className="flex justify-between text-xs mb-1">
-                        <span className="text-[#A0A0B5]">{skill.name}</span>
-                        <span className="text-purple-400">{skill.progress}%</span>
-                      </div>
-                      <div className="h-1.5 bg-[#1A1A24] rounded-full overflow-hidden">
-                        <div 
-                          className="h-full rounded-full transition-all"
-                          style={{ width: `${skill.progress}%`, backgroundColor: skill.color }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </GlowCard>
-
-          <GlowCard className="p-6">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h2 className="text-xl font-bold text-white">Academic Calendar</h2>
-                <p className="text-sm text-[#6B6B80]">Track your learning milestones</p>
-              </div>
-            </div>
-            <LearningCalendar />
-          </GlowCard>
+        {/* Left Column - Calendar */}
+        <div className="lg:col-span-2">
+          <LearningCalendar userId={user.id} />
         </div>
 
+        {/* Right Column - Upcoming Items and Recent Items */}
         <div className="space-y-6">
-          <GlowCard className="p-6">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h2 className="text-xl font-bold text-white">Upcoming</h2>
-                <p className="text-sm text-[#6B6B80]">Deadlines and events</p>
-              </div>
-              <Link href="/assignments" className="text-sm text-purple-400 hover:text-purple-300">
-                View All
-              </Link>
-            </div>
-            <UpcomingItems />
-          </GlowCard>
-
-          <GlowCard className="p-6">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h2 className="text-xl font-bold text-white">Recent Activity</h2>
-                <p className="text-sm text-[#6B6B80]">Your latest achievements</p>
-              </div>
-            </div>
-            <div className="space-y-4">
-              {recentActivities.map((activity, i) => (
-                <div key={activity.id} className="flex items-start gap-3 p-3 rounded-xl hover:bg-white/5 transition-all">
-                  <div className={`p-2 rounded-lg ${
-                    activity.type === 'completed' ? 'bg-green-500/10' :
-                    activity.type === 'submitted' ? 'bg-blue-500/10' :
-                    activity.type === 'enrolled' ? 'bg-purple-500/10' :
-                    'bg-yellow-500/10'
-                  }`}>
-                    {activity.type === 'completed' && <CheckCircle2 className="w-4 h-4 text-green-400" />}
-                    {activity.type === 'submitted' && <FileText className="w-4 h-4 text-blue-400" />}
-                    {activity.type === 'enrolled' && <BookOpen className="w-4 h-4 text-purple-400" />}
-                    {activity.type === 'achievement' && <Award className="w-4 h-4 text-yellow-400" />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-white text-sm font-medium truncate">{activity.title}</p>
-                    <p className="text-xs text-[#6B6B80]">{activity.date}</p>
-                  </div>
-                  {activity.points > 0 && (
-                    <div className="px-2 py-1 bg-green-500/10 rounded-lg">
-                      <span className="text-xs text-green-400">+{activity.points} XP</span>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </GlowCard>
-
-          <GlowCard className="p-6">
-            <div className="flex items-center gap-2 mb-6">
-              <Sparkles className="w-5 h-5 text-purple-400" />
-              <h2 className="text-xl font-bold text-white">Recommended for You</h2>
-            </div>
-            <div className="space-y-3">
-              {recommendedCourses.map((course) => (
-                <Link key={course.id} href={`/courses/${course.id}`}>
-                  <div className="group p-3 rounded-xl bg-[#12121A] border border-white/5 hover:border-purple-500/30 transition-all">
-                    <div className="flex items-start gap-3">
-                      <div className="w-12 h-12 rounded-lg bg-purple-500/20 flex items-center justify-center flex-shrink-0">
-                        <BookOpen className="w-6 h-6 text-purple-400" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-white font-medium text-sm group-hover:text-purple-400 transition-colors truncate">
-                          {course.title}
-                        </p>
-                        <p className="text-xs text-[#6B6B80]">{course.instructor}</p>
-                        <div className="flex items-center gap-3 mt-1">
-                          <div className="flex items-center gap-1">
-                            <Star className="w-3 h-3 fill-yellow-500 text-yellow-500" />
-                            <span className="text-xs text-white">{course.rating}</span>
-                          </div>
-                          <span className="text-xs text-[#6B6B80]">{course.students} students</span>
-                        </div>
-                      </div>
-                      <PlayCircle className="w-5 h-5 text-[#6B6B80] group-hover:text-purple-400 transition-colors" />
-                    </div>
-                  </div>
-                </Link>
-              ))}
-            </div>
-          </GlowCard>
+          <UpcomingItems items={mockUpcomingItems} />
+          <RecentItems items={mockRecentActivity} />
         </div>
       </div>
 
-      {/* Achievements & Friends Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <GlowCard className="p-6">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h2 className="text-xl font-bold text-white">Achievements</h2>
-              <p className="text-sm text-[#6B6B80]">Badges and milestones you've earned</p>
-            </div>
-            <Award className="w-5 h-5 text-purple-400" />
-          </div>
-          <AchievementsList />
-        </GlowCard>
-
-        <GlowCard className="p-6">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h2 className="text-xl font-bold text-white">Learning Community</h2>
-              <p className="text-sm text-[#6B6B80]">Connect with peers and friends</p>
-            </div>
-            <Users className="w-5 h-5 text-purple-400" />
-          </div>
-          <FriendsList />
-        </GlowCard>
-      </div>
-
-      <GlowCard className="p-6">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h2 className="text-xl font-bold text-white">Continue Learning</h2>
-            <p className="text-sm text-[#6B6B80]">Pick up where you left off</p>
-          </div>
-          <Link href="/courses" className="text-sm text-purple-400 hover:text-purple-300">
-            View All Courses
+      {/* My Courses Section - In Progress Only */}
+      <div>
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-xl font-semibold text-white">My Courses</h2>
+          <Link href="/courses">
+            <GlowButton variant="ghost" size="sm">
+              View All
+              <ChevronRight className="w-4 h-4 ml-1" />
+            </GlowButton>
           </Link>
         </div>
-        <RecentItems />
-      </GlowCard>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {mockEnrolledCourses.map((course) => (
+            <GlowCard key={course.id} glowColor="purple">
+              <div className="flex gap-4">
+                <img
+                  src={course.thumbnail}
+                  alt={course.title}
+                  className="w-32 h-32 rounded-lg object-cover"
+                />
+                <div className="flex-1">
+                  <h3 className="font-semibold text-white mb-1">{course.title}</h3>
+                  <p className="text-sm text-gray-400 mb-2">{course.description}</p>
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="flex items-center">
+                      <Star className="w-4 h-4 text-yellow-400 fill-current" />
+                      <span className="text-sm text-gray-300 ml-1">{course.rating}</span>
+                    </div>
+                    <span className="text-xs text-gray-500">•</span>
+                    <span className="text-sm text-gray-400">
+                      {course.lessonsCompleted}/{course.totalLessons} lessons
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 bg-gray-700 rounded-full h-2">
+                      <div
+                        className="bg-gradient-to-r from-purple-500 to-pink-500 rounded-full h-2"
+                        style={{ width: `${course.progress}%` }}
+                      />
+                    </div>
+                    <span className="text-sm text-gray-400">{course.progress}%</span>
+                  </div>
+                </div>
+              </div>
+            </GlowCard>
+          ))}
+        </div>
+      </div>
+
+      {/* Quick Actions Section */}
+      <div>
+        <h2 className="text-xl font-semibold text-white mb-4">Quick Actions</h2>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <GlowButton variant="outline" className="w-full">
+            <PlayCircle className="w-4 h-4 mr-2" />
+            Continue Learning
+          </GlowButton>
+          <GlowButton variant="outline" className="w-full">
+            <FileText className="w-4 h-4 mr-2" />
+            View Assignments
+          </GlowButton>
+          <GlowButton variant="outline" className="w-full">
+            <Trophy className="w-4 h-4 mr-2" />
+            Achievements
+          </GlowButton>
+          <GlowButton variant="outline" className="w-full">
+            <Users className="w-4 h-4 mr-2" />
+            Study Groups
+          </GlowButton>
+        </div>
+      </div>
     </div>
   );
 }

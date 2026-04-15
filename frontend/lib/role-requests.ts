@@ -30,6 +30,31 @@ export interface OrganizationCreationRequest {
 const ROLE_REQUESTS_KEY = 'role_requests';
 const ORG_CREATION_REQUESTS_KEY = 'org_creation_requests';
 
+// Helper functions for organization creation requests storage
+function getOrgCreationRequestsStorage(): OrganizationCreationRequest[] {
+  if (typeof window === 'undefined') return [];
+  
+  const stored = localStorage.getItem(ORG_CREATION_REQUESTS_KEY);
+  if (stored) {
+    try {
+      const parsed = JSON.parse(stored);
+      // Convert date strings back to Date objects
+      return parsed.map((req: any) => ({
+        ...req,
+        requestedAt: new Date(req.requestedAt)
+      }));
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function saveOrgCreationRequests(requests: OrganizationCreationRequest[]): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(ORG_CREATION_REQUESTS_KEY, JSON.stringify(requests));
+}
+
 // Get all role requests
 export function getRoleRequests(): RoleRequest[] {
   if (typeof window === 'undefined') return [];
@@ -37,7 +62,12 @@ export function getRoleRequests(): RoleRequest[] {
   const stored = localStorage.getItem(ROLE_REQUESTS_KEY);
   if (stored) {
     try {
-      return JSON.parse(stored);
+      const parsed = JSON.parse(stored);
+      // Convert date strings back to Date objects
+      return parsed.map((req: any) => ({
+        ...req,
+        requestedAt: new Date(req.requestedAt)
+      }));
     } catch {
       return [];
     }
@@ -56,7 +86,7 @@ export function createRoleRequest(
   message?: string
 ): RoleRequest {
   const newRequest: RoleRequest = {
-    id: `req-${Date.now()}`,
+    id: `req-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
     userId,
     userName,
     userEmail,
@@ -128,17 +158,7 @@ export function getUserPendingRequest(userId: string): RoleRequest | null {
 
 // Organization creation requests
 export function getOrgCreationRequests(): OrganizationCreationRequest[] {
-  if (typeof window === 'undefined') return [];
-  
-  const stored = localStorage.getItem(ORG_CREATION_REQUESTS_KEY);
-  if (stored) {
-    try {
-      return JSON.parse(stored);
-    } catch {
-      return [];
-    }
-  }
-  return [];
+  return getOrgCreationRequestsStorage();
 }
 
 export function createOrgCreationRequest(
@@ -150,7 +170,7 @@ export function createOrgCreationRequest(
   description: string
 ): OrganizationCreationRequest {
   const newRequest: OrganizationCreationRequest = {
-    id: `org-req-${Date.now()}`,
+    id: `org-req-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
     userId,
     userName,
     userEmail,
@@ -161,21 +181,70 @@ export function createOrgCreationRequest(
     status: 'pending',
   };
   
-  const requests = getOrgCreationRequests();
+  const requests = getOrgCreationRequestsStorage();
   requests.push(newRequest);
-  localStorage.setItem(ORG_CREATION_REQUESTS_KEY, JSON.stringify(requests));
+  saveOrgCreationRequests(requests);
+  
+  // Dispatch event for other components
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('org-creation-request-updated'));
+  }
   
   return newRequest;
 }
 
 export function approveOrgCreationRequest(requestId: string): OrganizationCreationRequest | null {
-  const requests = getOrgCreationRequests();
+  const requests = getOrgCreationRequestsStorage();
   const requestIndex = requests.findIndex(r => r.id === requestId);
   
   if (requestIndex === -1) return null;
   
   requests[requestIndex].status = 'approved';
-  localStorage.setItem(ORG_CREATION_REQUESTS_KEY, JSON.stringify(requests));
+  saveOrgCreationRequests(requests);
+  
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('org-creation-request-updated'));
+  }
   
   return requests[requestIndex];
+}
+
+export function rejectOrgCreationRequest(requestId: string, verificationNote?: string): OrganizationCreationRequest | null {
+  const requests = getOrgCreationRequestsStorage();
+  const requestIndex = requests.findIndex(r => r.id === requestId);
+  
+  if (requestIndex === -1) return null;
+  
+  requests[requestIndex].status = 'rejected';
+  if (verificationNote) {
+    requests[requestIndex].verificationNote = verificationNote;
+  }
+  saveOrgCreationRequests(requests);
+  
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('org-creation-request-updated'));
+  }
+  
+  return requests[requestIndex];
+}
+
+export function cancelOrgCreationRequest(requestId: string): OrganizationCreationRequest | null {
+  const requests = getOrgCreationRequestsStorage();
+  const requestIndex = requests.findIndex(r => r.id === requestId);
+  
+  if (requestIndex === -1) return null;
+  
+  const cancelledRequest = { 
+    ...requests[requestIndex], 
+    status: 'rejected' as const, 
+    verificationNote: 'Cancelled by user' 
+  };
+  requests[requestIndex] = cancelledRequest;
+  saveOrgCreationRequests(requests);
+  
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('org-creation-request-updated'));
+  }
+  
+  return cancelledRequest;
 }

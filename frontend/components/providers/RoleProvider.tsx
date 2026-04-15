@@ -42,6 +42,11 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     const data = getUserRoleData();
     setRoleData(data);
     setRoleCookie(data.role, data.organizationId, data.organizationName);
+    
+    // Dispatch event for other components to refresh
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('roleChanged', { detail: data }));
+    }
   }, []);
 
   // Initialize cookie on first load
@@ -52,15 +57,20 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     }
   }, [roleData, isInitialized]);
 
+  // Listen for role changes from other components
   useEffect(() => {
     const handleRoleChange = (event: CustomEvent<RoleData>) => {
       setRoleData(event.detail);
       setRoleCookie(event.detail.role, event.detail.organizationId, event.detail.organizationName);
     };
 
+    // Listen for both event names for compatibility
     window.addEventListener('role-changed', handleRoleChange as EventListener);
+    window.addEventListener('roleChanged', handleRoleChange as EventListener);
+    
     return () => {
       window.removeEventListener('role-changed', handleRoleChange as EventListener);
+      window.removeEventListener('roleChanged', handleRoleChange as EventListener);
     };
   }, []);
 
@@ -71,7 +81,10 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     setRoleCookie(newData.role, newData.organizationId, newData.organizationName);
     
     // Dispatch event for other components
-    window.dispatchEvent(new CustomEvent('role-changed', { detail: newData }));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('roleChanged', { detail: newData }));
+      window.dispatchEvent(new CustomEvent('role-changed', { detail: newData }));
+    }
   }, [roleData]);
 
   const clearRole = useCallback(() => {
@@ -79,7 +92,12 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     clearRoleCookie();
     const defaultData = { role: 'student' as UserRole, organizationId: null, organizationName: null, pendingRole: null };
     setRoleData(defaultData as RoleData);
-    window.dispatchEvent(new CustomEvent('role-changed', { detail: defaultData }));
+    
+    // Dispatch event for other components
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('roleChanged', { detail: defaultData }));
+      window.dispatchEvent(new CustomEvent('role-changed', { detail: defaultData }));
+    }
   }, []);
 
   const hasPermission = useCallback((requiredRole: UserRole): boolean => {

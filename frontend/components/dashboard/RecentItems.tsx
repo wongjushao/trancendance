@@ -1,11 +1,10 @@
 // frontend/components/dashboard/RecentItems.tsx
-"use client";
-
 import Link from "next/link";
-import { BookOpen, CheckCircle, Clock } from "lucide-react";
+import { BookOpen, CheckCircle, Clock, PlayCircle } from "lucide-react";
+import { GlowCard } from "@/components/lms/Cards";
 
 interface RecentItem {
-  id: string;
+  id: string | number;
   title: string;
   type: "course" | "assignment";
   courseName: string;
@@ -14,97 +13,91 @@ interface RecentItem {
   status?: "completed" | "in-progress" | "pending";
 }
 
-const mockRecent: RecentItem[] = [
-  {
-    id: "1",
-    title: "Advanced React Development",
-    type: "course",
-    courseName: "Advanced React Development",
-    progress: 65,
-    lastAccessed: new Date(2024, 2, 12),
-    status: "in-progress",
-  },
-  {
-    id: "2",
-    title: "Backend Development",
-    type: "course",
-    courseName: "Backend Development",
-    progress: 45,
-    lastAccessed: new Date(2024, 2, 10),
-    status: "in-progress",
-  },
-  {
-    id: "3",
-    title: "React Hooks Assignment",
-    type: "assignment",
-    courseName: "Advanced React Development",
-    lastAccessed: new Date(2024, 2, 9),
-    status: "pending",
-  },
-];
+interface RecentItemsProps {
+  items: RecentItem[];
+}
 
-export function RecentItems() {
+const getStatusIcon = (status?: string) => {
+  switch (status) {
+    case "completed":
+      return CheckCircle;
+    case "in-progress":
+      return PlayCircle;
+    default:
+      return Clock;
+  }
+};
+
+const getStatusColor = (status?: string) => {
+  switch (status) {
+    case "completed":
+      return "text-green-400";
+    case "in-progress":
+      return "text-blue-400";
+    default:
+      return "text-yellow-400";
+  }
+};
+
+export function RecentItems({ items }: RecentItemsProps) {
   return (
-    <div className="space-y-3">
-      <h3 className="text-lg font-semibold text-white">Recent Activity</h3>
-      
-      <div className="space-y-2">
-        {mockRecent.map((item) => (
-          <Link
-            key={item.id}
-            href={item.type === "assignment" ? `/assignments/${item.id}` : `/courses/${item.id}`}
-          >
-            <div className="p-3 bg-[#12121A] rounded-xl hover:bg-white/5 transition-colors group cursor-pointer">
-              <div className="flex items-start gap-3">
-                <div className="p-1.5 rounded-lg bg-purple-500/20">
-                  {item.type === "assignment" ? (
-                    <Clock className="w-4 h-4 text-yellow-400" />
-                  ) : (
-                    <BookOpen className="w-4 h-4 text-purple-400" />
-                  )}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-white font-medium text-sm truncate group-hover:text-purple-400 transition-colors">
-                    {item.title}
-                  </p>
-                  <p className="text-[#6B6B80] text-xs truncate">{item.courseName}</p>
-                  <div className="flex items-center gap-2 mt-1">
-                    {item.status === "completed" && (
-                      <span className="text-[10px] text-green-400 flex items-center gap-1">
-                        <CheckCircle className="w-3 h-3" />
-                        Completed
-                      </span>
-                    )}
-                    {item.status === "in-progress" && item.progress && (
-                      <div className="flex items-center gap-2">
-                        <div className="w-16 h-1 bg-[#1A1A24] rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-purple-500 rounded-full"
-                            style={{ width: `${item.progress}%` }}
-                          />
-                        </div>
-                        <span className="text-[10px] text-purple-400">{item.progress}%</span>
-                      </div>
-                    )}
-                    {item.status === "pending" && (
-                      <span className="text-[10px] text-yellow-400">Not started</span>
-                    )}
-                    <span className="text-[10px] text-[#6B6B80]">
-                      {item.lastAccessed.toLocaleDateString()}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
+    <GlowCard>
+      <div className="p-4">
+        <div className="flex justify-between items-center mb-4">
+          <div>
+            <h3 className="font-semibold text-white">Recently Accessed</h3>
+            <p className="text-xs text-gray-400 mt-1">Pick up where you left off</p>
+          </div>
+          <Link href="/dashboard">
+            <Clock className="w-4 h-4 text-gray-400 hover:text-white transition-colors" />
           </Link>
-        ))}
+        </div>
+
+        <div className="space-y-3">
+          {items.length === 0 ? (
+            <div className="text-center py-6">
+              <BookOpen className="w-8 h-8 text-gray-600 mx-auto mb-2" />
+              <p className="text-sm text-gray-400">No recent activity</p>
+              <p className="text-xs text-gray-500 mt-1">Start learning today! 🚀</p>
+            </div>
+          ) : (
+            items.map((item) => {
+              const StatusIcon = getStatusIcon(item.status);
+              const statusColor = getStatusColor(item.status);
+              
+              return (
+                <Link key={item.id} href={`/${item.type}s/${item.id}`}>
+                  <div className="flex items-start gap-3 p-2 rounded-lg hover:bg-gray-800/50 transition-colors cursor-pointer">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <p className="text-sm font-medium text-white truncate">
+                          {item.title}
+                        </p>
+                        <StatusIcon className={`w-3 h-3 ${statusColor} flex-shrink-0`} />
+                      </div>
+                      <p className="text-xs text-gray-400">{item.courseName}</p>
+                      {item.progress !== undefined && (
+                        <div className="mt-2">
+                          <div className="w-full bg-gray-700 rounded-full h-1.5 overflow-hidden">
+                            <div 
+                              className="bg-gradient-to-r from-purple-500 to-pink-500 h-1.5 rounded-full transition-all duration-500"
+                              style={{ width: `${item.progress}%` }}
+                            />
+                          </div>
+                          <p className="text-xs text-gray-500 mt-1">{item.progress}% complete</p>
+                        </div>
+                      )}
+                    </div>
+                    <div className="text-right text-xs text-gray-500 flex-shrink-0">
+                      {item.lastAccessed.toLocaleDateString('default', { month: 'short', day: 'numeric' })}
+                    </div>
+                  </div>
+                </Link>
+              );
+            })
+          )}
+        </div>
       </div>
-      
-      <Link href="/courses">
-        <button className="w-full text-center text-xs text-purple-400 hover:text-purple-300 transition-colors mt-2">
-          Browse More Courses →
-        </button>
-      </Link>
-    </div>
+    </GlowCard>
   );
 }

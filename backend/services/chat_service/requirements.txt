@@ -1,5 +1,6 @@
 flask
 Flask-Cors
+flask-socketio
 psycopg2-binary
 SQLAlchemy
 pydantic
@@ -9,3 +10,4 @@ cryptography
 prometheus-client
 gunicorn
 supabase
+simple-websocket

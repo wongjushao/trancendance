@@ -1,5 +1,5 @@
 // frontend/components/dev/EmailSimulator.tsx
-"use client";
+'use client';
 
 import { useState } from "react";
 import { Mail } from "lucide-react";
@@ -8,20 +8,20 @@ import { MockEmailInbox } from "@/components/notifications/MockEmailInbox";
 export function EmailSimulator() {
   const [isOpen, setIsOpen] = useState(false);
 
-  const IS_DEV = process.env.NODE_ENV === 'development';
-
-  if (!IS_DEV) return null;
-
   return (
     <>
       <button
-        onClick={() => setIsOpen(true)}
-        className="fixed bottom-4 left-32 z-50 flex items-center gap-2 px-3 py-2 bg-purple-600/90 backdrop-blur-sm rounded-lg text-white text-sm font-medium shadow-lg hover:bg-purple-500 transition-colors border border-purple-400/30"
+        onClick={() => setIsOpen(!isOpen)}
+        className="flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm text-white shadow-lg hover:bg-blue-700 transition-all"
+        aria-label="Email simulator"
       >
-        <Mail className="w-4 h-4" />
+        <Mail className="h-4 w-4" />
         <span>Mock Inbox</span>
       </button>
-      {isOpen && <MockEmailInbox isOpen={isOpen} onClose={() => setIsOpen(false)} />}
+
+      {isOpen && (
+        <MockEmailInbox isOpen={isOpen} onClose={() => setIsOpen(false)} />
+      )}
     </>
   );
 }
