@@ -27,6 +27,7 @@ from .entities import (
     UserConsent,
     UserSkill,
     UserRole,
+    UserMFA,
 )
 
 __all__ = [
@@ -58,4 +59,5 @@ __all__ = [
     "UserConsent",
     "DataExport",
     "AuditLog",
+    "UserMFA",
 ]

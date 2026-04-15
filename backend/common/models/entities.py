@@ -37,6 +37,7 @@ class Profile(Base):
     onboarded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(server_default=text("now()"), nullable=False)
     has_password: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    enabled_mfa: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
 class ApiKey(Base):
@@ -365,6 +366,25 @@ class NotificationPreference(Base):
     message_notifications: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     marketing_emails: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
 
+    updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+
+
+class UserMFA(Base):
+    __tablename__ = "user_mfa"
+    __table_args__ = (
+        UniqueConstraint("user_id", name="uq_user_mfa_user_id"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.profiles.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    totp_secret: Mapped[str | None] = mapped_column(Text)
+    backup_codes: Mapped[list[str] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
     updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
 
 
