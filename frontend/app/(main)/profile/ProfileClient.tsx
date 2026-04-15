@@ -49,6 +49,24 @@ interface ProfileData {
   professional_summary: string | null;
 }
 
+interface Education {
+  id: string;
+  institution_name: string;
+  degree: string | null;
+  field_of_study: string | null;
+  start_year: number | null;
+  end_year: number | null;
+  is_current: boolean;
+  order_index: number;
+}
+
+interface UserSkill {
+  skill_id: number;
+  name: string;
+  level: number;
+  years: number;
+}
+
 // Mock friends data
 const friendsData = [
   { id: "1", name: "Alice Johnson", avatar: "AJ", mutualCourses: 3, status: "online" as const, courseProgress: 75 },
@@ -107,79 +125,105 @@ export default function ProfileClient({ user }: ProfileClientProps) {
   const [educations, setEducations] = useState<any[]>([]);
   const [userSkills, setUserSkills] = useState<any[]>([]);
 
-  // SINGLE fetch function that gets everything
-  const fetchProfile = async () => {
+  // Helper to get auth token
+  const getAuthToken = async () => {
+    const supabase = getSupabaseBrowserClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token;
+  };
+
+  // SINGLE fetch function that gets everything (profile + skills + educations)
+  const fetchProfileData = async () => {
     try {
-      setLoading(true);
-      const supabase = getSupabaseBrowserClient();
-      
-      // Wait for session to be available
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        console.log("No session found, waiting for auth...");
-        setLoading(false);
-        return;
-      }
-      
-      const userId = session.user.id;
-      if (!userId) {
-        console.log("No user ID found");
-        setLoading(false);
-        return;
+      const token = await getAuthToken();
+      if (!token) {
+        console.error('No auth token');
+        return null;
       }
 
-      // Fetch profile data
-      const { data: profileData, error: profileError } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", userId)
-        .single();
-        
-      if (profileError) throw profileError;
-      setProfile(profileData);
+      const response = await fetch('/api/auth-service/profile', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
 
-      // Fetch education data
-      const { data: educationData, error: educationError } = await supabase
-        .from('profile_educations')
-        .select('*')
-        .eq('profile_id', userId)
-        .order('order_index', { ascending: true });
-      
-      if (educationError) throw educationError;
-      setEducations(educationData || []);
-
-      // Fetch user skills with skill names
-      const { data: userSkillsData, error: skillsError } = await supabase
-        .from('user_skills')
-        .select('*, skills(name)')
-        .eq('user_id', userId);
-      
-      if (!skillsError && userSkillsData) {
-        const formattedSkills = userSkillsData.map(us => ({
-          id: us.skill_id,
-          name: us.skills?.name || 'Unknown',
-          level: us.level,
-          years: us.years
-        }));
-        setUserSkills(formattedSkills);
-      } else {
-        setUserSkills([]);
+      if (!response.ok) {
+        throw new Error('Failed to fetch profile');
       }
 
+      const data = await response.json();
+      
+      // Set all data from single response
+      setProfile(data);
+      setEducations(data.educations || []);
+      setUserSkills(data.skills || []);
+      
+      return data;
     } catch (error) {
-      console.error("Error fetching profile:", error);
-    } finally {
-      setLoading(false);
+      console.error('Error fetching profile:', error);
+      toast.error('Failed to load profile data');
+      return null;
     }
   };
 
+  // UPDATE your useEffect - only one call needed
   useEffect(() => {
-    // Small delay to ensure auth is ready
-    const timer = setTimeout(() => {
-      fetchProfile();
-    }, 100);
+    const loadData = async () => {
+      setLoading(true);
+      await fetchProfileData();  // One call gets everything
+      setLoading(false);
+    };
+    loadData();
+  }, []);
+
+  // Update subscription - listens to all relevant tables
+  useEffect(() => {
+    const supabase = getSupabaseBrowserClient();
     
-    return () => clearTimeout(timer);
+    const profilesSubscription = supabase
+      .channel('profile-changes')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'profiles',
+        filter: `id=eq.${user.id}`
+      }, () => {
+        fetchProfileData();
+      })
+      .subscribe();
+    
+    // Add this - listen to education changes
+    const educationSubscription = supabase
+      .channel('education-changes')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'profile_educations',
+        filter: `profile_id=eq.${user.id}`
+      }, () => {
+        fetchProfileData();  // Refresh everything
+      })
+      .subscribe();
+    
+    // Add this - listen to skills changes
+    const skillsSubscription = supabase
+      .channel('skills-changes')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'user_skills',
+        filter: `user_id=eq.${user.id}`
+      }, () => {
+        fetchProfileData();  // Refresh everything
+      })
+      .subscribe();
+    
+    return () => {
+      profilesSubscription.unsubscribe();
+      educationSubscription.unsubscribe();
+      skillsSubscription.unsubscribe();
+    };
   }, [user.id]);
 
   useEffect(() => {
@@ -198,109 +242,50 @@ export default function ProfileClient({ user }: ProfileClientProps) {
     }
   }, [profile]);
 
-  // Set up Supabase Realtime subscriptions for automatic updates
-  useEffect(() => {
-    const supabase = getSupabaseBrowserClient();
-    
-    // Subscribe to changes on profiles table
-    const profilesSubscription = supabase
-      .channel('profile-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'profiles',
-          filter: `id=eq.${user.id}`
-        },
-        () => {
-          fetchProfile();
-        }
-      )
-      .subscribe();
-    
-    // Subscribe to changes on profile_educations table
-    const educationSubscription = supabase
-      .channel('education-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'profile_educations',
-          filter: `profile_id=eq.${user.id}`
-        },
-        () => {
-          fetchProfile();
-        }
-      )
-      .subscribe();
-    
-    // Subscribe to changes on user_skills table
-    const skillsSubscription = supabase
-      .channel('skills-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'user_skills',
-          filter: `user_id=eq.${user.id}`
-        },
-        () => {
-          fetchProfile();
-        }
-      )
-      .subscribe();
-    
-    return () => {
-      profilesSubscription.unsubscribe();
-      educationSubscription.unsubscribe();
-      skillsSubscription.unsubscribe();
-    };
-  }, [user.id]);
-
   const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
     
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please upload an image file');
+      return;
+    }
+    
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('File size must be less than 5MB');
+      return;
+    }
+    
+    const formData = new FormData();
+    formData.append('avatar', file);
+    
     try {
-      const supabase = getSupabaseBrowserClient();
-      
-      // ✅ Get fresh session
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
+      const token = await getAuthToken();
+      if (!token) {
         toast.error("You must be logged in to upload an avatar");
         return;
       }
       
-      const userId = session.user.id;
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${userId}-${Date.now()}.${fileExt}`;
-      const filePath = `avatars/${fileName}`;
+      const response = await fetch('/api/auth-service/upload-avatar', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+        body: formData
+      });
       
-      // Upload to storage
-      const { error: uploadError } = await supabase.storage
-        .from('avatars')
-        .upload(filePath, file);
-        
-      if (uploadError) throw uploadError;
+      if (!response.ok) {
+        throw new Error('Failed to upload avatar');
+      }
       
-      // Get public URL
-      const { data: { publicUrl } } = supabase.storage
-        .from('avatars')
-        .getPublicUrl(filePath);
-      
-      // ✅ Update profile with the correct user ID
-      const { error: updateError } = await supabase
-        .from('profiles')
-        .update({ avatar_url: publicUrl })
-        .eq('id', userId);  // Make sure this matches auth.uid()
-        
-      if (updateError) throw updateError;
-      
+      const data = await response.json();
       toast.success("Avatar updated successfully");
       refreshAvatar();
+      
+      // Refresh profile to get new avatar URL
+      await fetchProfileData();
       
     } catch (error) {
       console.error("Error uploading avatar:", error);
@@ -322,6 +307,17 @@ export default function ProfileClient({ user }: ProfileClientProps) {
     if (firstName && lastName) return `${firstName} ${lastName}`;
     if (firstName) return firstName;
     return user.email?.split('@')[0] || "User";
+  };
+
+  const hasNoSocialLinks = () => {
+    const socialLinks = profile?.social_links;
+    if (!socialLinks) return true;
+    if (typeof socialLinks !== 'object') return true;
+    
+    // Check if all values are empty strings
+    return Object.values(socialLinks).every(value => 
+      value === '' || value === null || value === undefined
+    );
   };
 
   if (loading) {
@@ -599,7 +595,7 @@ export default function ProfileClient({ user }: ProfileClientProps) {
                           Lv.{skill.level}
                         </span>
                       )}
-                      {skill.years !== undefined && skill.years !== null && (
+                      {skill.years !== undefined && skill.years !== null && skill.years > 0 && (
                         <span className="text-xs text-purple-300/70">
                           {skill.years} yr{skill.years !== 1 ? 's' : ''}
                         </span>
@@ -649,18 +645,19 @@ export default function ProfileClient({ user }: ProfileClientProps) {
                   <h3 className="font-semibold text-white">Social Links</h3>
                   <p className="text-xs text-gray-400 mt-0.5">Connect with me</p>
                 </div>
-                {(!profile?.social_links || 
-                  (typeof profile.social_links === 'object' && Object.keys(profile.social_links).length === 0)) && (
-                  <GlowButton
-                    variant="outline"
-                    size="sm"
-                    onClick={() => router.push('/settings')}
-                    className="text-xs"
+                {/* Only show button if NO social links exist */}
+
+                {hasNoSocialLinks() && (
+                  <button
+                    onClick={() => router.push('/settings?tab=social-links')}
+                    className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 rounded-lg text-white text-sm transition-colors"
                   >
-                    Add
-                  </GlowButton>
+                    Add Links
+                  </button>
                 )}
               </div>
+              
+              {/* Has social links - display them */}
               {profile?.social_links && 
               typeof profile.social_links === 'object' && 
               Object.keys(profile.social_links).length > 0 ? (
@@ -722,14 +719,13 @@ export default function ProfileClient({ user }: ProfileClientProps) {
                   )}
                 </div>
               ) : (
-                <div className="text-center py-6">
-                  <p className="text-gray-400 text-sm">No social links added yet</p>
-                  <button
-                    onClick={() => router.push('/settings')}
-                    className="mt-2 text-purple-400 text-sm hover:text-purple-300 transition-colors"
-                  >
-                    Add your social links →
-                  </button>
+                /* Empty State - No social links */
+                <div className="text-center py-8">
+                  <div className="w-16 h-16 rounded-full bg-purple-500/10 flex items-center justify-center mx-auto mb-3">
+                    <Link className="w-8 h-8 text-purple-400" />
+                  </div>
+                  <p className="text-gray-400 text-sm mb-2">No social links added yet</p>
+                  <p className="text-gray-500 text-xs">Click "Add Links" to share your social profiles</p>
                 </div>
               )}
             </div>

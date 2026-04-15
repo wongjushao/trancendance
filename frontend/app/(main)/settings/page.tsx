@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { 
   Camera, Mail, Briefcase, Calendar as CalendarIcon, Save, X, 
   Globe, User, Lock, Bell, Shield, CreditCard, Loader2,
@@ -36,8 +36,7 @@ import {
   validatePassword,
   validateConfirmPassword,
 } from "@/lib/validation";
-import { SkillsSelector } from "@/components/settings/SkillsSelector";
-//import Link from "next/link";
+import { SkillsSelector, UserSkill } from "@/components/settings/SkillsSelector";
 
 // Modal Component for confirmation dialogs
 const ConfirmModal = ({ isOpen, onClose, onConfirm, title, message, danger = false }: any) => {
@@ -138,6 +137,8 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [isGoogleUser, setIsGoogleUser] = useState(false);
   const [hasSetPassword, setHasSetPassword] = useState(false);
+  const [activeTab, setActiveTab] = useState("profile");
+  const [profileDataLoaded, setProfileDataLoaded] = useState(false);
   
   // Profile form state
   const [formData, setFormData] = useState({
@@ -147,10 +148,12 @@ export default function SettingsPage() {
     job_title: "",
     bio: "",
     language: "en",
-    timezone: "",
+    timezone: detectTimezone(),
     birthday: "",
   });
 
+  //Bio
+  const [bioCharCount, setBioCharCount] = useState(0);
 
   // Password form state
   const [currentPassword, setCurrentPassword] = useState("");
@@ -209,9 +212,7 @@ export default function SettingsPage() {
   });
 
   // Skills
-  const [skills, setSkills] = useState<string[]>([]);
-  const [isAddingSkill, setIsAddingSkill] = useState(false);
-  const [newSkill, setNewSkill] = useState("");
+  const [skills, setSkills] = useState<UserSkill[]>([]);
 
   // Social Links
   const [socialLinks, setSocialLinks] = useState({
@@ -221,6 +222,9 @@ export default function SettingsPage() {
     website: "",
   });
 
+  //Saving
+  const [isSaving, setIsSaving] = useState(false);
+
   // ========== END NEW STATE VARIABLES ==========
   useEffect(() => {
     fetchProfile();
@@ -228,41 +232,74 @@ export default function SettingsPage() {
     fetchNotificationPrefs();
   }, []);
 
-  const loadEducation = async () => {
-    const supabase = getSupabaseBrowserClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+  const searchParams = useSearchParams();
+  const [pendingScrollTarget, setPendingScrollTarget] = useState<string | null>(null);
 
-    const { data, error } = await supabase
-      .from("profile_educations")
-      .select("*")
-      .eq("profile_id", user.id)
-      .order("order_index", { ascending: true });
-
-    if (!error && data) {
-      setEducationList(data);
+  const performScroll = (targetId: string) => {
+    const element = document.getElementById(targetId);
+    if (element) {
+      requestAnimationFrame(() => {
+        const elementRect = element.getBoundingClientRect();
+        const absoluteElementTop = elementRect.top + window.pageYOffset;
+        const offset = 100; // Adjust based on your navbar height
+        
+        window.scrollTo({
+          top: absoluteElementTop - offset,
+          behavior: 'smooth'
+        });
+        
+        setPendingScrollTarget(null);
+      });
     }
   };
 
+  // First effect: Read URL parameter and set active tab and pending scroll target
   useEffect(() => {
-    loadEducation();
-  }, []);
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const tab = params.get('tab');
+    const tab = searchParams.get('tab');
+    
+    if (!tab) return;
+    
     if (tab === 'skills') {
-      // Set active tab to profile (where skills section is)
-      const tabsElement = document.querySelector('[value="profile"]');
-      if (tabsElement) {
-        // Trigger tab change
-      }
-      // Scroll to skills section
-      setTimeout(() => {
-        document.getElementById('skills-section')?.scrollIntoView({ behavior: 'smooth' });
-      }, 100);
+      setActiveTab('profile');
+      setPendingScrollTarget('skills-section');
+    } 
+    else if (tab === 'education') {
+      setActiveTab('profile');
+      setPendingScrollTarget('education-section');
     }
-  }, []);
+    else if (tab === 'professional') {
+      setActiveTab('profile');
+      setPendingScrollTarget('professional-section');
+    }
+    else if (tab === 'social-links') {
+      setActiveTab('profile');
+      setPendingScrollTarget('social-links-section');
+    }
+    else if (tab === 'notifications') {
+      setActiveTab('notifications');
+      setPendingScrollTarget(null);
+    }
+    else if (tab === 'security') {
+      setActiveTab('security');
+      setPendingScrollTarget(null);
+    }
+    else if (tab === 'danger') {
+      setActiveTab('danger');
+      setPendingScrollTarget(null);
+    }
+  }, [searchParams]);
+
+  // Second effect: Scroll when activeTab becomes 'profile' and we have a pending target
+  useEffect(() => {
+    if (activeTab === 'profile' && pendingScrollTarget && profileDataLoaded) {
+      // Small delay to ensure DOM is fully rendered after data loads
+      const timer = setTimeout(() => {
+        performScroll(pendingScrollTarget);
+      }, 200);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [activeTab, pendingScrollTarget, profileDataLoaded]);
 
   const [notificationPrefs, setNotificationPrefs] = useState<{
     email_enabled: boolean;
@@ -275,92 +312,33 @@ export default function SettingsPage() {
 
   const [loadingPrefs, setLoadingPrefs] = useState(true);
 
-  // Update fetchNotificationPrefs to handle null state
+  // ✅ CORRECTED: Fetch notification preferences (already correct, but ensure error handling)
   const fetchNotificationPrefs = async () => {
-    setLoadingPrefs(true);
     try {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      
-      if (sessionError || !session?.access_token) {
-        console.log('No session found');
-        setLoadingPrefs(false);
+      const token = await getAuthToken();
+      if (!token) {
+        router.push('/login');
         return;
       }
 
       const response = await fetch('/api/notification-service/notification', {
         headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-        },
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
       });
 
-      console.log('Response status:', response.status);
-      
-      if (response.ok) {
-        const data = await response.json();
-        console.log('Raw response from backend:', JSON.stringify(data, null, 2));
-        
-        // IMPORTANT: Your backend returns preferences inside a 'preferences' object
-        // The response structure is: { user_id: "...", preferences: { ... } }
-        const preferencesData = data.preferences;
-        
-        // FIX: Check if preferencesData exists and has the expected properties
-        if (preferencesData && typeof preferencesData === 'object') {
-          console.log('Setting notification prefs from database:', preferencesData);
-          setNotificationPrefs({
-            email_enabled: preferencesData.email_enabled ?? true,
-            push_enabled: preferencesData.push_enabled ?? true,
-            assignment_reminders: preferencesData.assignment_reminders ?? true,
-            course_updates: preferencesData.course_updates ?? true,
-            message_notifications: preferencesData.message_notifications ?? true,
-            marketing_emails: preferencesData.marketing_emails ?? false,
-          });
-        } else {
-          console.log('No preferences found in response, creating defaults');
-          // No preferences found, create default
-          await createDefaultNotificationPrefs({
-            email_enabled: true,
-            push_enabled: true,
-            assignment_reminders: true,
-            course_updates: true,
-            message_notifications: true,
-            marketing_emails: false,
-          });
-          // Fetch again after creation
-          await fetchNotificationPrefs();
-          return;
-        }
-      } else if (response.status === 404) {
-        console.log('404 - No preferences exist, creating defaults');
-        // No preferences exist, create defaults
-        await createDefaultNotificationPrefs({
-          email_enabled: true,
-          push_enabled: true,
-          assignment_reminders: true,
-          course_updates: true,
-          message_notifications: true,
-          marketing_emails: false,
-        });
-        // Fetch again after creation
-        await fetchNotificationPrefs();
-        return;
-      } else {
-        const errorText = await response.text();
-        console.error('Failed to fetch notification prefs:', response.status, errorText);
-        // Even on error, set default values so UI doesn't break
-        setNotificationPrefs({
-          email_enabled: true,
-          push_enabled: true,
-          assignment_reminders: true,
-          course_updates: true,
-          message_notifications: true,
-          marketing_emails: false,
-        });
+      if (!response.ok) {
+        throw new Error('Failed to fetch notification preferences');
       }
+
+      const data = await response.json();
+      // Your backend returns preferences inside a 'preferences' object
+      setNotificationPrefs(data.preferences || data);
+      
     } catch (error) {
-      console.error('Error fetching notification prefs:', error);
-      // Set default values on error
+      console.error('Error fetching notification preferences:', error);
+      // Set default values
       setNotificationPrefs({
         email_enabled: true,
         push_enabled: true,
@@ -369,8 +347,6 @@ export default function SettingsPage() {
         message_notifications: true,
         marketing_emails: false,
       });
-    } finally {
-      setLoadingPrefs(false);
     }
   };
 
@@ -417,67 +393,42 @@ export default function SettingsPage() {
     }
   };
 
-  const saveNotificationPrefs = async (key: keyof Exclude<typeof notificationPrefs, null>, value: boolean) => {
-    try {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      
-      if (sessionError || !session?.access_token) {
-        toast.error('Please sign in to update preferences');
-        return false;
-      }
+  // ✅ CORRECTED: Update notification preferences
+  const saveNotificationPrefs = async (key: keyof typeof notificationPrefs, value: boolean) => {
+    if (!notificationPrefs) return;
 
-      // Update optimistic UI first
-      setNotificationPrefs(prev => {
-        if (!prev) return prev;
-        return { ...prev, [key]: value };
-      });
+    // Optimistic update
+    const previousValue = notificationPrefs[key];
+    setNotificationPrefs(prev => ({ ...prev!, [key]: value }));
+
+    try {
+      const token = await getAuthToken();
+      if (!token) {
+        router.push('/login');
+        return;
+      }
 
       const response = await fetch(`/api/notification-service/notification?${key}=${value}`, {
         method: 'PATCH',
         headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-        },
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
       });
 
       if (!response.ok) {
-        // Revert on error
-        setNotificationPrefs(prev => {
-          if (!prev) return prev;
-          return { ...prev, [key]: !value };
-        });
-        const errorData = await response.json();
-        toast.error(errorData.error || 'Failed to update notification preferences');
-        return false;
+        throw new Error('Failed to update notification preferences');
       }
 
       const data = await response.json();
-      console.log('Update response:', data);
-      
-      // Update with the actual values from the server response
-      if (data.preferences) {
-        setNotificationPrefs({
-          email_enabled: data.preferences.email_enabled ?? true,
-          push_enabled: data.preferences.push_enabled ?? true,
-          assignment_reminders: data.preferences.assignment_reminders ?? true,
-          course_updates: data.preferences.course_updates ?? true,
-          message_notifications: data.preferences.message_notifications ?? true,
-          marketing_emails: data.preferences.marketing_emails ?? false,
-        });
-      }
-      
+      setNotificationPrefs(data.preferences || data);
       toast.success('Notification preferences updated');
-      return true;
+      
     } catch (error) {
-      console.error('Error saving notification prefs:', error);
+      console.error('Error updating notification preferences:', error);
       // Revert on error
-      setNotificationPrefs(prev => {
-        if (!prev) return prev;
-        return { ...prev, [key]: !value };
-      });
+      setNotificationPrefs(prev => ({ ...prev!, [key]: previousValue }));
       toast.error('Failed to update notification preferences');
-      return false;
     }
   };
 
@@ -527,64 +478,74 @@ export default function SettingsPage() {
   };
 
 
-  const fetchProfile = async () => {
-  try {
+  // Helper to get auth token
+  const getAuthToken = async () => {
     const supabase = getSupabaseBrowserClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error("No user");
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token;
+  };
 
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", user.id)
-      .single();
 
-    if (error) throw error;
+  // ✅ CORRECTED: Fetch profile from backend API
+  const fetchProfile = async () => {
+    try {
+      const token = await getAuthToken();
+      if (!token) {
+        router.push('/login');
+        return;
+      }
 
-    setFormData({
-      username: data.username || "",
-      first_name: data.first_name || "",
-      last_name: data.last_name || "",
-      job_title: data.job_title || "",
-      bio: data.bio || "",
-      language: data.language || "en",
-      timezone: data.timezone || detectTimezone(),
-      birthday: data.birthday || "",
-    });
-
-    // ADD THIS: Also populate professionalInfo
-    setProfessionalInfo({
-      jobTitle: data.job_title || "",
-      professionalSummary: data.professional_summary || "",
-      department: data.department || "",
-      yearsOfExperience: data.years_of_experience?.toString() || "",
-    });
-
-    // ADD THIS: Load social links from database
-    if (data.social_links) {
-      setSocialLinks({
-        linkedin: data.social_links.linkedin || "",
-        github: data.social_links.github || "",
-        twitter: data.social_links.twitter || "",
-        website: data.social_links.website || "",
+      const response = await fetch('/api/auth-service/profile', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
       });
-    } else {
-      // Reset to empty if no social links exist
-      setSocialLinks({
-        linkedin: "",
-        github: "",
-        twitter: "",
-        website: "",
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch profile');
+      }
+
+      const data = await response.json();
+      
+      setFormData({
+        username: data.username || '',
+        first_name: data.first_name || '',
+        last_name: data.last_name || '',
+        bio: data.bio || '',
+        language: data.language || 'EN',
+        timezone: data.timezone || detectTimezone(),
+        birthday: data.birthday || '',
+        job_title: data.job_title || '',
       });
+
+      setBioCharCount(data.bio?.length || 0);
+      
+      setProfessionalInfo({
+        jobTitle: data.job_title || '', 
+        department: data.department || '',
+        yearsOfExperience: data.years_of_experience || 0,
+        professionalSummary: data.professional_summary || '',
+      });
+      
+      setSocialLinks(data.social_links || {});
+      
+      // Load education and skills from the same response
+      setEducationList(data.educations || []);
+      setSkills((data.skills || []).map((s: any) => ({ 
+        name: s.name, 
+        level: s.level || 1, 
+        years: s.years || 0 
+      })));
+      setProfileDataLoaded(true);
+    } catch (error) {
+      console.error('Error fetching profile:', error);
+      toast.error('Failed to load profile data');
+      setProfileDataLoaded(true);
+    } finally {
+      setLoading(false);
     }
-
-  } catch (error) {
-    console.error("Error fetching profile:", error);
-    toast.error("Failed to load profile");
-  } finally {
-    setLoading(false);
-  }
-};
+  };
 
   const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -660,57 +621,91 @@ export default function SettingsPage() {
 
   // Social Links handlers
   const saveSocialLinks = async () => {
-    try {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("No user");
-
-      const { error } = await supabase
-        .from("profiles")
-        .update({ social_links: socialLinks })
-        .eq("id", user.id);
-
-      if (error) throw error;
-      
-      toast.success("Social links updated");
-      
-      // Optional: Refresh the profile to ensure data is synced
-      await fetchProfile();
-    } catch (error) {
-      console.error("Error saving social links:", error);
-      toast.error("Failed to save social links");
-    }
+    toast.success('Social links updated locally');
+    toast.info('Click "Save All Changes" to persist your changes');
   };
 
+  const validateForm = (): boolean => {
+    const newErrors: Record<string, string> = {};
+    
+    if (formData.username && !validateUsername(formData.username).isValid) {
+      newErrors.username = validateUsername(formData.username).error;
+    }
+    if (formData.first_name && !validateName(formData.first_name, "First name").isValid) {
+      newErrors.first_name = validateName(formData.first_name, "First name").error;
+    }
+    if (formData.last_name && !validateName(formData.last_name, "Last name").isValid) {
+      newErrors.last_name = validateName(formData.last_name, "Last name").error;
+    }
+    if (formData.bio && !validateBio(formData.bio).isValid) {
+      newErrors.bio = validateBio(formData.bio).error;
+    }
+    if (formData.birthday && !validateBirthday(formData.birthday).isValid) {
+      newErrors.birthday = validateBirthday(formData.birthday).error;
+    }
+    if (formData.language && !validateLanguage(formData.language).isValid) {
+      newErrors.language = validateLanguage(formData.language).error;
+    }
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  // ✅ CORRECTED: Update profile via backend API
   const handleSaveProfile = async () => {
-    setSaving(true);
+    // Validate form
+    if (!validateForm()) return;
+
+    setIsSaving(true);
+    
     try {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("No user");
+      const token = await getAuthToken();
+      if (!token) {
+        router.push('/login');
+        return;
+      }
 
-      const { error } = await supabase
-        .from("profiles")
-        .update({
-          username: formData.username,
-          first_name: formData.first_name,
-          last_name: formData.last_name,
-          job_title: formData.job_title,
-          bio: formData.bio,
-          language: formData.language,
-          timezone: formData.timezone,
-          birthday: formData.birthday || null,
-        })
-        .eq("id", user.id);
+      const profileData = {
+        username: formData.username,
+        first_name: formData.first_name,
+        last_name: formData.last_name,
+        bio: formData.bio,
+        language: formData.language,
+        timezone: formData.timezone,
+        birthday: formData.birthday,
+        job_title: formData.job_title,
+        department: professionalInfo.department,
+        years_of_experience: professionalInfo.yearsOfExperience,
+        professional_summary: professionalInfo.professionalSummary,
+        social_links: socialLinks,
+        skills: skills,
+        educations: educationList,
+      };
 
-      if (error) throw error;
+      const response = await fetch('/api/auth-service/profile', {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(profileData)
+      });
 
-      toast.success("Profile updated successfully");
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Failed to update profile');
+      }
+
+      toast.success('Profile updated successfully');
+      
+      // Dispatch event for other components
+      window.dispatchEvent(new CustomEvent('profileUpdated'));
+      
     } catch (error) {
-      console.error("Error saving profile:", error);
-      toast.error("Failed to save profile");
+      console.error('Error updating profile:', error);
+      toast.error('Failed to update profile');
     } finally {
-      setSaving(false);
+      setIsSaving(false);
     }
   };
 
@@ -876,116 +871,52 @@ export default function SettingsPage() {
 
   // ========== NEW HANDLER FUNCTIONS FOR ADDED SECTIONS ==========
   const saveProfessionalInfo = async () => {
-    try {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("No user");
-
-      const { error } = await supabase
-        .from("profiles")
-        .update({
-          job_title: professionalInfo.jobTitle,
-          professional_summary: professionalInfo.professionalSummary,
-          department: professionalInfo.department,
-          years_of_experience: professionalInfo.yearsOfExperience,
-        })
-        .eq("id", user.id);
-
-      if (error) throw error;
-      
-      // ADD THIS: Update formData.job_title to keep them in sync
-      setFormData(prev => ({
-        ...prev,
-        job_title: professionalInfo.jobTitle
-      }));
-      
-      toast.success("Professional info updated");
-      
-    } catch (error) {
-      console.error("Error saving professional info:", error);
-      toast.error("Failed to save professional info");
-    }
+    setIsEditingProfessional(false);
+    toast.success('Professional info updated locally');
+    toast.info('Click "Save All Changes" to persist your changes');
   };
 
-  // Save new education
   const saveEducation = async () => {
-    if (!educationForm.institution_name || !educationForm.degree) {
-      toast.error("Please fill in institution name and degree");
+    if (!educationForm.institution_name) {
+      toast.error('Please enter institution name');
       return;
     }
 
-    try {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("No user");
-
-      if (editingEducation !== null && editingEducation.id) {
-        // UPDATE existing education
-        const { error } = await supabase
-          .from("profile_educations")
-          .update({
-            institution_name: educationForm.institution_name,
-            degree: educationForm.degree,
-            field_of_study: educationForm.field_of_study,
-            start_year: educationForm.start_year,
-            end_year: educationForm.is_current ? null : educationForm.end_year,
-            is_current: educationForm.is_current,
-            description: educationForm.description,
-
-          })
-          .eq("id", editingEducation.id);
-
-        if (error) throw error;
-        toast.success("Education updated");
-      } else {
-        // INSERT new education
-        const { error } = await supabase
-          .from("profile_educations")
-          .insert({
-            profile_id: user.id,
-            institution_name: educationForm.institution_name,
-            degree: educationForm.degree,
-            field_of_study: educationForm.field_of_study,
-            start_year: educationForm.start_year,
-            end_year: educationForm.is_current ? null : educationForm.end_year,
-            is_current: educationForm.is_current,
-            description: educationForm.description,
-            order_index: educationList.length, // Append to end
-          });
-
-        if (error) throw error;
-        toast.success("Education added");
-      }
-
-      // Refresh the list
-      await loadEducation();
-      setIsAddingEducation(false);
-      setEditingEducation(null);
-      resetEducationForm();
-    } catch (error) {
-      console.error("Error saving education:", error);
-      toast.error("Failed to save education");
+    let updatedList = [...educationList];
+    
+    if (editingEducation) {
+      // Update existing
+      const index = editingEducation.index;
+      updatedList[index] = {
+        ...editingEducation,
+        ...educationForm,
+        id: editingEducation.id,
+      };
+    } else {
+      // Add new
+      const newEducation: Education = {
+        ...educationForm,
+        order_index: educationList.length,
+      };
+      updatedList.push(newEducation);
     }
+    
+    setEducationList(updatedList);
+    setIsAddingEducation(false);
+    setEditingEducation(null);
+    resetEducationForm();
+    
+    // Note: Education is saved when user clicks "Save All Changes"
+    toast.success(editingEducation ? 'Education updated locally' : 'Education added locally');
+    toast.info('Click "Save All Changes" to persist your changes');
   };
 
   // Remove education
   const removeEducation = async (id: string) => {
-    try {
-      const supabase = getSupabaseBrowserClient();
-      const { error } = await supabase
-        .from("profile_educations")
-        .delete()
-        .eq("id", id);
-
-      if (error) throw error;
-      
-      // Refresh list
-      await loadEducation();
-      toast.success("Education removed");
-    } catch (error) {
-      console.error("Error removing education:", error);
-      toast.error("Failed to remove education");
-    }
+    const updatedList = educationList.filter(edu => edu.id !== id);
+    setEducationList(updatedList);
+    toast.success('Education removed locally');
+    toast.info('Click "Save All Changes" to persist your changes');
   };
 
   // Reorder education (drag and drop or up/down buttons)
@@ -995,28 +926,16 @@ export default function SettingsPage() {
       (direction === 'down' && index === educationList.length - 1)
     ) return;
 
-    setIsReordering(true);
     const newList = [...educationList];
     const swapIndex = direction === 'up' ? index - 1 : index + 1;
     [newList[index], newList[swapIndex]] = [newList[swapIndex], newList[index]];
     
-    try {
-      const supabase = getSupabaseBrowserClient();
-      // Update order_index for all items (or just the two swapped)
-      for (let i = 0; i < newList.length; i++) {
-        await supabase
-          .from("profile_educations")
-          .update({ order_index: i })
-          .eq("id", newList[i].id);
-      }
-      setEducationList(newList);
-      toast.success("Order updated");
-    } catch (error) {
-      console.error("Error reordering:", error);
-      toast.error("Failed to update order");
-    } finally {
-      setIsReordering(false);
-    }
+    // Update order_index for all items
+    const reorderedList = newList.map((item, idx) => ({ ...item, order_index: idx }));
+    setEducationList(reorderedList);
+    
+    toast.success("Order updated locally");
+    toast.info('Click "Save All Changes" to persist your changes');
   };
 
   // Reset form
@@ -1045,41 +964,6 @@ export default function SettingsPage() {
     });
     setEditingEducation({ ...edu, index });
     setIsAddingEducation(true);
-  };
-
-
-  const addSkill = async () => {
-    if (!newSkill.trim()) return;
-    const updatedSkills = [...skills, newSkill.trim()];
-    setSkills(updatedSkills);
-    setNewSkill("");
-    setIsAddingSkill(false);
-    await saveSkillsToDB(updatedSkills);
-    toast.success("Skill added");
-  };
-
-  const removeSkill = async (index: number) => {
-    const updatedSkills = skills.filter((_, i) => i !== index);
-    setSkills(updatedSkills);
-    await saveSkillsToDB(updatedSkills);
-    toast.success("Skill removed");
-  };
-
-  const saveSkillsToDB = async (skillsList: string[]) => {
-    try {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("No user");
-
-      const { error } = await supabase
-        .from("profiles")
-        .update({ skills: skillsList })
-        .eq("id", user.id);
-
-      if (error) throw error;
-    } catch (error) {
-      console.error("Error saving skills:", error);
-    }
   };
 
   // ========== END NEW HANDLER FUNCTIONS ==========
@@ -1122,7 +1006,7 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      <Tabs defaultValue="profile" className="space-y-6">
+      <Tabs value={activeTab} onValueChange={setActiveTab} defaultValue="profile" className="space-y-6">
         <TabsList className="bg-gray-800/50 border border-gray-700 w-full justify-start overflow-x-auto">
           <TabsTrigger value="profile" className="gap-2">
             <User className="w-4 h-4" /> Profile
@@ -1207,9 +1091,22 @@ export default function SettingsPage() {
                     className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500 mt-1"
                     rows={4}
                     value={formData.bio}
-                    onChange={(e) => setFormData({ ...formData, bio: e.target.value })}
+                    onChange={(e) => {
+                      const newBio = e.target.value;
+                      if (newBio.length <= 500) {
+                        setFormData({ ...formData, bio: newBio });
+                        setBioCharCount(newBio.length);
+                      } else {
+                        toast.error("Bio cannot exceed 500 characters");
+                      }
+                    }}
                     placeholder="Tell us about yourself..."
                   />
+                  <div className="flex justify-end mt-1">
+                    <span className={`text-xs ${bioCharCount > 450 ? 'text-yellow-400' : 'text-gray-500'}`}>
+                      {bioCharCount}/500 characters
+                    </span>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1243,370 +1140,373 @@ export default function SettingsPage() {
           </GlowCard>
 
           {/* ========== NEW: Social Links Section ========== */}
-          <GlowCard>
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <Link className="w-5 h-5 text-purple-400" />
-                  <h3 className="text-lg font-semibold text-white">Social Links</h3>
+          <div id="social-links-section">
+            <GlowCard>
+              <div className="p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <Link className="w-5 h-5 text-purple-400" />
+                    <h3 className="text-lg font-semibold text-white">Social Links</h3>
+                  </div>
                 </div>
-                <GlowButton 
-                  variant="outline" 
-                  size="sm"
-                  onClick={saveSocialLinks}
-                >
-                  <Save className="w-4 h-4 mr-1" />
-                  Save Links
-                </GlowButton>
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <Linkedin className="w-5 h-5 text-blue-400" />
+                    <Input
+                      value={socialLinks.linkedin}
+                      onChange={(e) => setSocialLinks({ ...socialLinks, linkedin: e.target.value })}
+                      placeholder="LinkedIn URL (e.g., https://linkedin.com/in/username)"
+                      className="flex-1 bg-gray-800 border-gray-700"
+                    />
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Github className="w-5 h-5 text-gray-400" />
+                    <Input
+                      value={socialLinks.github}
+                      onChange={(e) => setSocialLinks({ ...socialLinks, github: e.target.value })}
+                      placeholder="GitHub URL (e.g., https://github.com/username)"
+                      className="flex-1 bg-gray-800 border-gray-700"
+                    />
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Twitter className="w-5 h-5 text-blue-400" />
+                    <Input
+                      value={socialLinks.twitter}
+                      onChange={(e) => setSocialLinks({ ...socialLinks, twitter: e.target.value })}
+                      placeholder="Twitter/X URL"
+                      className="flex-1 bg-gray-800 border-gray-700"
+                    />
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Globe className="w-5 h-5 text-green-400" />
+                    <Input
+                      value={socialLinks.website}
+                      onChange={(e) => setSocialLinks({ ...socialLinks, website: e.target.value })}
+                      placeholder="Personal Website or Portfolio"
+                      className="flex-1 bg-gray-800 border-gray-700"
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-gray-500 mt-3">Your social links will be displayed on your public profile</p>
               </div>
-              <div className="space-y-3">
-                <div className="flex items-center gap-3">
-                  <Linkedin className="w-5 h-5 text-blue-400" />
-                  <Input
-                    value={socialLinks.linkedin}
-                    onChange={(e) => setSocialLinks({ ...socialLinks, linkedin: e.target.value })}
-                    placeholder="LinkedIn URL (e.g., https://linkedin.com/in/username)"
-                    className="flex-1 bg-gray-800 border-gray-700"
-                  />
-                </div>
-                <div className="flex items-center gap-3">
-                  <Github className="w-5 h-5 text-gray-400" />
-                  <Input
-                    value={socialLinks.github}
-                    onChange={(e) => setSocialLinks({ ...socialLinks, github: e.target.value })}
-                    placeholder="GitHub URL (e.g., https://github.com/username)"
-                    className="flex-1 bg-gray-800 border-gray-700"
-                  />
-                </div>
-                <div className="flex items-center gap-3">
-                  <Twitter className="w-5 h-5 text-blue-400" />
-                  <Input
-                    value={socialLinks.twitter}
-                    onChange={(e) => setSocialLinks({ ...socialLinks, twitter: e.target.value })}
-                    placeholder="Twitter/X URL"
-                    className="flex-1 bg-gray-800 border-gray-700"
-                  />
-                </div>
-                <div className="flex items-center gap-3">
-                  <Globe className="w-5 h-5 text-green-400" />
-                  <Input
-                    value={socialLinks.website}
-                    onChange={(e) => setSocialLinks({ ...socialLinks, website: e.target.value })}
-                    placeholder="Personal Website or Portfolio"
-                    className="flex-1 bg-gray-800 border-gray-700"
-                  />
-                </div>
-              </div>
-              <p className="text-xs text-gray-500 mt-3">Your social links will be displayed on your public profile</p>
-            </div>
-          </GlowCard>
+            </GlowCard>
+          </div>
 
           {/* Professional Info Section - ORIGINAL, UNCHANGED */}
-          <GlowCard>
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <Briefcase className="w-5 h-5 text-purple-400" />
-                  <h3 className="text-lg font-semibold text-white">Professional Info</h3>
+          <div id="professional-section">
+            <GlowCard>
+              <div className="p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <Briefcase className="w-5 h-5 text-purple-400" />
+                    <h3 className="text-lg font-semibold text-white">Professional Info</h3>
+                  </div>
+                  <GlowButton 
+                    variant="outline" 
+                    size="sm"
+                    onClick={() => setIsEditingProfessional(!isEditingProfessional)}
+                  >
+                    {isEditingProfessional ? <X className="w-4 h-4 mr-1" /> : <Edit2 className="w-4 h-4 mr-1" />}
+                    {isEditingProfessional ? "Cancel" : "Edit"}
+                  </GlowButton>
                 </div>
-                <GlowButton 
-                  variant="outline" 
-                  size="sm"
-                  onClick={() => setIsEditingProfessional(!isEditingProfessional)}
-                >
-                  {isEditingProfessional ? <X className="w-4 h-4 mr-1" /> : <Edit2 className="w-4 h-4 mr-1" />}
-                  {isEditingProfessional ? "Cancel" : "Edit"}
-                </GlowButton>
-              </div>
-              
-              {isEditingProfessional ? (
-                <div className="space-y-4">
-                  <div>
-                    <Label className="text-sm text-gray-300 mb-1 block">Job Title</Label>
-                    <Input
-                      value={professionalInfo.jobTitle}
-                      onChange={(e) => setProfessionalInfo({ ...professionalInfo, jobTitle: e.target.value })}
-                      placeholder="e.g., Senior Software Engineer"
-                      className="bg-gray-800 border-gray-700"
-                    />
-                  </div>
-
-                  <div>
-                    <Label className="text-sm text-gray-300 mb-1 block">Professional Summary</Label>
-                    <textarea
-                      value={professionalInfo.professionalSummary}
-                      onChange={(e) => setProfessionalInfo({ ...professionalInfo, professionalSummary: e.target.value })}
-                      placeholder="e.g., Experienced software engineer with 8+ years of expertise in full-stack development, leading cross-functional teams, and delivering scalable solutions..."
-                      className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                      rows={4}
-                    />
-                  </div>
-
-                  <div>
-                    <Label className="text-sm text-gray-300 mb-1 block">Department</Label>
-                    <Input
-                      value={professionalInfo.department}
-                      onChange={(e) => setProfessionalInfo({ ...professionalInfo, department: e.target.value })}
-                      placeholder="e.g., Engineering, Product, Design"
-                      className="bg-gray-800 border-gray-700"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-sm text-gray-300 mb-1 block">Years of Experience</Label>
-                    <Input
-                      type="number"
-                      value={professionalInfo.yearsOfExperience}
-                      onChange={(e) => setProfessionalInfo({ ...professionalInfo, yearsOfExperience: e.target.value })}
-                      placeholder="e.g., 5"
-                      className="bg-gray-800 border-gray-700"
-                    />
-                  </div>
-                  <div className="flex justify-end gap-2">
-                    <GlowButton 
-                      variant="outline" 
-                      size="sm"
-                      onClick={() => setIsEditingProfessional(false)}
-                    >
-                      Cancel
-                    </GlowButton>
-                    <GlowButton 
-                      size="sm"
-                      onClick={() => {
-                        saveProfessionalInfo();
-                        setIsEditingProfessional(false);
-                      }}
-                    >
-                      Save
-                    </GlowButton>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between py-2 border-b border-gray-800">
-                    <span className="text-gray-400">Job Title</span>
-                    <span className="text-white">{professionalInfo.jobTitle || "Not specified"}</span>
-                  </div>
-                  <div className="flex justify-between py-2 border-b border-gray-800">
-                    <span className="text-gray-400">Professional Summary</span>
-                    <span className="text-white whitespace-pre-wrap">{professionalInfo.professionalSummary || "Not specified"}</span>
-                  </div>
-                  <div className="flex justify-between py-2 border-b border-gray-800">
-                    <span className="text-gray-400">Department</span>
-                    <span className="text-white">{professionalInfo.department || "Not specified"}</span>
-                  </div>
-                  <div className="flex justify-between py-2">
-                    <span className="text-gray-400">Experience</span>
-                    <span className="text-white">{professionalInfo.yearsOfExperience ? `${professionalInfo.yearsOfExperience} years` : "Not specified"}</span>
-                  </div>
-                </div>
-              )}
-            </div>
-          </GlowCard>
-
-          {/* Education Section - ORIGINAL, UNCHANGED */}
-          <GlowCard>
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <GraduationCap className="w-5 h-5 text-purple-400" />
-                  <h3 className="text-lg font-semibold text-white">Education</h3>
-                </div>
-                <GlowButton 
-                  variant="outline" 
-                  size="sm"
-                  onClick={() => setIsAddingEducation(true)}
-                >
-                  <Plus className="w-4 h-4 mr-1" />
-                  Add
-                </GlowButton>
-              </div>
-              
-              <div className="space-y-3">
-                {educationList.length === 0 ? (
-                  <p className="text-gray-400 text-sm text-center py-4">No education added yet</p>
-                ) : (
-                  educationList.map((edu, index) => (
-                    <div key={edu.id || index} className="p-3 bg-gray-800/30 rounded-lg">
-                      <div className="flex justify-between items-start">
-                        <div className="flex-1">
-                          <p className="text-white font-medium">{edu.degree}{edu.field_of_study && ` in ${edu.field_of_study}`}</p>
-                          <p className="text-sm text-gray-400">{edu.institution_name}</p>
-                          <p className="text-xs text-gray-500">
-                            {edu.start_year && edu.start_year}
-                            {edu.end_year && !edu.is_current && ` - ${edu.end_year}`}
-                            {edu.is_current && " - Present"}
-                          </p>
-                          {edu.description && (
-                            <p className="text-xs text-gray-400 mt-1 line-clamp-2">{edu.description}</p>
-                          )}
-                        </div>
-                        <div className="flex gap-2">
-                          {/* Add Reorder Buttons */}
-                          <div className="flex flex-col gap-1 mr-2">
-                            {index > 0 && (
-                              <button
-                                onClick={() => reorderEducation(index, 'up')}
-                                disabled={isReordering}
-                                className="p-1 hover:bg-gray-700 rounded transition-colors"
-                                title="Move up"
-                              >
-                                ↑
-                              </button>
-                            )}
-                            {index < educationList.length - 1 && (
-                              <button
-                                onClick={() => reorderEducation(index, 'down')}
-                                className="p-1 hover:bg-gray-700 rounded transition-colors"
-                                title="Move down"
-                              >
-                                ↓
-                              </button>
-                            )}
-                          </div>
-                          {/* Edit and Delete buttons */}
-                          <button
-                            onClick={() => startEditingEducation(edu, index)}
-                            className="p-1 hover:bg-gray-700 rounded transition-colors"
-                          >
-                            <Edit2 className="w-4 h-4 text-gray-400" />
-                          </button>
-                          <button
-                            onClick={() => removeEducation(edu.id!)}
-                            className="p-1 hover:bg-gray-700 rounded transition-colors"
-                          >
-                            <Trash2 className="w-4 h-4 text-red-400" />
-                          </button>
-                        </div>
-                      </div>
+                
+                {isEditingProfessional ? (
+                  <div className="space-y-4">
+                    <div>
+                      <Label className="text-sm text-gray-300 mb-1 block">Job Title</Label>
+                      <Input
+                        value={professionalInfo.jobTitle}
+                        onChange={(e) => setProfessionalInfo({ ...professionalInfo, jobTitle: e.target.value })}
+                        placeholder="e.g., Senior Software Engineer"
+                        className="bg-gray-800 border-gray-700"
+                      />
                     </div>
-                  ))
-                )}
-              </div>
 
-              {/* Add/Edit Education Modal - ORIGINAL, UNCHANGED */}
-              {(isAddingEducation || editingEducation !== null) && (
-                <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 overflow-y-auto">
-                  <div className="bg-gray-900 rounded-lg max-w-2xl w-full mx-4 border border-gray-700 p-6 max-h-[90vh] overflow-y-auto">
-                    <h3 className="text-xl font-semibold text-white mb-4">
-                      {editingEducation ? "Edit Education" : "Add Education"}
-                    </h3>
-                    <div className="space-y-4">
-                      <div>
-                        <Label className="text-gray-300 mb-1 block">Institution Name *</Label>
-                        <Input
-                          value={educationForm.institution_name}
-                          onChange={(e) => setEducationForm({ ...educationForm, institution_name: e.target.value })}
-                          placeholder="e.g., Stanford University"
-                          className="bg-gray-800 border-gray-700"
-                        />
-                      </div>
-                      
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <Label className="text-gray-300 mb-1 block">Degree *</Label>
-                          <Input
-                            value={educationForm.degree}
-                            onChange={(e) => setEducationForm({ ...educationForm, degree: e.target.value })}
-                            placeholder="e.g., Bachelor of Science"
-                            className="bg-gray-800 border-gray-700"
-                          />
-                        </div>
-                        <div>
-                          <Label className="text-gray-300 mb-1 block">Field of Study</Label>
-                          <Input
-                            value={educationForm.field_of_study}
-                            onChange={(e) => setEducationForm({ ...educationForm, field_of_study: e.target.value })}
-                            placeholder="e.g., Computer Science"
-                            className="bg-gray-800 border-gray-700"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <Label className="text-gray-300 mb-1 block">Start Year</Label>
-                          <Input
-                            type="number"
-                            value={educationForm.start_year || ""}
-                            onChange={(e) => setEducationForm({ ...educationForm, start_year: e.target.value ? parseInt(e.target.value) : null })}
-                            placeholder="e.g., 2020"
-                            className="bg-gray-800 border-gray-700"
-                          />
-                        </div>
-                        <div>
-                          <Label className="text-gray-300 mb-1 block">End Year</Label>
-                          <Input
-                            type="number"
-                            value={educationForm.end_year || ""}
-                            onChange={(e) => setEducationForm({ ...educationForm, end_year: e.target.value ? parseInt(e.target.value) : null })}
-                            placeholder="e.g., 2024"
-                            disabled={educationForm.is_current}
-                            className="bg-gray-800 border-gray-700"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <Switch
-                          checked={educationForm.is_current}
-                          onCheckedChange={(checked) => {
-                            setEducationForm({ 
-                              ...educationForm, 
-                              is_current: checked,
-                              end_year: checked ? null : educationForm.end_year
-                            });
-                          }}
-                        />
-                        <Label className="text-gray-300">I currently study here</Label>
-                      </div>
-
-                      <div>
-                        <Label className="text-gray-300 mb-1 block">Description</Label>
-                        <textarea
-                          value={educationForm.description}
-                          onChange={(e) => setEducationForm({ ...educationForm, description: e.target.value })}
-                          placeholder="Describe your studies, achievements, relevant coursework..."
-                          rows={3}
-                          className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                        />
-                      </div>
+                    <div>
+                      <Label className="text-sm text-gray-300 mb-1 block">Professional Summary</Label>
+                      <textarea
+                        value={professionalInfo.professionalSummary}
+                        onChange={(e) => setProfessionalInfo({ ...professionalInfo, professionalSummary: e.target.value })}
+                        placeholder="e.g., Experienced software engineer with 8+ years of expertise in full-stack development, leading cross-functional teams, and delivering scalable solutions..."
+                        className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                        rows={4}
+                      />
                     </div>
-                    <div className="flex gap-3 mt-6">
+
+                    <div>
+                      <Label className="text-sm text-gray-300 mb-1 block">Department</Label>
+                      <Input
+                        value={professionalInfo.department}
+                        onChange={(e) => setProfessionalInfo({ ...professionalInfo, department: e.target.value })}
+                        placeholder="e.g., Engineering, Product, Design"
+                        className="bg-gray-800 border-gray-700"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-sm text-gray-300 mb-1 block">Years of Experience</Label>
+                      <Input
+                        type="number"
+                        value={professionalInfo.yearsOfExperience}
+                        onChange={(e) => setProfessionalInfo({ ...professionalInfo, yearsOfExperience: e.target.value })}
+                        placeholder="e.g., 5"
+                        className="bg-gray-800 border-gray-700"
+                      />
+                    </div>
+                    <div className="flex justify-end gap-2">
                       <GlowButton 
                         variant="outline" 
-                        onClick={() => {
-                          setIsAddingEducation(false);
-                          setEditingEducation(null);
-                          resetEducationForm();
-                        }}
-                        fullWidth
+                        size="sm"
+                        onClick={() => setIsEditingProfessional(false)}
                       >
                         Cancel
                       </GlowButton>
                       <GlowButton 
-                        onClick={saveEducation}
-                        fullWidth
+                        size="sm"
+                        onClick={() => {
+                          saveProfessionalInfo();
+                          setIsEditingProfessional(false);
+                        }}
                       >
-                        {editingEducation ? "Update" : "Add"}
+                        Save
                       </GlowButton>
                     </div>
                   </div>
-                </div>
-              )}
+                ) : (
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between py-2 border-b border-gray-800">
+                      <span className="text-gray-400">Job Title</span>
+                      <span className="text-white">{professionalInfo.jobTitle || "Not specified"}</span>
+                    </div>
+                    <div className="flex justify-between py-2 border-b border-gray-800">
+                      <span className="text-gray-400">Professional Summary</span>
+                      <span className="text-white whitespace-pre-wrap">{professionalInfo.professionalSummary || "Not specified"}</span>
+                    </div>
+                    <div className="flex justify-between py-2 border-b border-gray-800">
+                      <span className="text-gray-400">Department</span>
+                      <span className="text-white">{professionalInfo.department || "Not specified"}</span>
+                    </div>
+                    <div className="flex justify-between py-2">
+                      <span className="text-gray-400">Experience</span>
+                      <span className="text-white">{professionalInfo.yearsOfExperience ? `${professionalInfo.yearsOfExperience} years` : "Not specified"}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </GlowCard>
+          </div>
 
-            </div>
-          </GlowCard>
+          {/* Education Section - ORIGINAL, UNCHANGED */}
+          <div id="education-section">
+            <GlowCard>
+              <div className="p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <GraduationCap className="w-5 h-5 text-purple-400" />
+                    <h3 className="text-lg font-semibold text-white">Education</h3>
+                  </div>
+                  <GlowButton 
+                    variant="outline" 
+                    size="sm"
+                    onClick={() => setIsAddingEducation(true)}
+                  >
+                    <Plus className="w-4 h-4 mr-1" />
+                    Add
+                  </GlowButton>
+                </div>
+                
+                <div className="space-y-3">
+                  {educationList.length === 0 ? (
+                    <p className="text-gray-400 text-sm text-center py-4">No education added yet</p>
+                  ) : (
+                    educationList.map((edu, index) => (
+                      <div key={edu.id || index} className="p-3 bg-gray-800/30 rounded-lg">
+                        <div className="flex justify-between items-start">
+                          <div className="flex-1">
+                            <p className="text-white font-medium">{edu.degree}{edu.field_of_study && ` in ${edu.field_of_study}`}</p>
+                            <p className="text-sm text-gray-400">{edu.institution_name}</p>
+                            <p className="text-xs text-gray-500">
+                              {edu.start_year && edu.start_year}
+                              {edu.end_year && !edu.is_current && ` - ${edu.end_year}`}
+                              {edu.is_current && " - Present"}
+                            </p>
+                            {edu.description && (
+                              <p className="text-xs text-gray-400 mt-1 line-clamp-2">{edu.description}</p>
+                            )}
+                          </div>
+                          <div className="flex gap-2">
+                            {/* Add Reorder Buttons */}
+                            <div className="flex flex-col gap-1 mr-2">
+                              {index > 0 && (
+                                <button
+                                  onClick={() => reorderEducation(index, 'up')}
+                                  disabled={isReordering}
+                                  className="p-1 hover:bg-gray-700 rounded transition-colors"
+                                  title="Move up"
+                                >
+                                  ↑
+                                </button>
+                              )}
+                              {index < educationList.length - 1 && (
+                                <button
+                                  onClick={() => reorderEducation(index, 'down')}
+                                  className="p-1 hover:bg-gray-700 rounded transition-colors"
+                                  title="Move down"
+                                >
+                                  ↓
+                                </button>
+                              )}
+                            </div>
+                            {/* Edit and Delete buttons */}
+                            <button
+                              onClick={() => startEditingEducation(edu, index)}
+                              className="p-1 hover:bg-gray-700 rounded transition-colors"
+                            >
+                              <Edit2 className="w-4 h-4 text-gray-400" />
+                            </button>
+                            <button
+                              onClick={() => removeEducation(edu.id!)}
+                              className="p-1 hover:bg-gray-700 rounded transition-colors"
+                            >
+                              <Trash2 className="w-4 h-4 text-red-400" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/* Add/Edit Education Modal - ORIGINAL, UNCHANGED */}
+                {(isAddingEducation || editingEducation !== null) && (
+                  <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 overflow-y-auto">
+                    <div className="bg-gray-900 rounded-lg max-w-2xl w-full mx-4 border border-gray-700 p-6 max-h-[90vh] overflow-y-auto">
+                      <h3 className="text-xl font-semibold text-white mb-4">
+                        {editingEducation ? "Edit Education" : "Add Education"}
+                      </h3>
+                      <div className="space-y-4">
+                        <div>
+                          <Label className="text-gray-300 mb-1 block">Institution Name *</Label>
+                          <Input
+                            value={educationForm.institution_name}
+                            onChange={(e) => setEducationForm({ ...educationForm, institution_name: e.target.value })}
+                            placeholder="e.g., Stanford University"
+                            className="bg-gray-800 border-gray-700"
+                          />
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <Label className="text-gray-300 mb-1 block">Degree *</Label>
+                            <Input
+                              value={educationForm.degree}
+                              onChange={(e) => setEducationForm({ ...educationForm, degree: e.target.value })}
+                              placeholder="e.g., Bachelor of Science"
+                              className="bg-gray-800 border-gray-700"
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-gray-300 mb-1 block">Field of Study</Label>
+                            <Input
+                              value={educationForm.field_of_study}
+                              onChange={(e) => setEducationForm({ ...educationForm, field_of_study: e.target.value })}
+                              placeholder="e.g., Computer Science"
+                              className="bg-gray-800 border-gray-700"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <Label className="text-gray-300 mb-1 block">Start Year</Label>
+                            <Input
+                              type="number"
+                              value={educationForm.start_year || ""}
+                              onChange={(e) => setEducationForm({ ...educationForm, start_year: e.target.value ? parseInt(e.target.value) : null })}
+                              placeholder="e.g., 2020"
+                              className="bg-gray-800 border-gray-700"
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-gray-300 mb-1 block">End Year</Label>
+                            <Input
+                              type="number"
+                              value={educationForm.end_year || ""}
+                              onChange={(e) => setEducationForm({ ...educationForm, end_year: e.target.value ? parseInt(e.target.value) : null })}
+                              placeholder="e.g., 2024"
+                              disabled={educationForm.is_current}
+                              className="bg-gray-800 border-gray-700"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            checked={educationForm.is_current}
+                            onCheckedChange={(checked) => {
+                              setEducationForm({ 
+                                ...educationForm, 
+                                is_current: checked,
+                                end_year: checked ? null : educationForm.end_year
+                              });
+                            }}
+                          />
+                          <Label className="text-gray-300">I currently study here</Label>
+                        </div>
+
+                        <div>
+                          <Label className="text-gray-300 mb-1 block">Description</Label>
+                          <textarea
+                            value={educationForm.description}
+                            onChange={(e) => setEducationForm({ ...educationForm, description: e.target.value })}
+                            placeholder="Describe your studies, achievements, relevant coursework..."
+                            rows={3}
+                            className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex gap-3 mt-6">
+                        <GlowButton 
+                          variant="outline" 
+                          onClick={() => {
+                            setIsAddingEducation(false);
+                            setEditingEducation(null);
+                            resetEducationForm();
+                          }}
+                          fullWidth
+                        >
+                          Cancel
+                        </GlowButton>
+                        <GlowButton 
+                          onClick={saveEducation}
+                          fullWidth
+                        >
+                          {editingEducation ? "Update" : "Add"}
+                        </GlowButton>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+              </div>
+            </GlowCard>
+          </div>
 
           {/* Top Skills Section - ORIGINAL, UNCHANGED */}
-          <GlowCard>
-            <div className="p-6">
-              <div className="flex items-center gap-2 mb-4">
-                <Code className="w-5 h-5 text-purple-400" />
-                <h3 className="text-lg font-semibold text-white">Skills</h3>
+          <div id="skills-section">
+            <GlowCard>
+              <div className="p-6">
+                <div className="flex items-center gap-2 mb-4">
+                  <Code className="w-5 h-5 text-purple-400" />
+                  <h3 className="text-lg font-semibold text-white">Skills</h3>
+                </div>
+                <SkillsSelector 
+                  value={skills}
+                  onChange={setSkills}
+                />
               </div>
-              <SkillsSelector />
-            </div>
-          </GlowCard>
+            </GlowCard>
+          </div>
 
           {/* Save All Changes Button - AT THE BOTTOM */}
           <div className="flex justify-end">
