@@ -6,6 +6,7 @@ pydantic
 requests
 PyJWT
 cryptography
+pyotp
 prometheus-client
 gunicorn
 supabase
