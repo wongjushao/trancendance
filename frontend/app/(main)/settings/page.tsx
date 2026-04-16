@@ -227,9 +227,19 @@ export default function SettingsPage() {
 
   // ========== END NEW STATE VARIABLES ==========
   useEffect(() => {
-    fetchProfile();
-    checkAuthProvider();
-    fetchNotificationPrefs();
+    const loadData = async () => {
+      setLoading(true);
+      try {
+        await fetchProfile();
+        await checkAuthProvider();
+        await fetchNotificationPrefs(); // This should complete
+      } catch (error) {
+        console.error('Error loading data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadData();
   }, []);
 
   const searchParams = useSearchParams();
@@ -314,31 +324,46 @@ export default function SettingsPage() {
 
   // ✅ CORRECTED: Fetch notification preferences (already correct, but ensure error handling)
   const fetchNotificationPrefs = async () => {
+    setLoadingPrefs(true); // Set loading to true when starting
     try {
       const token = await getAuthToken();
-      if (!token) {
-        router.push('/login');
-        return;
-      }
-
       const response = await fetch('/api/notification-service/notification', {
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
+        },
       });
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch notification preferences');
-      }
-
-      const data = await response.json();
-      // Your backend returns preferences inside a 'preferences' object
-      setNotificationPrefs(data.preferences || data);
       
+      if (response.ok) {
+        const data = await response.json();
+        // The backend returns the preference object directly, not wrapped in 'preferences'
+        setNotificationPrefs(data);
+      } else if (response.status === 404) {
+        // No preferences found, create defaults
+        const defaultPrefs = {
+          email_enabled: true,
+          push_enabled: true,
+          assignment_reminders: true,
+          course_updates: true,
+          message_notifications: true,
+          marketing_emails: false,
+        };
+        setNotificationPrefs(defaultPrefs);
+        await createDefaultNotificationPrefs(defaultPrefs);
+      } else {
+        // Other error, set defaults
+        console.error('Failed to fetch preferences:', response.status);
+        setNotificationPrefs({
+          email_enabled: true,
+          push_enabled: true,
+          assignment_reminders: true,
+          course_updates: true,
+          message_notifications: true,
+          marketing_emails: false,
+        });
+      }
     } catch (error) {
       console.error('Error fetching notification preferences:', error);
-      // Set default values
+      // Set default values on error
       setNotificationPrefs({
         email_enabled: true,
         push_enabled: true,
@@ -347,6 +372,8 @@ export default function SettingsPage() {
         message_notifications: true,
         marketing_emails: false,
       });
+    } finally {
+      setLoadingPrefs(false); // IMPORTANT: Always set loading to false when done
     }
   };
 
@@ -359,76 +386,60 @@ export default function SettingsPage() {
     marketing_emails: boolean;
   }) => {
     try {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      
-      if (sessionError || !session?.access_token) {
-        console.error('No session found for creating preferences');
-        return;
-      }
-
-      // Send all preferences at once to create the record
+      const token = await getAuthToken();
+      // Build query params for each preference
       const params = new URLSearchParams();
-      Object.entries(defaultPrefs).forEach(([key, value]) => {
-        params.append(key, String(value));
-      });
-
+      params.append('email_enabled', defaultPrefs.email_enabled.toString());
+      params.append('push_enabled', defaultPrefs.push_enabled.toString());
+      params.append('assignment_reminders', defaultPrefs.assignment_reminders.toString());
+      params.append('course_updates', defaultPrefs.course_updates.toString());
+      params.append('message_notifications', defaultPrefs.message_notifications.toString());
+      params.append('marketing_emails', defaultPrefs.marketing_emails.toString());
+      
       const response = await fetch(`/api/notification-service/notification?${params.toString()}`, {
         method: 'PATCH',
         headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
         },
       });
-
+      
       if (!response.ok) {
-        const errorData = await response.json();
-        console.error('Failed to create default notification preferences:', errorData);
-      } else {
-        const data = await response.json();
-        console.log('Created default preferences:', data);
+        console.error('Failed to create notification preferences');
       }
     } catch (error) {
-      console.error('Error creating default notification prefs:', error);
+      console.error('Error creating notification preferences:', error);
     }
+    // No need to set loadingPrefs here since it's called from within fetchNotificationPrefs
   };
 
-  // ✅ CORRECTED: Update notification preferences
-  const saveNotificationPrefs = async (key: keyof typeof notificationPrefs, value: boolean) => {
+  const saveNotificationPrefs = async (key: keyof Exclude<typeof notificationPrefs, null>, value: boolean) => {
     if (!notificationPrefs) return;
-
+    
     // Optimistic update
-    const previousValue = notificationPrefs[key];
-    setNotificationPrefs(prev => ({ ...prev!, [key]: value }));
-
+    const oldPrefs = { ...notificationPrefs };
+    setNotificationPrefs({ ...notificationPrefs, [key]: value });
+    
     try {
       const token = await getAuthToken();
-      if (!token) {
-        router.push('/login');
-        return;
-      }
-
-      const response = await fetch(`/api/notification-service/notification?${key}=${value}`, {
+      const params = new URLSearchParams();
+      params.append(key, value.toString());
+      
+      const response = await fetch(`/api/notification-service/notification?${params.toString()}`, {
         method: 'PATCH',
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
+        },
       });
-
-      if (!response.ok) {
-        throw new Error('Failed to update notification preferences');
-      }
-
-      const data = await response.json();
-      setNotificationPrefs(data.preferences || data);
-      toast.success('Notification preferences updated');
       
+      if (!response.ok) {
+        // Revert on error
+        setNotificationPrefs(oldPrefs);
+        console.error('Failed to save notification preference');
+      }
     } catch (error) {
-      console.error('Error updating notification preferences:', error);
       // Revert on error
-      setNotificationPrefs(prev => ({ ...prev!, [key]: previousValue }));
-      toast.error('Failed to update notification preferences');
+      setNotificationPrefs(oldPrefs);
+      console.error('Error saving notification preference:', error);
     }
   };
 
@@ -1535,20 +1546,25 @@ export default function SettingsPage() {
                         <Label className="text-white">Email Notifications</Label>
                         <p className="text-sm text-gray-400">Receive notifications via email</p>
                       </div>
-                      <Switch
-                        checked={notificationPrefs.email_enabled}
-                        onCheckedChange={() => handleNotificationChange('email_enabled')}
-                      />
+                      {/* Only render Switch if notificationPrefs is not null */}
+                      {notificationPrefs && (
+                        <Switch
+                          checked={notificationPrefs.email_enabled}
+                          onCheckedChange={() => handleNotificationChange('email_enabled')}
+                        />
+                      )}
                     </div>
                     <div className="flex items-center justify-between">
                       <div className="space-y-0.5">
                         <Label className="text-white">Push Notifications</Label>
                         <p className="text-sm text-gray-400">Receive notifications in-app</p>
                       </div>
-                      <Switch
-                        checked={notificationPrefs.push_enabled}
-                        onCheckedChange={() => handleNotificationChange('push_enabled')}
-                      />
+                      {notificationPrefs && (
+                        <Switch
+                          checked={notificationPrefs.push_enabled}
+                          onCheckedChange={() => handleNotificationChange('push_enabled')}
+                        />
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1564,44 +1580,52 @@ export default function SettingsPage() {
                         <Label className="text-white">Assignment Reminders</Label>
                         <p className="text-sm text-gray-400">Get reminders about upcoming assignments</p>
                       </div>
-                      <Switch
-                        checked={notificationPrefs.assignment_reminders}
-                        onCheckedChange={() => handleNotificationChange('assignment_reminders')}
-                        disabled={!notificationPrefs.email_enabled && !notificationPrefs.push_enabled}
-                      />
+                      {notificationPrefs && (
+                        <Switch
+                          checked={notificationPrefs.assignment_reminders}
+                          onCheckedChange={() => handleNotificationChange('assignment_reminders')}
+                          disabled={!notificationPrefs.email_enabled && !notificationPrefs.push_enabled}
+                        />
+                      )}
                     </div>
                     <div className="flex items-center justify-between">
                       <div className="space-y-0.5">
                         <Label className="text-white">Course Updates</Label>
                         <p className="text-sm text-gray-400">Get notified about course changes and announcements</p>
                       </div>
-                      <Switch
-                        checked={notificationPrefs.course_updates}
-                        onCheckedChange={() => handleNotificationChange('course_updates')}
-                        disabled={!notificationPrefs.email_enabled && !notificationPrefs.push_enabled}
-                      />
+                      {notificationPrefs && (
+                        <Switch
+                          checked={notificationPrefs.course_updates}
+                          onCheckedChange={() => handleNotificationChange('course_updates')}
+                          disabled={!notificationPrefs.email_enabled && !notificationPrefs.push_enabled}
+                        />
+                      )}
                     </div>
                     <div className="flex items-center justify-between">
                       <div className="space-y-0.5">
                         <Label className="text-white">Message Notifications</Label>
                         <p className="text-sm text-gray-400">Get notified about new messages</p>
                       </div>
-                      <Switch
-                        checked={notificationPrefs.message_notifications}
-                        onCheckedChange={() => handleNotificationChange('message_notifications')}
-                        disabled={!notificationPrefs.email_enabled && !notificationPrefs.push_enabled}
-                      />
+                      {notificationPrefs && (
+                        <Switch
+                          checked={notificationPrefs.message_notifications}
+                          onCheckedChange={() => handleNotificationChange('message_notifications')}
+                          disabled={!notificationPrefs.email_enabled && !notificationPrefs.push_enabled}
+                        />
+                      )}
                     </div>
                     <div className="flex items-center justify-between">
                       <div className="space-y-0.5">
                         <Label className="text-white">Marketing Emails</Label>
                         <p className="text-sm text-gray-400">Receive promotional emails and updates</p>
                       </div>
-                      <Switch
-                        checked={notificationPrefs.marketing_emails}
-                        onCheckedChange={() => handleNotificationChange('marketing_emails')}
-                        disabled={!notificationPrefs.email_enabled}
-                      />
+                      {notificationPrefs && (
+                        <Switch
+                          checked={notificationPrefs.marketing_emails}
+                          onCheckedChange={() => handleNotificationChange('marketing_emails')}
+                          disabled={!notificationPrefs.email_enabled}
+                        />
+                      )}
                     </div>
                   </div>
                 </div>

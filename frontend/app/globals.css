@@ -160,6 +160,8 @@
 
   html {
     font-size: var(--font-size);
+    overflow-y: scroll;
+    scrollbar-gutter: stable;
   }
 
   h1 { @apply text-2xl font-medium leading-relaxed; }

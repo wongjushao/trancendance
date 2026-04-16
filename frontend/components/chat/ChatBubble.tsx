@@ -1,7 +1,6 @@
 // frontend/components/chat/ChatBubble.tsx
-'use client';
-
 import { useState } from "react";
+import { useRouter } from "next/navigation"; // Add this import
 import { MessageCircle, X, Send, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 
@@ -14,104 +13,107 @@ interface Conversation {
   unread: number;
 }
 
+// Mock conversations data
+const mockConversations: Conversation[] = [
+  {
+    id: "1",
+    name: "Alice Johnson",
+    avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150",
+    lastMessage: "Hey, have you submitted the assignment?",
+    time: "2m ago",
+    unread: 2,
+  },
+  // ... other conversations
+];
+
 export function ChatBubble() {
+  const router = useRouter(); // Add this
   const [isOpen, setIsOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
 
-  // Mock conversations data
-  const conversations: Conversation[] = [
-    {
-      id: "1",
-      name: "John Doe",
-      avatar: "JD",
-      lastMessage: "Hey, how's the course going?",
-      time: "2 min ago",
-      unread: 2,
-    },
-    {
-      id: "2",
-      name: "Jane Smith",
-      avatar: "JS",
-      lastMessage: "Don't forget about the assignment due tomorrow",
-      time: "1 hour ago",
-      unread: 0,
-    },
-    {
-      id: "3",
-      name: "Course Assistant",
-      avatar: "CA",
-      lastMessage: "New announcement posted",
-      time: "3 hours ago",
-      unread: 1,
-    },
-  ];
+  const toggleChat = () => setIsOpen(!isOpen);
 
-  const toggleChat = () => {
-    setIsOpen(!isOpen);
+  const handleConversationClick = (conversationId: string) => {
+    // Navigate to messages page instead of opening modal
+    router.push(`/messages?conversation=${conversationId}`);
+    setIsOpen(false); // Close the bubble
   };
 
   return (
     <>
-      {/* Floating Button - Only change is the positioning classes */}
+      {/* Floating Button */}
       <button
         onClick={toggleChat}
-        className="fixed bottom-4 right-4 z-40 rounded-full bg-purple-600 p-3 text-white shadow-lg hover:bg-purple-700 transition-all"
-        aria-label="Open chat"
+        className="fixed bottom-6 right-6 z-50 p-4 bg-purple-600 rounded-full shadow-lg hover:bg-purple-700 transition-all duration-200"
       >
-        {isOpen ? <X className="h-6 w-6" /> : <MessageCircle className="h-6 w-6" />}
+        <MessageCircle className="w-6 h-6 text-white" />
       </button>
 
       {/* Chat Modal */}
       {isOpen && (
-        <div className="fixed bottom-20 right-4 z-40 h-[500px] w-80 rounded-lg bg-gray-900 shadow-xl flex flex-col overflow-hidden border border-gray-700">
+        <div className="fixed bottom-24 right-6 z-50 w-80 bg-gray-900 rounded-lg shadow-xl border border-gray-700">
           {/* Header */}
-          <div className="bg-purple-600 p-3 flex justify-between items-center">
+          <div className="flex justify-between items-center p-4 border-b border-gray-700">
             <h3 className="text-white font-semibold">Messages</h3>
-            <button onClick={toggleChat} className="text-white hover:text-gray-200">
-              <X className="h-4 w-4" />
+            <button
+              onClick={() => router.push("/messages")}
+              className="text-sm text-purple-400 hover:text-purple-300"
+            >
+              View All
             </button>
           </div>
 
           {/* Search */}
           <div className="p-3 border-b border-gray-700">
             <div className="relative">
-              <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-400" />
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
               <Input
+                type="text"
                 placeholder="Search conversations..."
-                className="pl-8 bg-gray-800 border-gray-700 text-white"
-                onChange={(e) => console.log(e.target.value)}
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-9 bg-gray-800 border-gray-600 text-white"
               />
             </div>
           </div>
 
           {/* Conversations List */}
-          <div className="flex-1 overflow-y-auto">
-            {conversations.map((conv) => (
-              <button
+          <div className="max-h-96 overflow-y-auto">
+            {mockConversations.map((conv) => (
+              <div
                 key={conv.id}
-                className="w-full p-3 text-left hover:bg-gray-800 transition-colors border-b border-gray-700 flex items-center gap-3"
+                onClick={() => handleConversationClick(conv.id)}
+                className="flex items-center gap-3 p-3 hover:bg-gray-800 cursor-pointer transition-colors"
               >
-                <div className="w-10 h-10 rounded-full bg-purple-600 flex items-center justify-center text-white font-semibold">
-                  {conv.avatar}
+                <div className="relative">
+                  <img
+                    src={conv.avatar}
+                    alt={conv.name}
+                    className="w-10 h-10 rounded-full object-cover"
+                  />
+                  {conv.unread > 0 && (
+                    <span className="absolute -top-1 -right-1 w-5 h-5 bg-purple-600 rounded-full text-xs text-white flex items-center justify-center">
+                      {conv.unread}
+                    </span>
+                  )}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-center">
-                    <span className="font-medium text-white">{conv.name}</span>
+                    <p className="text-white font-medium truncate">{conv.name}</p>
                     <span className="text-xs text-gray-400">{conv.time}</span>
                   </div>
-                  <p className="text-sm text-gray-400 truncate">{conv.lastMessage}</p>
+                  <p className="text-gray-400 text-sm truncate">{conv.lastMessage}</p>
                 </div>
-                {conv.unread > 0 && (
-                  <div className="w-5 h-5 rounded-full bg-purple-600 flex items-center justify-center text-xs text-white">
-                    {conv.unread}
-                  </div>
-                )}
-              </button>
+              </div>
             ))}
           </div>
 
           {/* New Message Button */}
           <div className="p-3 border-t border-gray-700">
-            <button className="w-full bg-purple-600 text-white rounded-lg py-2 hover:bg-purple-700 transition-colors">
+            <button
+              onClick={() => router.push("/messages")}
+              className="w-full py-2 bg-purple-600 hover:bg-purple-700 rounded-md text-white text-sm transition-colors"
+            >
               New Message
             </button>
           </div>
