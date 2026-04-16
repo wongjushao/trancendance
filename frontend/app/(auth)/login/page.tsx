@@ -1,16 +1,17 @@
 // frontend/app/(auth)/login/page.tsx
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Mail, Lock, Eye, EyeOff, AlertCircle } from "lucide-react";
+import { Mail, Lock, Eye, EyeOff, AlertCircle, Shield, Smartphone } from "lucide-react";
 import { GlowButton } from "@/components/lms/GlowButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 import { getSiteUrl } from "@/lib/site-url";
 import { validateEmail, validatePassword } from "@/lib/validation";
+import { toast } from "sonner";
 
 function getFriendlyLoginError(
   errorMessage: string
@@ -62,6 +63,36 @@ export default function LoginPage() {
     message: string;
     action?: { label: string; href: string };
   } | null>(null);
+
+  // MFA state
+  const [showMFA, setShowMFA] = useState(false);
+  const [mfaCode, setMfaCode] = useState("");
+  const [tempSession, setTempSession] = useState<any>(null);
+  const [isVerifyingMFA, setIsVerifyingMFA] = useState(false);
+
+  useEffect(() => {
+    // Check if we're returning from OAuth with pending MFA
+    const checkPendingMFAFromOAuth = async () => {
+      // Check for MFA required cookie
+      const mfaRequired = document.cookie.includes('mfa_required=true');
+      const mfaToken = document.cookie.split('; ').find(row => row.startsWith('mfa_temp_token='))?.split('=')[1];
+      
+      if (mfaRequired && mfaToken) {
+        // Clear the cookies
+        document.cookie = 'mfa_required=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT';
+        document.cookie = 'mfa_temp_token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT';
+        
+        // Store token in session storage for MFA verification
+        sessionStorage.setItem('mfa_temp_token', mfaToken);
+        
+        // Show MFA modal
+        setShowMFA(true);
+        toast.info('MFA verification required');
+      }
+    };
+    
+    checkPendingMFAFromOAuth();
+  }, []);
 
   const validateField = (field: string, value: string): string | undefined => {
     switch (field) {
@@ -124,7 +155,7 @@ export default function LoginPage() {
     setIsLoading(true);
 
     const supabase = getSupabaseBrowserClient();
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
     if (error) {
       const friendly = getFriendlyLoginError(error.message);
@@ -133,8 +164,76 @@ export default function LoginPage() {
       return;
     }
 
+    // Check if MFA is enabled for this user
+    try {
+      const token = data.session?.access_token;
+      const response = await fetch('/api/auth-service/mfa/status', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (response.ok) {
+        const mfaStatus = await response.json();
+        
+        if (mfaStatus.enabled_mfa) {
+          // MFA is enabled, show verification screen
+          setTempSession(data.session);
+          setShowMFA(true);
+          setIsLoading(false);
+          return;
+        }
+      }
+    } catch (err) {
+      console.error('Error checking MFA status:', err);
+      // Continue with login even if MFA check fails
+    }
+
     router.refresh();
     router.push("/dashboard");
+  };
+
+  const handleMFAVerification = async () => {
+    if (!mfaCode || mfaCode.length !== 6) {
+      toast.error("Please enter a valid 6-digit code");
+      return;
+    }
+
+    setIsVerifyingMFA(true);
+
+    try {
+      const response = await fetch('/api/auth-service/mfa/verify-login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${tempSession?.access_token}`,
+        },
+        body: JSON.stringify({ code: mfaCode }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        // Set the session in Supabase
+        const supabase = getSupabaseBrowserClient();
+        await supabase.auth.setSession({
+          access_token: tempSession.access_token,
+          refresh_token: tempSession.refresh_token,
+        });
+        
+        toast.success("MFA verification successful!");
+        router.push("/dashboard");
+        router.refresh();
+      } else {
+        toast.error(data.error || "Invalid verification code");
+        setMfaCode("");
+      }
+    } catch (err) {
+      console.error('MFA verification error:', err);
+      toast.error("Verification failed. Please try again.");
+    } finally {
+      setIsVerifyingMFA(false);
+    }
   };
 
   const handleGoogle = async () => {
@@ -170,6 +269,74 @@ export default function LoginPage() {
     const hasError = field === "email" ? errors.email : errors.password;
     return `pl-12 pr-12 bg-[#12121A] rounded-xl h-12 ${hasError && touched[field as keyof typeof touched] ? 'border-red-500' : 'border-white/10'} text-white`;
   };
+
+  // Show MFA verification screen if needed
+  if (showMFA) {
+    return (
+      <div className="w-full max-w-md">
+        <div className="bg-[#16161F] border border-white/10 rounded-3xl p-8 shadow-2xl shadow-purple-500/10">
+          <div className="text-center mb-8">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center mx-auto mb-4 shadow-lg shadow-purple-500/30">
+              <Shield className="w-8 h-8 text-white" />
+            </div>
+            <h1 className="text-3xl font-bold text-white mb-2">Two-Factor Authentication</h1>
+            <p className="text-[#A0A0B5]">Enter the verification code from your authenticator app</p>
+          </div>
+
+          <div className="space-y-6">
+            <div>
+              <Label htmlFor="mfa-code" className="text-white mb-2 block">Verification Code</Label>
+              <div className="relative">
+                <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[#6B6B80]" />
+                <Input
+                  id="mfa-code"
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="000000"
+                  value={mfaCode}
+                  onChange={(e) => {
+                    const value = e.target.value.replace(/\D/g, "").slice(0, 6);
+                    setMfaCode(value);
+                  }}
+                  className="pl-12 text-center text-2xl tracking-widest bg-[#12121A] rounded-xl h-12 border-white/10 text-white"
+                  maxLength={6}
+                  autoFocus
+                />
+              </div>
+              <p className="text-xs text-gray-500 mt-2">
+                Open Google Authenticator and enter the 6-digit code
+              </p>
+            </div>
+
+            <GlowButton
+              onClick={handleMFAVerification}
+              isLoading={isVerifyingMFA}
+              fullWidth
+            >
+              Verify & Sign In
+            </GlowButton>
+
+            <button
+              onClick={() => {
+                setShowMFA(false);
+                setMfaCode("");
+                setTempSession(null);
+                setIsLoading(false);
+              }}
+              className="text-sm text-purple-400 hover:text-purple-300 text-center w-full"
+            >
+              ← Back to login
+            </button>
+
+            <div className="text-center text-xs text-[#6B6B80]">
+              <p>Lost access to your authenticator app?</p>
+              <p>Use one of your backup codes or contact support.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full max-w-md">

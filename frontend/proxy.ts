@@ -19,7 +19,10 @@ const PROTECTED_PREFIXES = [
 
 // Pages that require login but NOT a completed profile
 // (onboarding itself lives here — logged-in users with incomplete profiles can access it)
-const AUTH_ONLY_PREFIXES = ["/onboarding"];
+const AUTH_ONLY_PREFIXES = [
+  "/onboarding",
+  "/auth/mfa-verify",  // ADD THIS LINE - MFA verification page
+];
 
 // Pages that logged-in users should not see (they're already in)
 const AUTH_PREFIXES = ["/login", "/register", "/forgot-password"];
@@ -101,15 +104,21 @@ export async function proxy(request: NextRequest) {
         if (!isAuthOnly) {
           return NextResponse.redirect(new URL("/onboarding", request.url));
         }
-        // Already on /onboarding, let them through
+        // Already on /onboarding or /auth/mfa-verify, let them through
         return NextResponse.next();
       }
 
       // Profile IS complete
       console.log('[proxy] Onboarded user, allowing access');
       if (isAuthOnly) {
-        // Block re-entry to onboarding for completed users
-        return NextResponse.redirect(new URL("/dashboard", request.url));
+        // Block re-entry to onboarding for completed users, but allow MFA page
+        if (pathname === "/onboarding") {
+          return NextResponse.redirect(new URL("/dashboard", request.url));
+        }
+        // Allow MFA page access even for onboarded users (they might need to verify)
+        if (pathname === "/auth/mfa-verify") {
+          return NextResponse.next();
+        }
       }
     }
   }

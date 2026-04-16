@@ -14,7 +14,8 @@ import {
   Plus, Edit2, GraduationCap, Building2, Code, Palette, Database as DatabaseIcon,
   Cloud, Brain, Shield as ShieldIcon, Heart, Music, Camera as CameraIcon,
   Coffee, Gamepad, Film, Mic, Dumbbell, Target, Award as AwardIcon,
-  ExternalLink, ThumbsUp, MessageCircle as MessageCircleIcon, Linkedin, Github, Twitter, Instagram, Link
+  ExternalLink, ThumbsUp, MessageCircle as MessageCircleIcon, Linkedin, Github, Twitter, Instagram, Link,
+  ShieldOff,
 } from "lucide-react";
 import { GlowCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
@@ -37,6 +38,9 @@ import {
   validateConfirmPassword,
 } from "@/lib/validation";
 import { SkillsSelector, UserSkill } from "@/components/settings/SkillsSelector";
+import { MFASetupModal } from '@/components/settings/MFASetupModal';
+import { MFADisableModal } from '@/components/settings/MFADisableModal';
+import { getMFAStatus } from '@/lib/mfa-api';
 
 // Modal Component for confirmation dialogs
 const ConfirmModal = ({ isOpen, onClose, onConfirm, title, message, danger = false }: any) => {
@@ -139,6 +143,10 @@ export default function SettingsPage() {
   const [hasSetPassword, setHasSetPassword] = useState(false);
   const [activeTab, setActiveTab] = useState("profile");
   const [profileDataLoaded, setProfileDataLoaded] = useState(false);
+  const [mfaStatus, setMfaStatus] = useState<{ enabled: boolean; configured: boolean }>({ enabled: false, configured: false });
+  const [showMFASetupModal, setShowMFASetupModal] = useState(false);
+  const [showMFADisableModal, setShowMFADisableModal] = useState(false);
+  const [loadingMFAStatus, setLoadingMFAStatus] = useState(true);
   
   // Profile form state
   const [formData, setFormData] = useState({
@@ -151,6 +159,32 @@ export default function SettingsPage() {
     timezone: detectTimezone(),
     birthday: "",
   });
+
+  //MFA
+  // Add fetch function
+  const fetchMFAStatus = async () => {
+    setLoadingMFAStatus(true);
+    try {
+      const status = await getMFAStatus();
+      setMfaStatus({
+        enabled: status.enabled_mfa,
+        configured: status.totp_configured,
+      });
+    } catch (err) {
+      console.error('Failed to fetch MFA status:', err);
+    } finally {
+      setLoadingMFAStatus(false);
+    }
+  };
+
+  // Add handler for successful enable/disable
+  const handleMFAEnabled = () => {
+    fetchMFAStatus();
+  };
+
+  const handleMFADisabled = () => {
+    fetchMFAStatus();
+  };
 
   //Bio
   const [bioCharCount, setBioCharCount] = useState(0);
@@ -232,6 +266,7 @@ export default function SettingsPage() {
       try {
         await fetchProfile();
         await checkAuthProvider();
+        await fetchMFAStatus();
         await fetchNotificationPrefs(); // This should complete
       } catch (error) {
         console.error('Error loading data:', error);
@@ -1804,6 +1839,55 @@ export default function SettingsPage() {
                   </GlowButton>
                 </div>
 
+
+                {/* MFA Section */}
+                <div className="border border-gray-800 rounded-xl overflow-hidden">
+                  <div className="p-5 bg-gray-900/50">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <div className="flex items-center gap-2 mb-2">
+                          {mfaStatus.enabled ? (
+                            <Shield className="w-5 h-5 text-green-400" />
+                          ) : (
+                            <ShieldOff className="w-5 h-5 text-gray-400" />
+                          )}
+                          <h4 className="font-semibold text-white">Two-Factor Authentication</h4>
+                        </div>
+                        <p className="text-sm text-gray-400 mb-4">
+                          {mfaStatus.enabled 
+                            ? "Your account is protected with two-factor authentication" 
+                            : "Add an extra layer of security to your account"}
+                        </p>
+                        {loadingMFAStatus ? (
+                          <div className="animate-pulse h-10 w-32 bg-gray-800 rounded-lg" />
+                        ) : mfaStatus.enabled ? (
+                          <div className="flex gap-3">
+                            <GlowButton
+                              variant="secondary"
+                              onClick={() => setShowMFADisableModal(true)}
+                              className="border-red-500/50 hover:border-red-500"
+                            >
+                              Disable MFA
+                            </GlowButton>
+                          </div>
+                        ) : (
+                          <GlowButton
+                            onClick={() => setShowMFASetupModal(true)}
+                          >
+                            <Smartphone className="w-4 h-4 mr-2" />
+                            Enable MFA
+                          </GlowButton>
+                        )}
+                      </div>
+                      {mfaStatus.enabled && (
+                        <div className="px-3 py-1 bg-green-500/20 rounded-full border border-green-500/30">
+                          <span className="text-xs text-green-400 font-medium">ENABLED</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                
                 <div className="flex items-center justify-between p-4 bg-blue-500/5 rounded-lg border border-blue-500/20">
                   <div>
                     <h3 className="font-semibold text-white">Contact Support</h3>
@@ -1847,6 +1931,18 @@ export default function SettingsPage() {
         isOpen={showContactSupport}
         onClose={() => setShowContactSupport(false)}
         onSubmit={handleContactSupport}
+      />
+
+      <MFASetupModal
+        isOpen={showMFASetupModal}
+        onClose={() => setShowMFASetupModal(false)}
+        onMFASuccessfullyEnabled={handleMFAEnabled}
+      />
+
+      <MFADisableModal
+        isOpen={showMFADisableModal}
+        onClose={() => setShowMFADisableModal(false)}
+        onMFASuccessfullyDisabled={handleMFADisabled}
       />
     </div>
   );

@@ -5,5 +5,5 @@ from .register import register_bp
 from . import MFA  # noqa: F401
 
 
-__all__ = ["docs_bp", "health_bp", "metrics_bp", "register_bp"]
+__all__ = ["docs_bp", "health_bp", "metrics_bp", "register_bp", "profile_bp"]
 
