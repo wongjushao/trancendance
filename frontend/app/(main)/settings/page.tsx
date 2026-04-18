@@ -15,7 +15,7 @@ import {
   Cloud, Brain, Shield as ShieldIcon, Heart, Music, Camera as CameraIcon,
   Coffee, Gamepad, Film, Mic, Dumbbell, Target, Award as AwardIcon,
   ExternalLink, ThumbsUp, MessageCircle as MessageCircleIcon, Linkedin, Github, Twitter, Instagram, Link,
-  ShieldOff,
+  ShieldOff
 } from "lucide-react";
 import { GlowCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
@@ -1570,102 +1570,131 @@ export default function SettingsPage() {
               <Loader2 className="w-8 h-8 animate-spin text-purple-500" />
             </div>
           ) : notificationPrefs ? (
-            <>
-              {/* Channel Settings */}
-              <GlowCard>
-                <div className="p-6 space-y-4">
-                  <h3 className="text-lg font-semibold text-white">Notification Channels</h3>
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5">
-                        <Label className="text-white">Email Notifications</Label>
+            <GlowCard>
+              <div className="p-6">
+                <div className="flex items-center gap-2 mb-4">
+                  <Bell className="w-5 h-5 text-purple-400" />
+                  <h2 className="text-xl font-semibold text-white">Notification Preferences</h2>
+                </div>
+                <p className="text-sm text-gray-400 mb-6">
+                  Choose which notifications you want to receive and how you want to receive them.
+                </p>
+
+                <div className="space-y-6">
+                  {/* Channel Settings - Email Notifications */}
+                  <div className="flex items-center justify-between p-4 rounded-lg bg-gray-800/30 border border-gray-700">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
+                        <MailIcon className="w-5 h-5 text-blue-400" />
+                      </div>
+                      <div>
+                        <h3 className="font-medium text-white">Email Notifications</h3>
                         <p className="text-sm text-gray-400">Receive notifications via email</p>
                       </div>
-                      {/* Only render Switch if notificationPrefs is not null */}
-                      {notificationPrefs && (
-                        <Switch
-                          checked={notificationPrefs.email_enabled}
-                          onCheckedChange={() => handleNotificationChange('email_enabled')}
-                        />
-                      )}
                     </div>
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5">
-                        <Label className="text-white">Push Notifications</Label>
-                        <p className="text-sm text-gray-400">Receive notifications in-app</p>
-                      </div>
-                      {notificationPrefs && (
-                        <Switch
-                          checked={notificationPrefs.push_enabled}
-                          onCheckedChange={() => handleNotificationChange('push_enabled')}
-                        />
-                      )}
-                    </div>
+                    <Switch
+                      checked={notificationPrefs.email_enabled}
+                      onCheckedChange={() => handleNotificationChange('email_enabled')}
+                    />
                   </div>
-                </div>
-              </GlowCard>
 
-              {/* Notification Types */}
-              <GlowCard>
-                <div className="p-6 space-y-4">
-                  <h3 className="text-lg font-semibold text-white">Notification Types</h3>
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5">
-                        <Label className="text-white">Assignment Reminders</Label>
-                        <p className="text-sm text-gray-400">Get reminders about upcoming assignments</p>
+                  {/* Channel Settings - Push Notifications */}
+                  <div className="flex items-center justify-between p-4 rounded-lg bg-gray-800/30 border border-gray-700">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-purple-500/20 flex items-center justify-center">
+                        <BellRing className="w-5 h-5 text-purple-400" />
                       </div>
-                      {notificationPrefs && (
-                        <Switch
-                          checked={notificationPrefs.assignment_reminders}
-                          onCheckedChange={() => handleNotificationChange('assignment_reminders')}
-                          disabled={!notificationPrefs.email_enabled && !notificationPrefs.push_enabled}
-                        />
-                      )}
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5">
-                        <Label className="text-white">Course Updates</Label>
-                        <p className="text-sm text-gray-400">Get notified about course changes and announcements</p>
+                      <div>
+                        <h3 className="font-medium text-white">Push Notifications</h3>
+                        <p className="text-sm text-gray-400">Receive push notifications in your browser</p>
                       </div>
-                      {notificationPrefs && (
-                        <Switch
-                          checked={notificationPrefs.course_updates}
-                          onCheckedChange={() => handleNotificationChange('course_updates')}
-                          disabled={!notificationPrefs.email_enabled && !notificationPrefs.push_enabled}
-                        />
-                      )}
                     </div>
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5">
-                        <Label className="text-white">Message Notifications</Label>
-                        <p className="text-sm text-gray-400">Get notified about new messages</p>
+                    <Switch
+                      checked={notificationPrefs.push_enabled}
+                      onCheckedChange={() => handleNotificationChange('push_enabled')}
+                    />
+                  </div>
+
+                  {/* Notification Types - Assignment Reminders */}
+                  <div className="flex items-center justify-between p-4 rounded-lg bg-gray-800/30 border border-gray-700">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-yellow-500/20 flex items-center justify-center">
+                        <AlertCircle className="w-5 h-5 text-yellow-400" />
                       </div>
-                      {notificationPrefs && (
-                        <Switch
-                          checked={notificationPrefs.message_notifications}
-                          onCheckedChange={() => handleNotificationChange('message_notifications')}
-                          disabled={!notificationPrefs.email_enabled && !notificationPrefs.push_enabled}
-                        />
-                      )}
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5">
-                        <Label className="text-white">Marketing Emails</Label>
-                        <p className="text-sm text-gray-400">Receive promotional emails and updates</p>
+                      <div>
+                        <h3 className="font-medium text-white">Assignment Reminders</h3>
+                        <p className="text-sm text-gray-400">Get reminders about upcoming assignments and deadlines</p>
                       </div>
-                      {notificationPrefs && (
-                        <Switch
-                          checked={notificationPrefs.marketing_emails}
-                          onCheckedChange={() => handleNotificationChange('marketing_emails')}
-                          disabled={!notificationPrefs.email_enabled}
-                        />
-                      )}
                     </div>
+                    <Switch
+                      checked={notificationPrefs.assignment_reminders}
+                      onCheckedChange={() => handleNotificationChange('assignment_reminders')}
+                      disabled={!notificationPrefs.email_enabled && !notificationPrefs.push_enabled}
+                    />
+                  </div>
+
+                  {/* Notification Types - Course Updates */}
+                  <div className="flex items-center justify-between p-4 rounded-lg bg-gray-800/30 border border-gray-700">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-green-500/20 flex items-center justify-center">
+                        <BookOpen className="w-5 h-5 text-green-400" />
+                      </div>
+                      <div>
+                        <h3 className="font-medium text-white">Course Updates</h3>
+                        <p className="text-sm text-gray-400">Get notified about new course content and updates</p>
+                      </div>
+                    </div>
+                    <Switch
+                      checked={notificationPrefs.course_updates}
+                      onCheckedChange={() => handleNotificationChange('course_updates')}
+                      disabled={!notificationPrefs.email_enabled && !notificationPrefs.push_enabled}
+                    />
+                  </div>
+
+                  {/* Notification Types - Message Notifications */}
+                  <div className="flex items-center justify-between p-4 rounded-lg bg-gray-800/30 border border-gray-700">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-pink-500/20 flex items-center justify-center">
+                        <MessageSquare className="w-5 h-5 text-pink-400" />
+                      </div>
+                      <div>
+                        <h3 className="font-medium text-white">Message Notifications</h3>
+                        <p className="text-sm text-gray-400">Get notified when you receive new messages</p>
+                      </div>
+                    </div>
+                    <Switch
+                      checked={notificationPrefs.message_notifications}
+                      onCheckedChange={() => handleNotificationChange('message_notifications')}
+                      disabled={!notificationPrefs.email_enabled && !notificationPrefs.push_enabled}
+                    />
+                  </div>
+
+                  {/* Notification Types - Marketing Emails */}
+                  <div className="flex items-center justify-between p-4 rounded-lg bg-gray-800/30 border border-gray-700">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-red-500/20 flex items-center justify-center">
+                        <Mail className="w-5 h-5 text-red-400" />
+                      </div>
+                      <div>
+                        <h3 className="font-medium text-white">Marketing Emails</h3>
+                        <p className="text-sm text-gray-400">Receive promotional offers and newsletters</p>
+                      </div>
+                    </div>
+                    <Switch
+                      checked={notificationPrefs.marketing_emails}
+                      onCheckedChange={() => handleNotificationChange('marketing_emails')}
+                      disabled={!notificationPrefs.email_enabled}
+                    />
                   </div>
                 </div>
-              </GlowCard>
-            </>
+
+                <div className="mt-6 pt-4 border-t border-gray-800">
+                  <p className="text-xs text-gray-500 text-center">
+                    Notification preferences are saved locally. You can change these settings at any time.
+                  </p>
+                </div>
+              </div>
+            </GlowCard>
           ) : (
             <div className="text-center py-12 text-gray-400">
               Failed to load notification preferences. Please try again later.

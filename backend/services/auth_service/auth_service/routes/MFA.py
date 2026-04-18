@@ -1,61 +1,81 @@
 # backend/services/auth_service/auth_service/routes/MFA.py
 from flask import Blueprint, request, current_app, jsonify
+import logging
 import pyotp
 import secrets
 import os
-import logging
 from datetime import datetime
-from backend.common.models.entities import Profile, UserMFA
 
-profile_bp = Blueprint("profile", __name__)
+from backend.common.models.entities import Profile, UserMFA
+from ..utils.supabase_jwt import extract_bearer_token, verify_supabase_jwt
+
+mfa_bp = Blueprint("mfa", __name__)
 logger = logging.getLogger(__name__)
 
 
-@profile_bp.get("/mfa/status")
+@mfa_bp.get("/mfa/status")
 def get_mfa_status():
-    """Return current user's MFA status.
-    
-    Response shape:
-    - enabled_mfa: bool (from profiles.enabled_mfa)
-    - totp_configured: bool (totp_secret present)
-    - backup_codes_configured: bool (backup_codes array non-empty)
-    - updated_at: ISO timestamp or null
-    """
+    """Return current user's MFA status."""
     db_session = current_app.config.get("DB_SESSION")
     
     # Extract token and get user
-    from backend.services.auth_service.auth_service.utils.supabase_jwt import extract_bearer_token, verify_supabase_jwt
-    
     token = extract_bearer_token()
     if not token:
-        return jsonify({"error": "No authorization token provided"}), 401
+        return {"error": "No authorization token"}, 401
     
-    user_id, _ = verify_supabase_jwt(token)
-    if not user_id:
-        return jsonify({"error": "Invalid or expired token"}), 401
+    # FIX: handle tuple return
+    try:
+        result = verify_supabase_jwt(token)
+        
+        # Handle tuple return (user_id, email)
+        if isinstance(result, tuple):
+            user_id = result[0]
+        elif isinstance(result, dict):
+            user_id = result.get("user_id")
+        else:
+            return {"error": "Invalid token"}, 401
+            
+        if not user_id:
+            return {"error": "Invalid token"}, 401
+    except Exception as e:
+        logger.error(f"Token verification failed: {str(e)}")
+        return {"error": "Token verification failed"}, 401
     
     session = db_session()
     try:
         profile = session.query(Profile).filter(Profile.id == user_id).first()
         mfa = session.query(UserMFA).filter(UserMFA.user_id == user_id).first()
         
-        enabled_mfa = bool(getattr(profile, "enabled_mfa", False))
+        # Log the values for debugging
+        logger.info(f"MFA status check for user {user_id}: enabled_mfa={profile.enabled_mfa if profile else None}, totp_secret={bool(mfa and mfa.totp_secret) if mfa else None}")
+        
+        # IMPORTANT: MFA is only considered enabled if BOTH:
+        # 1. profile.enabled_mfa is True
+        # 2. mfa.totp_secret exists (TOTP is configured)
+        enabled_mfa = bool(
+            profile and 
+            profile.enabled_mfa and 
+            mfa and 
+            mfa.totp_secret
+        )
         totp_configured = bool(mfa and mfa.totp_secret)
         backup_codes_configured = bool(mfa and isinstance(mfa.backup_codes, list) and len(mfa.backup_codes) > 0)
+        updated_at = mfa.updated_at.isoformat() if mfa and mfa.updated_at else None
         
-        updated_at = mfa.updated_at if mfa else None
-        
-        return jsonify({
+        return {
             "enabled_mfa": enabled_mfa,
             "totp_configured": totp_configured,
             "backup_codes_configured": backup_codes_configured,
-            "updated_at": updated_at.isoformat() if updated_at else None,
-        })
+            "updated_at": updated_at
+        }
+    except Exception as e:
+        logger.error(f"MFA status error: {str(e)}")
+        return {"error": "Failed to get MFA status"}, 500
     finally:
         session.close()
 
 
-@profile_bp.post("/mfa/setup")
+@mfa_bp.post("/mfa/setup")
 def setup_mfa():
     """Start MFA setup for Google Authenticator.
     
@@ -66,15 +86,18 @@ def setup_mfa():
     """
     db_session = current_app.config.get("DB_SESSION")
     
-    from backend.services.auth_service.auth_service.utils.supabase_jwt import extract_bearer_token, verify_supabase_jwt
-    
-    token = extract_bearer_token()
-    if not token:
-        return jsonify({"error": "No authorization token provided"}), 401
-    
-    user_id, email = verify_supabase_jwt(token)
-    if not user_id:
-        return jsonify({"error": "Invalid or expired token"}), 401
+    # Extract token and get user
+    try:
+        token = extract_bearer_token()
+        if not token:
+            return jsonify({"error": "No authorization token provided"}), 401
+        
+        user_id, email = verify_supabase_jwt(token)
+        if not user_id:
+            return jsonify({"error": "Invalid token"}), 401
+    except Exception as e:
+        logger.error(f"Token verification failed: {e}")
+        return jsonify({"error": "Invalid token"}), 401
     
     session = db_session()
     try:
@@ -90,6 +113,7 @@ def setup_mfa():
         
         mfa.totp_secret = secret
         mfa.backup_codes = None  # Clear old backup codes until verification
+        mfa.updated_at = datetime.utcnow()
         session.commit()
         
         issuer = os.getenv("MFA_ISSUER", "Trancendance")
@@ -102,13 +126,17 @@ def setup_mfa():
             "secret": secret,
             "provisioning_uri": provisioning_uri,
             "issuer": issuer,
-            "account_name": account_name,
+            "account_name": account_name
         })
+    except Exception as e:
+        logger.error(f"Error setting up MFA: {e}")
+        session.rollback()
+        return jsonify({"error": "Internal server error"}), 500
     finally:
         session.close()
 
 
-@profile_bp.post("/mfa/verify")
+@mfa_bp.post("/mfa/verify")
 def verify_mfa_setup():
     """Verify TOTP code and enable MFA.
     
@@ -116,15 +144,18 @@ def verify_mfa_setup():
     """
     db_session = current_app.config.get("DB_SESSION")
     
-    from backend.services.auth_service.auth_service.utils.supabase_jwt import extract_bearer_token, verify_supabase_jwt
-    
-    token = extract_bearer_token()
-    if not token:
-        return jsonify({"error": "No authorization token provided"}), 401
-    
-    user_id, _ = verify_supabase_jwt(token)
-    if not user_id:
-        return jsonify({"error": "Invalid or expired token"}), 401
+    # Extract token and get user
+    try:
+        token = extract_bearer_token()
+        if not token:
+            return jsonify({"error": "No authorization token provided"}), 401
+        
+        user_id, email = verify_supabase_jwt(token)
+        if not user_id:
+            return jsonify({"error": "Invalid token"}), 401
+    except Exception as e:
+        logger.error(f"Token verification failed: {e}")
+        return jsonify({"error": "Invalid token"}), 401
     
     payload = request.get_json(silent=True) or {}
     code = payload.get("code")
@@ -136,16 +167,17 @@ def verify_mfa_setup():
     try:
         mfa = session.query(UserMFA).filter(UserMFA.user_id == user_id).first()
         if not mfa or not mfa.totp_secret:
-            return jsonify({"error": "MFA setup not initialized"}), 400
+            return jsonify({"error": "MFA setup not initiated"}), 400
         
         totp = pyotp.TOTP(mfa.totp_secret)
         # Allow a small time drift
         if not totp.verify(code, valid_window=1):
-            return jsonify({"error": "Invalid verification code"}), 400
+            return jsonify({"error": "Invalid verification code. Please try again."}), 400
         
         # Generate one-time backup codes
         backup_codes = [secrets.token_urlsafe(8) for _ in range(10)]
         mfa.backup_codes = backup_codes
+        mfa.updated_at = datetime.utcnow()
         
         # Update profile to enable MFA
         profile = session.query(Profile).filter(Profile.id == user_id).first()
@@ -155,77 +187,116 @@ def verify_mfa_setup():
         session.commit()
         
         return jsonify({
-            "enabled_mfa": True,
+            "success": True,
             "backup_codes": backup_codes,
+            "message": "MFA enabled successfully"
         })
+    except Exception as e:
+        logger.error(f"Error verifying MFA: {e}")
+        session.rollback()
+        return jsonify({"error": "Internal server error"}), 500
     finally:
         session.close()
 
 
-@profile_bp.post("/mfa/verify-login")
+@mfa_bp.post("/mfa/verify-login")
 def verify_login_mfa():
-    """Verify MFA code during login.
+    """Verify MFA code during login."""
+    logger.info("=== MFA Login Verification Started ===")
     
-    Called after successful password authentication OR OAuth authentication.
-    Validates the TOTP code from the user's authenticator app.
-    
-    Body JSON: {"code": "123456"}
-    """
-    db_session = current_app.config.get("DB_SESSION")
-    
-    from backend.services.auth_service.auth_service.utils.supabase_jwt import extract_bearer_token, verify_supabase_jwt
-    
+    # Get token from header
     token = extract_bearer_token()
     if not token:
-        return jsonify({"error": "No authorization token provided"}), 401
+        logger.error("No bearer token provided")
+        return {"success": False, "message": "No authorization token"}, 401
     
-    user_id, _ = verify_supabase_jwt(token)
-    if not user_id:
-        return jsonify({"error": "Invalid or expired token"}), 401
+    # Verify token and get user - FIX: handle tuple return
+    try:
+        result = verify_supabase_jwt(token)
+        logger.info(f"Token verification result type: {type(result)}")
+        logger.info(f"Token verification result: {result}")
+        
+        # Handle tuple return (user_id, email)
+        if isinstance(result, tuple):
+            user_id = result[0]
+            email = result[1] if len(result) > 1 else None
+        elif isinstance(result, dict):
+            user_id = result.get("user_id")
+            email = result.get("email")
+        else:
+            logger.error(f"Unexpected token verification result type: {type(result)}")
+            return {"success": False, "message": "Invalid token format"}, 401
+        
+        if not user_id:
+            logger.error("No user_id in token verification result")
+            return {"success": False, "message": "Invalid token"}, 401
+            
+        logger.info(f"Verifying MFA for user: {user_id} ({email})")
+    except Exception as e:
+        logger.error(f"Token verification failed: {str(e)}")
+        return {"success": False, "message": "Token verification failed"}, 401
     
+    # Get request body
     payload = request.get_json(silent=True) or {}
     code = payload.get("code")
     
     if not code:
-        return jsonify({"error": "Verification code is required"}), 400
+        logger.error("No verification code provided")
+        return {"success": False, "message": "Verification code required"}, 400
     
+    # Check if MFA is enabled
+    db_session = current_app.config.get("DB_SESSION")
     session = db_session()
+    
     try:
-        mfa = session.query(UserMFA).filter(UserMFA.user_id == user_id).first()
-        if not mfa or not mfa.totp_secret:
-            return jsonify({"error": "MFA not configured for this user"}), 400
-        
-        # Check if MFA is enabled
         profile = session.query(Profile).filter(Profile.id == user_id).first()
         if not profile or not profile.enabled_mfa:
-            return jsonify({"error": "MFA is not enabled for this user"}), 400
+            logger.warning(f"MFA not enabled for user: {user_id}")
+            return {"success": False, "message": "MFA not enabled for this user"}, 400
         
+        mfa = session.query(UserMFA).filter(UserMFA.user_id == user_id).first()
+        if not mfa or not mfa.totp_secret:
+            logger.warning(f"MFA not configured for user: {user_id}")
+            return {"success": False, "message": "MFA not properly configured"}, 400
+        
+        # Check TOTP code
         totp = pyotp.TOTP(mfa.totp_secret)
+        is_valid = totp.verify(code, valid_window=1)
         
         # Also check against backup codes
         is_backup_code = False
-        if mfa.backup_codes and code in mfa.backup_codes:
-            is_backup_code = True
-            # Remove used backup code
-            mfa.backup_codes.remove(code)
-            session.commit()
+        if not is_valid and mfa.backup_codes:
+            for i, backup_code in enumerate(mfa.backup_codes):
+                if backup_code == code:
+                    is_backup_code = True
+                    # Remove used backup code
+                    mfa.backup_codes.pop(i)
+                    session.commit()
+                    logger.info(f"Backup code used for user: {user_id}")
+                    break
         
-        if not (totp.verify(code, valid_window=1) or is_backup_code):
-            # Log failed attempt (optional but recommended)
-            logger.warning(f"Failed MFA verification attempt for user {user_id}")
-            return jsonify({"error": "Invalid verification code"}), 401
-        
-        session.commit()
-        
-        return jsonify({
-            "success": True,
-            "message": "MFA verification successful",
-        })
+        if is_valid or is_backup_code:
+            logger.info(f"MFA verification successful for user: {user_id}")
+            return {
+                "success": True,
+                "message": "MFA verified successfully"
+            }
+        else:
+            logger.warning(f"MFA verification failed for user: {user_id}")
+            return {
+                "success": False,
+                "message": "Invalid verification code"
+            }, 401
+            
+    except Exception as e:
+        logger.error(f"MFA verification error: {str(e)}")
+        session.rollback()
+        return {"success": False, "message": "Verification failed"}, 500
     finally:
         session.close()
 
 
-@profile_bp.post("/mfa/disable")
+@mfa_bp.post("/mfa/disable")
 def disable_mfa():
     """Disable MFA for the current user.
     
@@ -233,40 +304,42 @@ def disable_mfa():
     """
     db_session = current_app.config.get("DB_SESSION")
     
-    from backend.services.auth_service.auth_service.utils.supabase_jwt import extract_bearer_token, verify_supabase_jwt
-    
-    token = extract_bearer_token()
-    if not token:
-        return jsonify({"error": "No authorization token provided"}), 401
-    
-    user_id, _ = verify_supabase_jwt(token)
-    if not user_id:
-        return jsonify({"error": "Invalid or expired token"}), 401
+    # Extract token and get user
+    try:
+        token = extract_bearer_token()
+        if not token:
+            return jsonify({"error": "No authorization token provided"}), 401
+        
+        user_id, email = verify_supabase_jwt(token)
+        if not user_id:
+            return jsonify({"error": "Invalid token"}), 401
+    except Exception as e:
+        logger.error(f"Token verification failed: {e}")
+        return jsonify({"error": "Invalid token"}), 401
     
     session = db_session()
     try:
         # Disable MFA in profile
         profile = session.query(Profile).filter(Profile.id == user_id).first()
-        if not profile:
-            return jsonify({"error": "Profile not found"}), 404
-        
-        profile.enabled_mfa = False
+        if profile:
+            profile.enabled_mfa = False
         
         # Clear MFA data
         mfa = session.query(UserMFA).filter(UserMFA.user_id == user_id).first()
         if mfa:
             mfa.totp_secret = None
             mfa.backup_codes = None
+            mfa.updated_at = datetime.utcnow()
         
         session.commit()
         
         return jsonify({
             "success": True,
-            "message": "MFA disabled successfully",
+            "message": "MFA disabled successfully"
         })
     except Exception as e:
+        logger.error(f"Error disabling MFA: {e}")
         session.rollback()
-        logger.error(f"Error disabling MFA for user {user_id}: {str(e)}")
-        return jsonify({"error": "Failed to disable MFA"}), 500
+        return jsonify({"error": "Internal server error"}), 500
     finally:
         session.close()

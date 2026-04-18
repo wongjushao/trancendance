@@ -63,24 +63,22 @@ export function MFASetupModal({ isOpen, onClose, onMFASuccessfullyEnabled }: MFA
 
   const handleVerify = async () => {
     if (!verificationCode || verificationCode.length !== 6) {
-      setError('Please enter a 6-digit verification code');
+      toast.error('Please enter a valid 6-digit code');
       return;
     }
 
     setIsVerifying(true);
-    setError(null);
     try {
       const response = await verifyAndEnableMFA(verificationCode);
-      if (response.success && response.backup_codes) {
+      if (response.success) {
         setBackupCodes(response.backup_codes);
         setStep('backup');
-        toast.success('MFA has been enabled successfully!');
-      } else {
-        setError('Invalid verification code. Please try again.');
+        toast.success('MFA enabled successfully!');
+        onMFASuccessfullyEnabled();
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to verify code');
-      toast.error('Verification failed');
+    } catch (error: any) {
+      console.error('Verification error:', error);
+      toast.error(error.message || 'Invalid verification code. Please try again.');
     } finally {
       setIsVerifying(false);
     }

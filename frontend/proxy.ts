@@ -1,126 +1,153 @@
 // frontend/proxy.ts
-
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server-client";
 
 // Pages that require login AND a completed profile
-const PROTECTED_PREFIXES = [
+const protectedRoutes = [
   "/dashboard",
-  "/profile",
   "/courses",
   "/assignments",
+  "/analytics",
+  "/profile",
+  "/settings",
   "/messages",
   "/notifications",
-  "/analytics",
+  "/student",
+  "/teacher",
   "/admin",
   "/organizations",
-  "/lessons",
+  "/organization-setup",
+  "/teacher-request",
 ];
 
 // Pages that require login but NOT a completed profile
-// (onboarding itself lives here — logged-in users with incomplete profiles can access it)
-const AUTH_ONLY_PREFIXES = [
+const authOnlyRoutes = [
   "/onboarding",
-  "/auth/mfa-verify",  // ADD THIS LINE - MFA verification page
+  "/auth/mfa-verify",
+  "/auth/error",
 ];
 
-// Pages that logged-in users should not see (they're already in)
-const AUTH_PREFIXES = ["/login", "/register", "/forgot-password"];
+// Pages that logged-in users should not see
+const publicOnlyRoutes = [
+  "/login",
+  "/register",
+  "/forgot-password",
+  "/reset-password",
+  "/accept-invite",
+];
+
+// Public routes that don't require authentication
+const publicRoutes = [
+  "/",
+  "/auth/callback",
+  "/auth/confirm",
+  "/auth/error",
+];
+
+// We can't check sessionStorage from middleware, so we'll rely on the fact that
+// when MFA is pending, there is NO active session. The user is not authenticated.
+// So we just need to make sure /auth/mfa-verify is accessible without a session.
 
 async function checkOnboardingStatus(token: string): Promise<boolean> {
   try {
-    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://auth-service:5001';
-    
-    console.log('[proxy] Checking onboarding status for token');
-
+    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
     const response = await fetch(
-      `${backendUrl}/api/auth-service/onboarding-status`,
+      `${siteUrl}/api/auth-service/onboarding-status`,
       {
         headers: {
-          'Authorization': `Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
         },
       }
     );
-    
-    console.log('[proxy] Onboarding status response:', response.status);
-
     if (!response.ok) {
-      console.log('[proxy] Failed to check onboarding status');
       return false;
     }
-    
     const data = await response.json();
-    console.log('[proxy] Onboarding status:', data.onboarded);
-    return data.onboarded;
+    return data.onboarded === true;
   } catch (error) {
-    console.error('Error checking onboarding status in proxy:', error);
+    console.error("[proxy] Error checking onboarding status:", error);
     return false;
   }
 }
 
 export async function proxy(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+  const pathname = request.nextUrl.pathname;
+  
+  // Skip middleware for static files and API routes
+  if (
+    pathname.startsWith("/_next") ||
+    pathname.startsWith("/api") ||
+    pathname.startsWith("/static") ||
+    pathname === "/favicon.ico"
+  ) {
+    return NextResponse.next();
+  }
 
+  // Allow public routes without any checks
+  if (publicRoutes.some(route => pathname === route)) {
+    console.log("[proxy] Public route, allowing access:", pathname);
+    return NextResponse.next();
+  }
+
+  // Allow MFA verify page without session check
+  if (pathname === "/auth/mfa-verify") {
+    console.log("[proxy] MFA verify page, allowing access");
+    return NextResponse.next();
+  }
+
+  // Get user session
   const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  const isProtected    = PROTECTED_PREFIXES.some((p) => pathname.startsWith(p));
-  const isAuthOnly     = AUTH_ONLY_PREFIXES.some((p) => pathname.startsWith(p));
-  const isAuthRoute    = AUTH_PREFIXES.some((p) => pathname.startsWith(p));
+  const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 
   // Unauthenticated users
-  if (!user && (isProtected || isAuthOnly)) {
-    return NextResponse.redirect(new URL("/", request.url));
+  if (!session || sessionError) {
+    console.log("[proxy] User not authenticated");
+    
+    // Allow access to public-only routes
+    if (publicOnlyRoutes.some(route => pathname === route) || 
+        pathname === "/" ||
+        pathname.startsWith("/_landing")) {
+      return NextResponse.next();
+    }
+    
+    // Redirect to login for protected routes
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("redirect", pathname);
+    return NextResponse.redirect(loginUrl);
   }
 
   // Authenticated users
-  if (user) {
-    console.log('[proxy] User authenticated:', user.id);
-    // Don't re-show login/register to signed-in users
-    if (isAuthRoute) {
-      return NextResponse.redirect(new URL("/dashboard", request.url));
+  console.log("[proxy] User authenticated:", session.user.id);
+
+  // Don't re-show login/register to signed-in users
+  if (publicOnlyRoutes.some(route => pathname === route)) {
+    console.log("[proxy] Authenticated user trying to access public route, redirecting to dashboard");
+    return NextResponse.redirect(new URL("/dashboard", request.url));
+  }
+
+  // For protected pages, check onboarding
+  const isProtected = protectedRoutes.some(route => pathname === route || pathname.startsWith(route + "/"));
+  const isAuthOnly = authOnlyRoutes.some(route => pathname === route || pathname.startsWith(route + "/"));
+  
+  if (isProtected || isAuthOnly) {
+    console.log("[proxy] Protected or auth-only page, checking onboarding");
+    
+    const accessToken = session.access_token;
+    const onboarded = await checkOnboardingStatus(accessToken);
+    console.log("[proxy] Onboarding status result:", onboarded);
+    
+    if (isAuthOnly && !onboarded) {
+      console.log("[proxy] Auth-only route and user not onboarded, allowing access");
+      return NextResponse.next();
     }
-
-    // For protected pages and onboarding, check profile completeness via backend
-    if (isProtected || isAuthOnly) {
-      console.log('[proxy] Protected or auth-only page, checking onboarding');
-      // Get the session token
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session?.access_token) {
-        console.log('[proxy] No session token')
-        return NextResponse.redirect(new URL("/", request.url));
-      }
-
-      // Check onboarding status via backend (checks required fields)
-      const onboarded = await checkOnboardingStatus(session.access_token);
-      console.log('[proxy] Onboarding status result:', onboarded);
-      
-      if (!onboarded) {
-        console.log('[proxy] Not onboarded, redirecting to onboarding');
-        // Incomplete profile → force onboarding, unless already there
-        if (!isAuthOnly) {
-          return NextResponse.redirect(new URL("/onboarding", request.url));
-        }
-        // Already on /onboarding or /auth/mfa-verify, let them through
-        return NextResponse.next();
-      }
-
-      // Profile IS complete
-      console.log('[proxy] Onboarded user, allowing access');
-      if (isAuthOnly) {
-        // Block re-entry to onboarding for completed users, but allow MFA page
-        if (pathname === "/onboarding") {
-          return NextResponse.redirect(new URL("/dashboard", request.url));
-        }
-        // Allow MFA page access even for onboarded users (they might need to verify)
-        if (pathname === "/auth/mfa-verify") {
-          return NextResponse.next();
-        }
-      }
+    
+    if (isProtected && !onboarded) {
+      console.log("[proxy] Protected route and user not onboarded, redirecting to onboarding");
+      return NextResponse.redirect(new URL("/onboarding", request.url));
     }
+    
+    console.log("[proxy] Onboarded user, allowing access");
+    return NextResponse.next();
   }
 
   return NextResponse.next();
@@ -128,6 +155,6 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|auth/callback|auth/confirm|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };

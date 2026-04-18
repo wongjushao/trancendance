@@ -176,7 +176,8 @@ export default function LoginPage() {
       if (response.ok) {
         const mfaStatus = await response.json();
         
-        if (mfaStatus.enabled_mfa) {
+        // Check if MFA is enabled AND configured (totp_configured should be true)
+        if (mfaStatus.enabled_mfa === true && mfaStatus.totp_configured === true) {
           // MFA is enabled, show verification screen
           setTempSession(data.session);
           setShowMFA(true);
@@ -236,32 +237,28 @@ export default function LoginPage() {
     }
   };
 
+  // In the login page, update the handleGoogle function
   const handleGoogle = async () => {
-    setIsGoogleLoading(true);
-    setStatus(null);
-
     const supabase = getSupabaseBrowserClient();
+    
+    // Clear any existing MFA cookies before new login
+    document.cookie.split(";").forEach((c) => {
+      if (c.trim().startsWith("mfa_")) {
+        document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
+      }
+    });
+    sessionStorage.removeItem("mfa_access_token");
+    
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
         redirectTo: `${getSiteUrl()}/auth/callback`,
-        queryParams: {
-          access_type: 'offline',
-          prompt: 'consent',
-        }
       },
     });
-
+    
     if (error) {
-      const lower = error.message.toLowerCase();
-      let message = error.message;
-      if (lower.includes("provider") || lower.includes("already linked")) {
-        message =
-          "This Google account is associated with an existing email/password account. " +
-          "Please sign in with your email and password instead.";
-      }
-      setStatus({ type: "error", message });
-      setIsGoogleLoading(false);
+      console.error("Google login error:", error);
+      toast.error(getFriendlyLoginError(error.message));
     }
   };
 

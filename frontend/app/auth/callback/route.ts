@@ -1,140 +1,178 @@
 // frontend/app/auth/callback/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { createSupabaseServerClient } from "@/lib/supabase/server-client";
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
 
 function getSiteOrigin(): string {
-  return process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
-}
-
-async function checkOnboardingStatus(token: string): Promise<boolean> {
-  try {
-    const response = await fetch(`${getSiteOrigin()}/api/auth-service/onboarding-status`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-    if (response.ok) {
-      const data = await response.json();
-      return data.onboarded === true;
-    }
-    return false;
-  } catch (error) {
-    console.error("Error checking onboarding status:", error);
-    return false;
+  const envUrl = process.env.NEXT_PUBLIC_SITE_URL;
+  if (envUrl) {
+    return envUrl.replace(/\/$/, "");
   }
+  return "http://localhost:3000";
 }
 
-// Add this new function to check MFA status
-async function checkMFAStatus(userId: string, token: string): Promise<boolean> {
-  try {
-    const response = await fetch(`${getSiteOrigin()}/api/auth-service/mfa/status`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
+async function createSupabaseServerClient() {
+  const cookieStore = await cookies();
+  
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get(name: string) {
+          return cookieStore.get(name)?.value;
+        },
+        set(name: string, value: string, options: any) {
+          cookieStore.set({ name, value, ...options });
+        },
+        remove(name: string, options: any) {
+          cookieStore.set({ name, value: "", ...options });
+        },
       },
-    });
-    if (response.ok) {
-      const data = await response.json();
-      return data.enabled_mfa === true;
     }
-    return false;
+  );
+}
+
+async function checkMFAStatus(userId: string, token: string): Promise<{
+  enabled_mfa: boolean;
+  totp_configured: boolean;
+}> {
+  try {
+    const response = await fetch(
+      `${getSiteOrigin()}/api/auth-service/mfa/status`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+    if (!response.ok) {
+      console.error("[Auth Callback] MFA status check failed:", response.status);
+      return { enabled_mfa: false, totp_configured: false };
+    }
+    const data = await response.json();
+    console.log("[Auth Callback] MFA status response:", data);
+    return {
+      enabled_mfa: data.enabled_mfa === true,
+      totp_configured: data.totp_configured === true,
+    };
   } catch (error) {
-    console.error("Error checking MFA status:", error);
-    return false;
+    console.error("[Auth Callback] Error checking MFA status:", error);
+    return { enabled_mfa: false, totp_configured: false };
   }
 }
 
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
   const code = requestUrl.searchParams.get("code");
-  const next = requestUrl.searchParams.get("next") ?? "/";
   const error = requestUrl.searchParams.get("error");
-  const error_description = requestUrl.searchParams.get("error_description");
+  const errorDescription = requestUrl.searchParams.get("error_description");
 
-  // Handle errors from Supabase OAuth
+  console.log("[Auth Callback] Processing request", { hasCode: !!code, error });
+
   if (error) {
-    console.error("Auth callback error:", error, error_description);
-    const redirectUrl = new URL("/auth/error", getSiteOrigin());
-    redirectUrl.searchParams.set("message", error_description || error);
-    return NextResponse.redirect(redirectUrl);
+    console.error("[Auth Callback] OAuth error:", error, errorDescription);
+    return NextResponse.redirect(
+      new URL(`/auth/error?message=${encodeURIComponent(errorDescription || error)}`, getSiteOrigin())
+    );
   }
 
-  if (code) {
+  if (!code) {
+    console.error("[Auth Callback] No code provided");
+    return NextResponse.redirect(
+      new URL("/auth/error?message=No authorization code provided", getSiteOrigin())
+    );
+  }
+
+  try {
     const supabase = await createSupabaseServerClient();
-    
-    try {
-      // Exchange the code for a session
-      const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
-      
-      if (exchangeError) {
-        console.error("Error exchanging code for session:", exchangeError);
-        const redirectUrl = new URL("/auth/error", getSiteOrigin());
-        redirectUrl.searchParams.set("message", exchangeError.message);
-        return NextResponse.redirect(redirectUrl);
-      }
 
-      const session = data.session;
-      if (!session) {
-        const redirectUrl = new URL("/auth/error", getSiteOrigin());
-        redirectUrl.searchParams.set("message", "No session created");
-        return NextResponse.redirect(redirectUrl);
-      }
+    console.log("[Auth Callback] Exchanging code for session...");
+    const { data: sessionData, error: sessionError } =
+      await supabase.auth.exchangeCodeForSession(code);
 
-      // Check if this is a password reset flow
-      const isRecovery = requestUrl.searchParams.get("type") === "recovery";
-      if (isRecovery) {
-        // Redirect to reset password page
-        const resetUrl = new URL("/auth/reset-password", getSiteOrigin());
-        resetUrl.searchParams.set("token", session.access_token);
-        return NextResponse.redirect(resetUrl);
-      }
-
-      // Check if MFA is enabled for this user
-      const mfaEnabled = await checkMFAStatus(session.user.id, session.access_token);
-      
-      if (mfaEnabled) {
-        // Store the session temporarily and redirect to MFA verification
-        const response = NextResponse.redirect(new URL("/auth/mfa-verify", getSiteOrigin()));
-        
-        // Set cookies to indicate MFA is required and store user info
-        response.cookies.set("mfa_required", "true", {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === "production",
-          sameSite: "lax",
-          maxAge: 300, // 5 minutes
-          path: "/",
-        });
-        
-        // Store the access token for MFA verification
-        response.cookies.set("mfa_temp_token", session.access_token, {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === "production",
-          sameSite: "lax",
-          maxAge: 300, // 5 minutes
-          path: "/",
-        });
-        
-        return response;
-      }
-
-      // Check onboarding status via backend
-      const isOnboarded = await checkOnboardingStatus(session.access_token);
-      
-      // User hasn't completed profile - needs onboarding
-      if (!isOnboarded) {
-        return NextResponse.redirect(new URL("/onboarding", getSiteOrigin()));
-      }
-      
-      // User has completed profile - go to dashboard
-      return NextResponse.redirect(new URL("/dashboard", getSiteOrigin()));
-      
-    } catch (err) {
-      console.error("Unexpected error in auth callback:", err);
-      const redirectUrl = new URL("/auth/error", getSiteOrigin());
-      redirectUrl.searchParams.set("message", "An unexpected error occurred");
-      return NextResponse.redirect(redirectUrl);
+    if (sessionError) {
+      console.error("[Auth Callback] Session exchange error:", sessionError);
+      return NextResponse.redirect(
+        new URL(`/auth/error?message=${encodeURIComponent(sessionError.message)}`, getSiteOrigin())
+      );
     }
-  }
 
-  // No code parameter - redirect to home
-  return NextResponse.redirect(new URL("/", getSiteOrigin()));
+    if (!sessionData.session) {
+      console.error("[Auth Callback] No session returned");
+      return NextResponse.redirect(
+        new URL("/auth/error?message=No session created", getSiteOrigin())
+      );
+    }
+
+    const accessToken = sessionData.session.access_token;
+    const refreshToken = sessionData.session.refresh_token;
+    const user = sessionData.user;
+
+    console.log("[Auth Callback] User authenticated:", { userId: user.id, email: user.email });
+
+    // Check if this is a password reset flow
+    const type = requestUrl.searchParams.get("type");
+    if (type === "recovery") {
+      console.log("[Auth Callback] Password recovery flow");
+      return NextResponse.redirect(new URL("/reset-password", getSiteOrigin()));
+    }
+
+    // Check MFA status
+    console.log("[Auth Callback] Checking MFA status...");
+    const mfaStatus = await checkMFAStatus(user.id, accessToken);
+    console.log("[Auth Callback] MFA Status:", mfaStatus);
+
+    const mfaEnabled = mfaStatus.enabled_mfa && mfaStatus.totp_configured;
+
+    if (mfaEnabled) {
+      console.log("[Auth Callback] MFA is enabled - redirecting to MFA verification");
+      
+      // Create an HTML page that stores the token and redirects
+      const html = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>MFA Required</title>
+            <script>
+              // Clear any existing session data
+              localStorage.clear();
+              
+              // Store tokens in sessionStorage (client-side only)
+              sessionStorage.setItem('mfa_access_token', '${accessToken}');
+              sessionStorage.setItem('mfa_refresh_token', '${refreshToken}');
+              sessionStorage.setItem('mfa_user_id', '${user.id}');
+              sessionStorage.setItem('mfa_required', 'true');
+              
+              console.log('MFA data stored in sessionStorage');
+              
+              // Redirect to MFA verify page
+              window.location.href = '/auth/mfa-verify';
+            </script>
+          </head>
+          <body>
+            <div style="display: flex; justify-content: center; align-items: center; height: 100vh; background: black; color: white;">
+              <div>Redirecting to MFA verification...</div>
+            </div>
+          </body>
+        </html>
+      `;
+      
+      return new NextResponse(html, {
+        headers: {
+          'Content-Type': 'text/html',
+        },
+      });
+    }
+
+    // No MFA required, proceed to dashboard
+    console.log("[Auth Callback] No MFA required, redirecting to dashboard");
+    return NextResponse.redirect(new URL("/dashboard", getSiteOrigin()));
+    
+  } catch (error) {
+    console.error("[Auth Callback] Unexpected error:", error);
+    return NextResponse.redirect(
+      new URL("/auth/error?message=Authentication failed", getSiteOrigin())
+    );
+  }
 }
