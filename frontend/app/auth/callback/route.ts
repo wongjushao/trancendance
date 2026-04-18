@@ -125,45 +125,45 @@ export async function GET(request: NextRequest) {
 
     const mfaEnabled = mfaStatus.enabled_mfa && mfaStatus.totp_configured;
 
-    if (mfaEnabled) {
-      console.log("[Auth Callback] MFA is enabled - redirecting to MFA verification");
-      
-      // Create an HTML page that stores the token and redirects
-      const html = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <title>MFA Required</title>
-            <script>
-              // Clear any existing session data
-              localStorage.clear();
-              
-              // Store tokens in sessionStorage (client-side only)
-              sessionStorage.setItem('mfa_access_token', '${accessToken}');
-              sessionStorage.setItem('mfa_refresh_token', '${refreshToken}');
-              sessionStorage.setItem('mfa_user_id', '${user.id}');
-              sessionStorage.setItem('mfa_required', 'true');
-              
-              console.log('MFA data stored in sessionStorage');
-              
-              // Redirect to MFA verify page
-              window.location.href = '/auth/mfa-verify';
-            </script>
-          </head>
-          <body>
-            <div style="display: flex; justify-content: center; align-items: center; height: 100vh; background: black; color: white;">
-              <div>Redirecting to MFA verification...</div>
-            </div>
-          </body>
-        </html>
-      `;
-      
-      return new NextResponse(html, {
-        headers: {
-          'Content-Type': 'text/html',
-        },
-      });
-    }
+  if (mfaEnabled) {
+    console.log("[Auth Callback] MFA is enabled - redirecting to MFA verification without creating session");
+    
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>MFA Required</title>
+          <script>
+            // Clear any existing session data
+            localStorage.clear();
+            
+            // Store tokens in sessionStorage (client-side only)
+            sessionStorage.setItem('mfa_access_token', '${accessToken}');
+            sessionStorage.setItem('mfa_refresh_token', '${refreshToken}');
+            sessionStorage.setItem('mfa_user_id', '${user.id}');
+            sessionStorage.setItem('mfa_required', 'true');
+            
+            console.log('MFA data stored in sessionStorage');
+            console.log('Refresh token stored:', !!sessionStorage.getItem('mfa_refresh_token'));
+            
+            // Redirect to MFA verify page
+            window.location.href = '/auth/mfa-verify';
+          </script>
+        </head>
+        <body>
+          <div style="display: flex; justify-content: center; align-items: center; height: 100vh; background: black; color: white;">
+            <div>Redirecting to MFA verification...</div>
+          </div>
+        </body>
+      </html>
+    `;
+    
+    return new NextResponse(html, {
+      headers: {
+        'Content-Type': 'text/html',
+      },
+    });
+  }
 
     // No MFA required, proceed to dashboard
     console.log("[Auth Callback] No MFA required, redirecting to dashboard");

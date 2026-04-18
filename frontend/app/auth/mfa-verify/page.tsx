@@ -16,22 +16,20 @@ export default function MFAVerifyPage() {
   const [isVerifying, setIsVerifying] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [accessToken, setAccessToken] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState<string | null>(null);
 
   useEffect(() => {
-    const checkPendingMFA = () => {
+    const checkPendingMFA = async () => {
       console.log("[MFA Verify] Checking for pending MFA...");
       
       // Check sessionStorage for MFA data
       const mfaRequired = sessionStorage.getItem("mfa_required");
-      const token = sessionStorage.getItem("mfa_access_token");
       const refresh = sessionStorage.getItem("mfa_refresh_token");
       
       console.log("[MFA Verify] mfa_required:", mfaRequired);
-      console.log("[MFA Verify] token present:", !!token);
+      console.log("[MFA Verify] refresh present:", !!refresh);
       
-      if (mfaRequired !== "true" || !token) {
+      if (mfaRequired !== "true" || !refresh) {
         console.log("[MFA Verify] No pending MFA found, redirecting to login");
         // Clean up any stale data
         sessionStorage.removeItem("mfa_access_token");
@@ -42,7 +40,6 @@ export default function MFAVerifyPage() {
         return;
       }
       
-      setAccessToken(token);
       setRefreshToken(refresh);
       setIsLoading(false);
       console.log("[MFA Verify] MFA verification ready");
@@ -58,7 +55,7 @@ export default function MFAVerifyPage() {
       return;
     }
 
-    if (!accessToken) {
+    if (!refreshToken) {
       setError("Session expired. Please log in again.");
       router.replace("/login");
       return;
@@ -70,6 +67,47 @@ export default function MFAVerifyPage() {
     try {
       console.log("[MFA Verify] Verifying code with backend...");
       
+      // First, verify the MFA code with the backend
+      // We need to get a fresh access token first
+      const supabase = getSupabaseBrowserClient();
+      
+      // Try to refresh the session using the refresh token
+      console.log("[MFA Verify] Attempting to refresh session...");
+      const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+      
+      if (refreshError) {
+        console.error("[MFA Verify] Refresh error:", refreshError);
+        // If refresh fails, try to set session with stored refresh token
+        const { error: setSessionError } = await supabase.auth.setSession({
+          access_token: "",
+          refresh_token: refreshToken,
+        });
+        
+        if (setSessionError) {
+          console.error("[MFA Verify] Set session error:", setSessionError);
+          toast.error("Failed to restore session. Please log in again.");
+          sessionStorage.removeItem("mfa_access_token");
+          sessionStorage.removeItem("mfa_refresh_token");
+          sessionStorage.removeItem("mfa_user_id");
+          sessionStorage.removeItem("mfa_required");
+          router.replace("/login");
+          return;
+        }
+      }
+      
+      // Get the current session to get a valid access token
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        console.error("[MFA Verify] No session available");
+        toast.error("Failed to get session. Please log in again.");
+        router.replace("/login");
+        return;
+      }
+      
+      const accessToken = session.access_token;
+      
+      // Now verify the MFA code
       const response = await fetch('/api/auth-service/mfa/verify-login', {
         method: 'POST',
         headers: {
@@ -85,34 +123,17 @@ export default function MFAVerifyPage() {
       if (response.ok && data.success) {
         console.log("[MFA Verify] MFA verification successful!");
         
-        // Set the session in Supabase
-        const supabase = getSupabaseBrowserClient();
-        const { error: setSessionError } = await supabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken || "",
-        });
-        
-        if (setSessionError) {
-          console.error("[MFA Verify] Error setting session:", setSessionError);
-          toast.error("Failed to create session. Please log in again.");
-          // Clear MFA data
-          sessionStorage.removeItem("mfa_access_token");
-          sessionStorage.removeItem("mfa_refresh_token");
-          sessionStorage.removeItem("mfa_user_id");
-          sessionStorage.removeItem("mfa_required");
-          router.replace("/login");
-          return;
-        }
-        
         // Clear MFA data from sessionStorage
         sessionStorage.removeItem("mfa_access_token");
         sessionStorage.removeItem("mfa_refresh_token");
         sessionStorage.removeItem("mfa_user_id");
         sessionStorage.removeItem("mfa_required");
         
-        // Wait a moment for the session to be established
+        // Refresh the session one more time to ensure it's valid
+        await supabase.auth.refreshSession();
+        
+        // Check onboarding status
         setTimeout(async () => {
-          // Check onboarding status
           const onboardingResponse = await fetch("/api/auth-service/onboarding-status", {
             headers: {
               Authorization: `Bearer ${accessToken}`,
