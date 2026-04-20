@@ -41,6 +41,7 @@ import { SkillsSelector, UserSkill } from "@/components/settings/SkillsSelector"
 import { MFASetupModal } from '@/components/settings/MFASetupModal';
 import { MFADisableModal } from '@/components/settings/MFADisableModal';
 import { getMFAStatus } from '@/lib/mfa-api';
+import { Textarea } from "@/components/ui/textarea";
 
 // Modal Component for confirmation dialogs
 const ConfirmModal = ({ isOpen, onClose, onConfirm, title, message, danger = false }: any) => {
@@ -111,7 +112,7 @@ const ContactSupportModal = ({ isOpen, onClose, onSubmit }: any) => {
             </div>
             <div>
               <Label className="text-gray-300">Message</Label>
-              <textarea
+              <Textarea
                 className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500 mt-1"
                 rows={5}
                 value={message}
@@ -147,6 +148,10 @@ export default function SettingsPage() {
   const [showMFASetupModal, setShowMFASetupModal] = useState(false);
   const [showMFADisableModal, setShowMFADisableModal] = useState(false);
   const [loadingMFAStatus, setLoadingMFAStatus] = useState(true);
+  const [showMFARequestModal, setShowMFARequestModal] = useState(false);
+  const [mfaRequestReason, setMfaRequestReason] = useState("");
+  const [isSubmittingMFARequest, setIsSubmittingMFARequest] = useState(false);
+
   
   // Profile form state
   const [formData, setFormData] = useState({
@@ -1133,7 +1138,7 @@ export default function SettingsPage() {
 
                 <div>
                   <Label className="text-gray-300">Bio</Label>
-                  <textarea
+                  <Textarea
                     className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500 mt-1"
                     rows={4}
                     value={formData.bio}
@@ -1271,7 +1276,7 @@ export default function SettingsPage() {
 
                     <div>
                       <Label className="text-sm text-gray-300 mb-1 block">Professional Summary</Label>
-                      <textarea
+                      <Textarea
                         value={professionalInfo.professionalSummary}
                         onChange={(e) => setProfessionalInfo({ ...professionalInfo, professionalSummary: e.target.value })}
                         placeholder="e.g., Experienced software engineer with 8+ years of expertise in full-stack development, leading cross-functional teams, and delivering scalable solutions..."
@@ -1502,7 +1507,7 @@ export default function SettingsPage() {
 
                         <div>
                           <Label className="text-gray-300 mb-1 block">Description</Label>
-                          <textarea
+                          <Textarea
                             value={educationForm.description}
                             onChange={(e) => setEducationForm({ ...educationForm, description: e.target.value })}
                             placeholder="Describe your studies, achievements, relevant coursework..."
@@ -1868,7 +1873,6 @@ export default function SettingsPage() {
                   </GlowButton>
                 </div>
 
-
                 {/* MFA Section */}
                 <div className="border border-gray-800 rounded-xl overflow-hidden">
                   <div className="p-5 bg-gray-900/50">
@@ -1914,6 +1918,22 @@ export default function SettingsPage() {
                         </div>
                       )}
                     </div>
+                    
+                    {/* Lost Access Link - Show when MFA is enabled */}
+                    {mfaStatus.enabled && (
+                      <div className="mt-4 pt-4 border-t border-gray-800">
+                        <button
+                          onClick={() => {
+                            // Open modal to request MFA reset from admin
+                            setShowMFARequestModal(true);
+                          }}
+                          className="text-sm text-yellow-400 hover:text-yellow-300 transition-colors flex items-center gap-2"
+                        >
+                          <AlertCircle className="w-4 h-4" />
+                          Lost access to your authenticator app? Request admin help
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
                 
@@ -1973,6 +1993,94 @@ export default function SettingsPage() {
         onClose={() => setShowMFADisableModal(false)}
         onMFASuccessfullyDisabled={handleMFADisabled}
       />
+
+      {/* Request MFA Reset Modal */}
+      {showMFARequestModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
+          <div className="bg-gray-900 rounded-lg max-w-md w-full border border-yellow-500/30 shadow-2xl">
+            <div className="p-6 border-b border-gray-800">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-yellow-500/20 rounded-xl">
+                  <AlertCircle className="w-6 h-6 text-yellow-400" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-semibold text-white">Request MFA Reset</h3>
+                  <p className="text-gray-400 text-sm">Submit a request to system admin</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowMFARequestModal(false)}
+                className="absolute top-4 right-4 text-gray-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3">
+                <p className="text-sm text-yellow-300">
+                  ⚠️ Important: This request will disable your MFA. A system administrator will review your request.
+                  You will receive an email notification once your request is processed.
+                </p>
+              </div>
+              <div>
+                <Label className="text-gray-300 mb-1 block">Reason for request</Label>
+                <Textarea
+                  rows={3}
+                  value={mfaRequestReason}
+                  onChange={(e) => setMfaRequestReason(e.target.value)}
+                  placeholder="e.g., Lost phone, factory reset, authenticator app not working, etc."
+                  className="bg-gray-800 border-gray-700"
+                />
+              </div>
+            </div>
+            <div className="flex gap-3 p-6 border-t border-gray-800">
+              <GlowButton variant="outline" onClick={() => setShowMFARequestModal(false)} fullWidth>
+                Cancel
+              </GlowButton>
+              <GlowButton 
+                onClick={async () => {
+                  if (!mfaRequestReason.trim()) {
+                    toast.error("Please provide a reason for your request");
+                    return;
+                  }
+                  
+                  setIsSubmittingMFARequest(true);
+                  try {
+                    const supabase = getSupabaseBrowserClient();
+                    const { data: { session } } = await supabase.auth.getSession();
+                    
+                    const response = await fetch('/api/auth-service/mfa/request-reset', {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${session?.access_token}`,
+                      },
+                      body: JSON.stringify({ reason: mfaRequestReason }),
+                    });
+                    
+                    if (response.ok) {
+                      toast.success("Request submitted! Admin will review and contact you.");
+                      setShowMFARequestModal(false);
+                      setMfaRequestReason("");
+                    } else {
+                      throw new Error("Failed to submit request");
+                    }
+                  } catch (error) {
+                    toast.error("Failed to submit request. Please try again.");
+                  } finally {
+                    setIsSubmittingMFARequest(false);
+                  }
+                }}
+                isLoading={isSubmittingMFARequest}
+                fullWidth
+                className="bg-yellow-600 hover:bg-yellow-700"
+              >
+                Submit Request
+              </GlowButton>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

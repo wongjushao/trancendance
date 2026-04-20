@@ -37,50 +37,6 @@ export interface Invitation {
   status: 'pending' | 'accepted' | 'expired';
 }
 
-// Mock Organizations with domains
-export const mockOrganizations: Organization[] = [
-  {
-    id: 1,
-    name: "Tech University",
-    domain: "tech.edu",
-    description: "Leading technology education institution focused on practical learning",
-    memberCount: 2847,
-    verified: true,
-  },
-  {
-    id: 2,
-    name: "DevCorp Training",
-    domain: "devcorp.com",
-    description: "Corporate development training platform for professionals",
-    memberCount: 1523,
-    verified: true,
-  },
-  {
-    id: 3,
-    name: "Design Academy",
-    domain: "design.academy",
-    description: "Creative design and UX courses for aspiring designers",
-    memberCount: 892,
-    verified: true,
-  },
-  {
-    id: 4,
-    name: "Data Science Institute",
-    domain: "datasci.org",
-    description: "Advanced data science and machine learning education",
-    memberCount: 456,
-    verified: true,
-  },
-  {
-    id: 5,
-    name: "Cloud Masters",
-    domain: "cloudmasters.com",
-    description: "Cloud computing certification programs",
-    memberCount: 1234,
-    verified: true,
-  },
-];
-
 // Mock users (for development)
 export const mockUsers: MockUser[] = [
   {
@@ -132,19 +88,20 @@ export const mockPendingRequests: PendingRequest[] = [
   },
 ];
 
-// Mock invitations
-export const mockInvitations: Invitation[] = [
+
+// Add mock invitations
+export const mockInvitations = [
   {
     id: 'inv-1',
-    token: 'mock-token-123',
-    email: 'newuser@tech.edu',
-    role: 'teacher',
+    token: 'test-token-123',
+    email: 'invited@example.com',
     organizationId: 1,
-    organizationName: 'Tech University',
-    invitedBy: 'user-1',
-    invitedByName: 'Alice Johnson',
-    createdAt: new Date('2024-03-25'),
-    expiresAt: new Date('2024-04-01'),
+    organizationName: '42 Kuala Lumpur',
+    role: 'student',
+    invitedBy: 'user-5',
+    invitedByName: 'Mike Johnson',
+    createdAt: new Date(),
+    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     status: 'pending',
   },
 ];

@@ -1,63 +1,35 @@
-// frontend/components/organization/InviteMemberModal.tsx
+// frontend/components/teacher/InviteStudentModal.tsx
+
 'use client';
 
-import { useState, useEffect } from 'react';
-import { X, Mail, Send, AlertCircle, Users, GraduationCap, Crown } from 'lucide-react';
+import { useState } from 'react';
+import { X, Mail, Send, AlertCircle, BookOpen, UserPlus } from 'lucide-react';
 import { GlowButton } from '@/components/lms/GlowButton';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Organization, OrganizationRole } from '@/types/organizations';
-import { createOrganizationInvite } from '@/lib/invites';
+import { createCourseInvite } from '@/lib/invites';
 import { toast } from 'sonner';
 
-interface InviteMemberModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  organization: Organization;
-  invitedByName: string;
-  currentUserRole: 'admin' | 'sub_admin' | 'teacher';
+interface Course {
+  id: number;
+  title: string;
+  organization_id: number;
+  organization_name: string;
 }
 
-export function InviteMemberModal({ 
-  isOpen, 
-  onClose, 
-  organization, 
-  invitedByName,
-  currentUserRole 
-}: InviteMemberModalProps) {
+interface InviteStudentModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  courses: Course[];
+  invitedByName: string;
+}
+
+export function InviteStudentModal({ isOpen, onClose, courses, invitedByName }: InviteStudentModalProps) {
   const [email, setEmail] = useState('');
-  const [selectedRole, setSelectedRole] = useState<OrganizationRole>('student');
+  const [selectedCourseId, setSelectedCourseId] = useState<number | null>(courses[0]?.id || null);
   const [message, setMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [emailError, setEmailError] = useState('');
-
-  // Debug: Log when modal opens/closes
-  useEffect(() => {
-    console.log('[InviteMemberModal] isOpen changed:', isOpen);
-    if (isOpen) {
-      console.log('[InviteMemberModal] Modal opened with organization:', organization?.name);
-    }
-  }, [isOpen, organization]);
-
-  // Determine which roles can be invited based on inviter's role
-  const getAvailableRoles = (): { role: OrganizationRole; label: string; icon: React.ReactNode; description: string }[] => {
-    const roles = [
-      { role: 'student' as const, label: 'Student', icon: <Users className="w-4 h-4" />, description: 'Can view and join courses, submit assignments' },
-      { role: 'teacher' as const, label: 'Teacher', icon: <GraduationCap className="w-4 h-4" />, description: 'Can create courses, manage assignments, invite students' },
-    ];
-    
-    // Only admins can invite sub_admins
-    if (currentUserRole === 'admin') {
-      roles.push({ 
-        role: 'sub_admin' as const, 
-        label: 'Sub-Administrator', 
-        icon: <Crown className="w-4 h-4" />, 
-        description: 'Can manage organization, members, and approve requests (cannot demote primary admin)' 
-      });
-    }
-    
-    return roles;
-  };
 
   const validateEmail = (email: string): boolean => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -76,53 +48,42 @@ export function InviteMemberModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    console.log('[InviteMemberModal] Submit clicked');
-    console.log('[InviteMemberModal] Email:', email);
-    console.log('[InviteMemberModal] Selected Role:', selectedRole);
-    console.log('[InviteMemberModal] Organization:', organization);
-    
-    if (!validateEmail(email)) {
-      console.log('[InviteMemberModal] Email validation failed');
+    if (!validateEmail(email)) return;
+    if (!selectedCourseId) {
+      toast.error('Please select a course');
       return;
     }
     
+    const selectedCourse = courses.find(c => c.id === selectedCourseId);
+    if (!selectedCourse) return;
+    
     setIsSubmitting(true);
     
-    try {
-      // Create invitation
-      console.log('[InviteMemberModal] Creating invitation...');
-      const invitation = createOrganizationInvite(
-        email,
-        organization.id,
-        selectedRole,
-        'current-user-id',
-        invitedByName
-      );
-      
-      console.log('[InviteMemberModal] Invitation created:', invitation);
-      console.log('[InviteMemberModal] Invitation token:', invitation.token);
-      
-      toast.success(`Invitation sent to ${email} as ${getAvailableRoles().find(r => r.role === selectedRole)?.label}`);
-      
-      // Reset form
-      setEmail('');
-      setMessage('');
-      setSelectedRole('student');
-      onClose();
-    } catch (error) {
-      console.error('[InviteMemberModal] Error creating invitation:', error);
-      toast.error('Failed to send invitation. Please try again.');
-    } finally {
-      setIsSubmitting(false);
-    }
+    // Simulate API call
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Create course invitation
+    const invitation = createCourseInvite(
+      email,
+      selectedCourse.organization_id,
+      selectedCourse.id,
+      selectedCourse.title,
+      'current-user-id',
+      invitedByName
+    );
+    
+    toast.success(`Course invitation sent to ${email} for ${selectedCourse.title}`);
+    
+    // Reset form
+    setEmail('');
+    setMessage('');
+    setIsSubmitting(false);
+    onClose();
   };
 
-  if (!isOpen) {
-    console.log('[InviteMemberModal] Modal not open, returning null');
-    return null;
-  }
+  if (!isOpen) return null;
 
-  const availableRoles = getAvailableRoles();
+  const selectedCourse = courses.find(c => c.id === selectedCourseId);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
@@ -139,11 +100,11 @@ export function InviteMemberModal({
         <div className="p-6 border-b border-gray-800">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-purple-500/20 rounded-full flex items-center justify-center">
-              <Mail className="w-5 h-5 text-purple-400" />
+              <UserPlus className="w-5 h-5 text-purple-400" />
             </div>
             <div>
-              <h2 className="text-xl font-semibold text-white">Invite Member</h2>
-              <p className="text-sm text-gray-400">Send an invitation to join {organization.name}</p>
+              <h2 className="text-xl font-semibold text-white">Invite Student</h2>
+              <p className="text-sm text-gray-400">Send a course invitation to a student</p>
             </div>
           </div>
         </div>
@@ -153,12 +114,12 @@ export function InviteMemberModal({
           {/* Email Field */}
           <div>
             <Label htmlFor="email" className="text-white mb-2 block">
-              Email Address <span className="text-red-400">*</span>
+              Student Email <span className="text-red-400">*</span>
             </Label>
             <Input
               id="email"
               type="email"
-              placeholder="user@example.com"
+              placeholder="student@example.com"
               value={email}
               onChange={(e) => {
                 setEmail(e.target.value);
@@ -174,35 +135,35 @@ export function InviteMemberModal({
             )}
           </div>
 
-          {/* Role Selection */}
+          {/* Course Selection */}
           <div>
             <Label className="text-white mb-2 block">
-              Assign Role <span className="text-red-400">*</span>
+              Select Course <span className="text-red-400">*</span>
             </Label>
-            <div className="space-y-2">
-              {availableRoles.map((role) => (
+            <div className="space-y-2 max-h-48 overflow-y-auto">
+              {courses.map((course) => (
                 <label
-                  key={role.role}
-                  className={`flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-colors ${
-                    selectedRole === role.role
+                  key={course.id}
+                  className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors ${
+                    selectedCourseId === course.id
                       ? 'bg-purple-500/20 border border-purple-500/50'
                       : 'bg-gray-800/50 border border-gray-700 hover:bg-gray-800'
                   }`}
                 >
                   <input
                     type="radio"
-                    name="role"
-                    value={role.role}
-                    checked={selectedRole === role.role}
-                    onChange={() => setSelectedRole(role.role)}
-                    className="mt-1 text-purple-500 focus:ring-purple-500"
+                    name="course"
+                    value={course.id}
+                    checked={selectedCourseId === course.id}
+                    onChange={() => setSelectedCourseId(course.id)}
+                    className="text-purple-500 focus:ring-purple-500"
                   />
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="text-purple-400">{role.icon}</span>
-                      <span className="font-medium text-white">{role.label}</span>
+                      <BookOpen className="w-4 h-4 text-purple-400" />
+                      <span className="font-medium text-white">{course.title}</span>
                     </div>
-                    <p className="text-xs text-gray-400 mt-1">{role.description}</p>
+                    <p className="text-xs text-gray-400 mt-1">{course.organization_name}</p>
                   </div>
                 </label>
               ))}
@@ -227,8 +188,8 @@ export function InviteMemberModal({
           {/* Info Box */}
           <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
             <p className="text-xs text-blue-300">
-              The invited user will receive an email with instructions to join. 
-              If they are not already a member, they will be added to the organization upon acceptance.
+              The student will be automatically added to the organization as a student (if not already a member)
+              and enrolled in the selected course upon accepting the invitation.
             </p>
           </div>
 

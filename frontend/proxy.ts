@@ -27,26 +27,22 @@ const authOnlyRoutes = [
   "/auth/error",
 ];
 
-// Pages that logged-in users should not see
+// Pages that logged-in users should NOT see (they get redirected to dashboard)
 const publicOnlyRoutes = [
   "/login",
   "/register",
   "/forgot-password",
   "/reset-password",
-  "/accept-invite",
 ];
 
-// Public routes that don't require authentication
+// Routes that should be accessible to both authenticated and unauthenticated users
 const publicRoutes = [
   "/",
   "/auth/callback",
   "/auth/confirm",
   "/auth/error",
+  "/accept-invite",  // ADD THIS - invitation acceptance should be accessible to both
 ];
-
-// We can't check sessionStorage from middleware, so we'll rely on the fact that
-// when MFA is pending, there is NO active session. The user is not authenticated.
-// So we just need to make sure /auth/mfa-verify is accessible without a session.
 
 async function checkOnboardingStatus(token: string): Promise<boolean> {
   try {
@@ -83,7 +79,7 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Allow public routes without any checks
+  // Allow public routes without any checks (including accept-invite)
   if (publicRoutes.some(route => pathname === route)) {
     console.log("[proxy] Public route, allowing access:", pathname);
     return NextResponse.next();

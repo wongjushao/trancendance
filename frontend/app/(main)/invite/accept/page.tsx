@@ -1,3 +1,4 @@
+// frontend/app/(auth)/accept-invite/page.tsx
 "use client";
 
 import { useState, useEffect, Suspense } from "react";
@@ -30,18 +31,24 @@ function AcceptInviteContent() {
   const [error, setError] = useState<string | null>(null);
   const [user, setUser] = useState<any>(null);
 
-  // Load invitation
+  console.log('[AcceptInvite] Page loaded, token:', token);
+
+  // Load invitation from the invites system
   useEffect(() => {
     const loadInvitation = async () => {
       if (!token) {
+        console.log('[AcceptInvite] No token in URL');
         setError('No invitation token provided');
         setIsLoading(false);
         return;
       }
 
       setIsLoading(true);
+      console.log('[AcceptInvite] Loading invitation for token:', token);
       
+      // Get invitation from mock invites storage
       const invite = getInvitationByToken(token);
+      console.log('[AcceptInvite] Found invitation:', invite);
       
       if (!invite) {
         setError('Invitation not found or has expired');
@@ -82,6 +89,7 @@ function AcceptInviteContent() {
     const checkUser = async () => {
       const supabase = getSupabaseBrowserClient();
       const { data: { user } } = await supabase.auth.getUser();
+      console.log('[AcceptInvite] Current user:', user?.email || 'Not logged in');
       setUser(user);
     };
     checkUser();
@@ -90,11 +98,13 @@ function AcceptInviteContent() {
   const handleAccept = async () => {
     if (!invitation || !token) return;
     
+    console.log('[AcceptInvite] Accepting invitation for:', invitation.email);
     setIsAccepting(true);
     setError(null);
     
-    // If user is not logged in, store invitation and redirect to register
+    // If user is not logged in, redirect to signup with invitation data
     if (!user) {
+      console.log('[AcceptInvite] User not logged in, storing invitation and redirecting to register');
       sessionStorage.setItem('pending_invitation', JSON.stringify({
         token: invitation.token,
         email: invitation.email,
@@ -107,19 +117,26 @@ function AcceptInviteContent() {
       return;
     }
     
-    // Check email match
+    // User is logged in, check email match
     if (user.email !== invitation.email) {
+      console.log('[AcceptInvite] Email mismatch - logged in as:', user.email, 'invitation for:', invitation.email);
       setError(`This invitation was sent to ${invitation.email}. Please log in with that email address to accept.`);
       setIsAccepting(false);
       return;
     }
     
+    // User is logged in with matching email, accept invitation directly
     try {
+      console.log('[AcceptInvite] Accepting invitation for logged-in user');
+      
+      // Call acceptInvitation which updates the invitation status
       const result = acceptInvitation(token, user.id, user.email);
       
       if (!result.success) {
         throw new Error(result.message);
       }
+      
+      console.log('[AcceptInvite] Invitation accepted:', result);
       
       // Update user role data
       setUserRoleData({
@@ -131,15 +148,18 @@ function AcceptInviteContent() {
         pendingOrganizationName: null,
       });
       
+      // Clear invitation from session storage if any
       sessionStorage.removeItem('pending_invitation');
       
-      // Redirect to confirmation page - using absolute path
+      console.log('[AcceptInvite] Redirecting to confirmation page');
+      // Redirect to confirmation page
       const params = new URLSearchParams();
       params.set('orgId', invitation.organizationId.toString());
       params.set('orgName', invitation.organizationName);
       params.set('role', invitation.role);
       router.push(`/organizations/join/confirm?${params.toString()}`);
     } catch (err: any) {
+      console.error('[AcceptInvite] Error accepting invitation:', err);
       setError(err.message || 'Failed to accept invitation. Please try again.');
     } finally {
       setIsAccepting(false);

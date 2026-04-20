@@ -9,11 +9,7 @@ import {
   BookOpen,
   FileText,
   BarChart3,
-  Settings,
-  ChevronLeft,
-  Menu, 
-  Users,
-  Crown,
+  Menu,
   Shield
 } from "lucide-react";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
@@ -39,6 +35,22 @@ export function Sidebar({ user }: SidebarProps) {
     last_name: null,
   });
 
+  // Helper function to determine if a link is active
+  const getIsActive = (href: string) => {
+    // For the main Organizations page - only highlight on exact match
+    if (href === "/organizations") {
+      return pathname === "/organizations";
+    }
+    
+    // For admin panel links - highlight when on admin pages
+    if (href.includes("/admin")) {
+      return pathname === href || pathname.startsWith(`${href}/`);
+    }
+    
+    // For all other links - exact match or subpaths
+    return pathname === href || pathname.startsWith(`${href}/`);
+  };
+
   // Load sidebar state from localStorage only after mount
   useEffect(() => {
     setMounted(true);
@@ -48,13 +60,12 @@ export function Sidebar({ user }: SidebarProps) {
     }
   }, []);
 
-  // Save sidebar state - ADDED event dispatch (preserves original save logic)
+  // Save sidebar state
   const toggleSidebar = () => {
     const newState = !isCollapsed;
     setIsCollapsed(newState);
     localStorage.setItem("sidebar_collapsed", String(newState));
     
-    // ADDED: Dispatch event for layout to listen to
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('sidebar-toggle', { detail: { collapsed: newState } }));
     }
@@ -126,41 +137,31 @@ export function Sidebar({ user }: SidebarProps) {
     const baseItems = [
       { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
       { href: "/courses", label: "Courses", icon: BookOpen },
-      { href: "/assignments", label: "Assignments", icon: FileText },
+      { href: "/organizations", label: "Organizations", icon: Building2 },
+      //{ href: "/assignments", label: "Assignments", icon: FileText },
       { href: "/analytics", label: "Analytics", icon: BarChart3 },
     ];
 
     // Add organization admin link for org_admin users
     if (roleData.role === "org_admin" && roleData.organizationId) {
-      baseItems.splice(2, 0, {
+      baseItems.splice(3, 0, {
         href: `/organizations/${roleData.organizationId}/admin`,
-        label: "Organization Admin",
+        label: "Admin Panel",
         icon: Building2,
       });
     }
 
     // Add system admin link for system_admin users
     if (roleData.role === "system_admin") {
-      baseItems.splice(2, 0, {
+      baseItems.splice(3, 0, {
         href: "/admin",
         label: "System Admin",
         icon: Shield,
       });
     }
 
-    // Add organizations link for system admin
-    if (roleData.role === "system_admin") {
-      baseItems.splice(3, 0, {
-        href: "/organizations",
-        label: "Organizations",
-        icon: Building2,
-      });
-    }
-
     return baseItems;
   };
-
-  const navItems = getNavItems();
 
   // Don't render during SSR to prevent hydration mismatch
   if (!mounted) {
@@ -209,7 +210,8 @@ export function Sidebar({ user }: SidebarProps) {
       <nav className="flex-1 py-6 overflow-y-auto">
         <div className="space-y-1 px-3">
           {getNavItems().map((item) => {
-            const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
+            const isActive = getIsActive(item.href);
+            
             return (
               <Link
                 key={item.href}

@@ -1,8 +1,8 @@
 // frontend/components/dev/RoleSwitcher.tsx
 'use client';
 
-import { useState, useEffect } from "react";
-import { Shield, ChevronDown, Check, Eye } from "lucide-react";
+import { useState } from "react";
+import { Shield, ChevronDown, Check } from "lucide-react";
 import { useRole } from "@/components/providers/RoleProvider";
 import { UserRole } from "@/lib/role";
 
@@ -36,56 +36,43 @@ const roleOptions: RoleOption[] = [
     label: "Organization Admin",
     description: "Manage organization settings and members",
     icon: "🏢",
-    dashboardPreview: "Organization Admin Dashboard"
+    organizationId: 1,
+    organizationName: "Tech University",
+    dashboardPreview: "Organization Admin Dashboard with member management"
   },
   {
     value: "system_admin",
     label: "System Admin",
     description: "Full system access",
     icon: "👑",
-    dashboardPreview: "System Admin Dashboard"
+    dashboardPreview: "System Admin Dashboard with platform-wide controls"
   },
-  {
-    value: "pending_teacher",
-    label: "Pending Teacher",
-    description: "Teacher request pending approval",
-    icon: "⏳",
-    dashboardPreview: "Pending approval page"
-  },
-  {
-    value: "pending_org_admin",
-    label: "Pending Org Admin",
-    description: "Organization admin request pending",
-    icon: "⏳",
-    dashboardPreview: "Pending approval page"
-  }
 ];
 
 export function RoleSwitcher() {
   const { roleData, setRole, clearRole } = useRole();
   const [isOpen, setIsOpen] = useState(false);
-  const [showPreview, setShowPreview] = useState<string | null>(null);
 
   const currentRole = roleOptions.find(r => r.value === roleData.role) || roleOptions[0];
 
-  const switchRole = (role: RoleOption) => {
+  const switchRole = (option: RoleOption) => {
     setRole({
-      role: role.value,
-      organizationId: role.organizationId || null,
-      organizationName: role.organizationName || null,
+      role: option.value,
+      organizationId: option.organizationId || null,
+      organizationName: option.organizationName || null,
       pendingRole: null,
+      pendingOrganizationId: null,
+      pendingOrganizationName: null,
     });
     setIsOpen(false);
     // Reload to refresh the dashboard with new role
     window.location.reload();
   };
 
-  const getCurrentRoleIcon = () => {
-    return currentRole.icon;
-  };
-
-  const getCurrentRoleLabel = () => {
-    return currentRole.label;
+  const resetToDefault = () => {
+    clearRole();
+    setIsOpen(false);
+    window.location.reload();
   };
 
   return (
@@ -96,7 +83,7 @@ export function RoleSwitcher() {
         aria-label="Role switcher"
       >
         <Shield className="h-4 w-4" />
-        <span className="font-medium">{getCurrentRoleLabel()}</span>
+        <span className="font-medium">{currentRole.label}</span>
         <ChevronDown className={`h-3 w-3 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
       </button>
 
@@ -113,50 +100,32 @@ export function RoleSwitcher() {
             </div>
             <div className="max-h-96 overflow-y-auto">
               {roleOptions.map((option) => (
-                <div
+                <button
                   key={option.value}
-                  className="relative"
-                  onMouseEnter={() => setShowPreview(option.value)}
-                  onMouseLeave={() => setShowPreview(null)}
+                  onClick={() => switchRole(option)}
+                  className={`w-full px-3 py-2 text-left hover:bg-gray-700 transition-colors flex items-center justify-between group ${
+                    roleData.role === option.value ? 'bg-gray-700' : ''
+                  }`}
                 >
-                  <button
-                    onClick={() => switchRole(option)}
-                    className={`w-full px-3 py-2 text-left hover:bg-gray-700 transition-colors flex items-center justify-between group ${
-                      roleData.role === option.value ? 'bg-gray-700' : ''
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="text-lg">{option.icon}</span>
-                      <div>
-                        <div className="text-sm font-medium text-white">{option.label}</div>
-                        <div className="text-xs text-gray-400">{option.description}</div>
-                      </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">{option.icon}</span>
+                    <div>
+                      <div className="text-sm font-medium text-white">{option.label}</div>
+                      <div className="text-xs text-gray-400">{option.description}</div>
                     </div>
-                    {roleData.role === option.value && (
-                      <Check className="h-4 w-4 text-green-500" />
-                    )}
-                  </button>
-                  
-                  {/* Preview Tooltip */}
-                  {showPreview === option.value && (
-                    <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 w-64 rounded-lg bg-gray-900 shadow-xl border border-gray-700 p-2 z-50 pointer-events-none">
-                      <div className="text-xs text-gray-400 mb-1">Preview</div>
-                      <div className="text-sm text-white">{option.dashboardPreview}</div>
-                    </div>
+                  </div>
+                  {roleData.role === option.value && (
+                    <Check className="h-4 w-4 text-green-500" />
                   )}
-                </div>
+                </button>
               ))}
             </div>
             <div className="p-2 border-t border-gray-700">
               <button
-                onClick={() => {
-                  clearRole();
-                  setIsOpen(false);
-                  window.location.reload();
-                }}
+                onClick={resetToDefault}
                 className="w-full text-center text-xs text-red-400 hover:text-red-300 transition-colors"
               >
-                Reset to Default
+                Reset to Default (Student)
               </button>
             </div>
           </div>

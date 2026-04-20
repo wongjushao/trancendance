@@ -17,9 +17,11 @@ const MOCK_EMAILS_KEY = 'mock_emails';
 export function storeMockEmail(email: MockEmail): void {
   if (typeof window === 'undefined') return;
   
+  console.log('[MockEmail] Storing email:', email);
   const existing = getMockEmails();
   existing.unshift(email);
   localStorage.setItem(MOCK_EMAILS_KEY, JSON.stringify(existing));
+  console.log('[MockEmail] Total emails now:', existing.length);
 }
 
 export function getMockEmails(): MockEmail[] {
@@ -28,7 +30,12 @@ export function getMockEmails(): MockEmail[] {
   const stored = localStorage.getItem(MOCK_EMAILS_KEY);
   if (stored) {
     try {
-      return JSON.parse(stored);
+      const emails = JSON.parse(stored);
+      // Convert date strings back to Date objects
+      return emails.map((email: any) => ({
+        ...email,
+        createdAt: new Date(email.createdAt)
+      }));
     } catch {
       return [];
     }
@@ -49,6 +56,7 @@ export function markEmailAsRead(id: string): void {
 export function clearMockEmails(): void {
   if (typeof window === 'undefined') return;
   localStorage.removeItem(MOCK_EMAILS_KEY);
+  console.log('[MockEmail] All emails cleared');
 }
 
 // Generate invitation link
@@ -65,6 +73,8 @@ export function sendMockInvitation(
   token: string,
   invitedByName: string
 ): void {
+  console.log('[MockEmail] sendMockInvitation called with:', { toEmail, organizationName, role, token, invitedByName });
+  
   const subject = `Invitation to join ${organizationName} on Educatorio`;
   const invitationLink = generateInvitationLink(token);
   
@@ -83,7 +93,7 @@ Best regards,
 The Educatorio Team
   `.trim();
 
-  storeMockEmail({
+  const newEmail: MockEmail = {
     id: Date.now().toString(),
     to: toEmail,
     subject,
@@ -91,8 +101,11 @@ The Educatorio Team
     link: invitationLink,
     createdAt: new Date(),
     read: false,
-  });
+  };
+
+  storeMockEmail(newEmail);
   
   console.log('[Mock Email] Sent invitation to:', toEmail);
   console.log('[Mock Email] Invitation link:', invitationLink);
+  console.log('[Mock Email] Stored email ID:', newEmail.id);
 }

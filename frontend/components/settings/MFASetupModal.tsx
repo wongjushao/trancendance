@@ -10,9 +10,6 @@ import {
   Copy, 
   Check,
   AlertCircle,
-  Download,
-  Eye,
-  EyeOff,
   Loader2
 } from 'lucide-react';
 import { GlowButton } from '@/components/lms/GlowButton';
@@ -28,15 +25,13 @@ interface MFASetupModalProps {
 }
 
 export function MFASetupModal({ isOpen, onClose, onMFASuccessfullyEnabled }: MFASetupModalProps) {
-  const [step, setStep] = useState<'setup' | 'verify' | 'backup'>('setup');
+  const [step, setStep] = useState<'setup' | 'verify'>('setup');
   const [secret, setSecret] = useState<string>('');
   const [provisioningUri, setProvisioningUri] = useState<string>('');
   const [verificationCode, setVerificationCode] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
-  const [backupCodes, setBackupCodes] = useState<string[]>([]);
   const [copied, setCopied] = useState(false);
-  const [showBackupCodes, setShowBackupCodes] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Initialize MFA setup when modal opens
@@ -71,10 +66,13 @@ export function MFASetupModal({ isOpen, onClose, onMFASuccessfullyEnabled }: MFA
     try {
       const response = await verifyAndEnableMFA(verificationCode);
       if (response.success) {
-        setBackupCodes(response.backup_codes);
-        setStep('backup');
         toast.success('MFA enabled successfully!');
         onMFASuccessfullyEnabled();
+        onClose();
+        // Reset state
+        setStep('setup');
+        setVerificationCode('');
+        setError(null);
       }
     } catch (error: any) {
       console.error('Verification error:', error);
@@ -88,28 +86,6 @@ export function MFASetupModal({ isOpen, onClose, onMFASuccessfullyEnabled }: MFA
     navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  };
-
-  const downloadBackupCodes = () => {
-    const blob = new Blob([backupCodes.join('\n')], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'trancendance-backup-codes.txt';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  const handleComplete = () => {
-    onMFASuccessfullyEnabled();
-    onClose();
-    // Reset state for next time
-    setStep('setup');
-    setVerificationCode('');
-    setBackupCodes([]);
-    setError(null);
   };
 
   if (!isOpen) return null;
@@ -150,72 +126,73 @@ export function MFASetupModal({ isOpen, onClose, onMFASuccessfullyEnabled }: MFA
 
         {/* Step 1: Setup - Display Secret and QR Code */}
         {step === 'setup' && (
-        <div className="space-y-4">
+          <div className="space-y-4">
             {isLoading ? (
-            <div className="flex justify-center py-8">
+              <div className="flex justify-center py-8">
                 <Loader2 className="w-8 h-8 animate-spin text-purple-500" />
-            </div>
+              </div>
             ) : (
-            <>
+              <>
                 <div className="text-center">
-                <div className="inline-block p-3 bg-gray-800 rounded-xl mb-3">
+                  <div className="inline-block p-3 bg-gray-800 rounded-xl mb-3">
                     <Smartphone className="w-8 h-8 text-purple-400" />
-                </div>
-                <p className="text-sm text-gray-300">
+                  </div>
+                  <p className="text-sm text-gray-300">
                     Scan the QR code with Google Authenticator or any TOTP app
-                </p>
+                  </p>
                 </div>
 
                 {/* QR Code */}
                 <div className="flex justify-center">
-                <div className="bg-white p-3 rounded-xl">
+                  <div className="bg-white p-3 rounded-xl">
                     {provisioningUri ? (
-                    <img 
+                      <img 
                         src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(provisioningUri)}`}
                         alt="Scan this QR code with Google Authenticator"
                         className="w-48 h-48"
-                    />
+                      />
                     ) : (
-                    <div className="w-48 h-48 bg-gray-200 flex items-center justify-center rounded">
+                      <div className="w-48 h-48 bg-gray-200 flex items-center justify-center rounded">
                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500" />
-                    </div>
+                      </div>
                     )}
-                </div>
+                  </div>
                 </div>
 
-                {/* Manual Secret Entry - keep as is */}
+                {/* Manual Secret Entry */}
                 <div className="bg-gray-800/50 rounded-lg p-3">
-                <div className="flex justify-between items-center mb-2">
+                  <div className="flex justify-between items-center mb-2">
                     <Label className="text-sm text-gray-300">Manual Entry Code</Label>
                     <button
-                    onClick={() => copyToClipboard(secret)}
-                    className="text-purple-400 hover:text-purple-300 text-sm flex items-center gap-1"
+                      onClick={() => copyToClipboard(secret)}
+                      className="text-purple-400 hover:text-purple-300 text-sm flex items-center gap-1"
                     >
-                    {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                    {copied ? 'Copied!' : 'Copy'}
+                      {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                      {copied ? 'Copied!' : 'Copy'}
                     </button>
-                </div>
-                <code className="text-sm font-mono bg-gray-900 p-2 rounded block text-center break-all">
+                  </div>
+                  <code className="text-sm font-mono bg-gray-900 p-2 rounded block text-center break-all">
                     {secret}
-                </code>
+                  </code>
                 </div>
 
                 <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3">
-                <p className="text-xs text-yellow-400">
+                  <p className="text-xs text-yellow-400">
                     <strong>Important:</strong> Save this secret key. You'll need it if you lose access to your authenticator app.
-                </p>
+                    If you lose access, you'll need to contact system admin for help.
+                  </p>
                 </div>
 
                 <GlowButton
-                onClick={() => setStep('verify')}
-                fullWidth
-                className="mt-4"
+                  onClick={() => setStep('verify')}
+                  fullWidth
+                  className="mt-4"
                 >
-                Continue to Verification
+                  Continue to Verification
                 </GlowButton>
-            </>
+              </>
             )}
-        </div>
+          </div>
         )}
 
         {/* Step 2: Verify Code */}
@@ -257,74 +234,6 @@ export function MFASetupModal({ isOpen, onClose, onMFASuccessfullyEnabled }: MFA
             >
               ← Back to setup
             </button>
-          </div>
-        )}
-
-        {/* Step 3: Backup Codes */}
-        {step === 'backup' && (
-          <div className="space-y-4">
-            <div className="text-center">
-              <div className="inline-block p-2 bg-green-500/20 rounded-full mb-3">
-                <Check className="w-6 h-6 text-green-400" />
-              </div>
-              <p className="text-sm text-gray-300">
-                MFA has been enabled! Save these backup codes in a secure place.
-              </p>
-            </div>
-
-            <div className="bg-gray-800 rounded-lg p-4">
-              <div className="flex justify-between items-center mb-3">
-                <Label className="text-sm text-gray-300">Backup Codes</Label>
-                <button
-                  onClick={() => setShowBackupCodes(!showBackupCodes)}
-                  className="text-gray-400 hover:text-white"
-                >
-                  {showBackupCodes ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                {backupCodes.map((code, index) => (
-                  <code
-                    key={index}
-                    className={`text-sm font-mono bg-gray-900 p-2 rounded text-center ${
-                      !showBackupCodes ? 'blur-sm select-none' : ''
-                    }`}
-                  >
-                    {showBackupCodes ? code : '••••••••'}
-                  </code>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex gap-3">
-              <GlowButton
-                variant="secondary"
-                onClick={downloadBackupCodes}
-                className="flex-1"
-              >
-                <Download className="w-4 h-4 mr-2" />
-                Download
-              </GlowButton>
-              <GlowButton
-                onClick={() => copyToClipboard(backupCodes.join('\n'))}
-                variant="secondary"
-                className="flex-1"
-              >
-                {copied ? <Check className="w-4 h-4 mr-2" /> : <Copy className="w-4 h-4 mr-2" />}
-                Copy All
-              </GlowButton>
-            </div>
-
-            <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
-              <p className="text-xs text-red-400">
-                <strong>Warning:</strong> Each backup code can only be used once. Store them securely.
-                If you lose access to your authenticator app, these codes are your only way to recover your account.
-              </p>
-            </div>
-
-            <GlowButton onClick={handleComplete} fullWidth>
-              Done
-            </GlowButton>
           </div>
         )}
       </div>

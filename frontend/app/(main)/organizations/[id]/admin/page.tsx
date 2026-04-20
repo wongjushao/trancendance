@@ -53,6 +53,9 @@ import {
   cancelRoleRequest
 } from "@/lib/role-requests";
 import { toast } from "sonner";
+import { PendingRequestsTab } from '@/components/organization/PendingRequestsTab';
+import { getPendingJoinRequests, getOrganizationMembers, updateMemberRole, removeMember } from '@/lib/organizations';
+import { JoinRequest } from "@/types/organizations";
 
 // Mock data for organization members
 interface Member {
@@ -176,7 +179,7 @@ const mockCourses: Course[] = [
   },
 ];
 
-const mockPendingRequests: RoleRequest[] = [
+const mockRoleRequests: RoleRequest[] = [
   {
     id: "req-1",
     userId: "user-3",
@@ -211,25 +214,33 @@ export default function OrganizationAdminPage({ params }: PageProps) {
   const [organization, setOrganization] = useState<Organization | null>(null);
   const [members, setMembers] = useState(mockMembers);
   const [courses, setCourses] = useState(mockCourses);
-  const [pendingRequests, setPendingRequests] = useState<RoleRequest[]>([]);
-  const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
+  const [roleRequests, setRoleRequests] = useState<RoleRequest[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [editingMember, setEditingMember] = useState<Member | null>(null);
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [pendingJoinRequests, setPendingJoinRequests] = useState<JoinRequest[]>([]);
+  const [activeTab, setActiveTab] = useState("members");
 
+  const organizationId = parseInt(id);
+
+  // Load organization data and pending requests
   useEffect(() => {
-    const org = mockOrganizations.find(o => o.id === parseInt(id));
+    const org = mockOrganizations.find(o => o.id === organizationId);
     if (org) {
       setOrganization(org);
-      setPendingRequests(getPendingRequestsForOrganization(parseInt(id)));
+      setRoleRequests(getPendingRequestsForOrganization(organizationId));
+      // Load pending join requests
+      const requests = getPendingJoinRequests(organizationId);
+      setPendingJoinRequests(requests);
     } else {
       router.push("/organizations");
     }
-  }, [id, router]);
+  }, [organizationId, router]);
 
   // Check if user has admin permission for this organization
-  if (roleData.role !== "admin" || roleData.organizationId !== parseInt(id)) {
+  if (roleData.role !== "org_admin" && roleData.role !== "system_admin") {
     return (
       <div className="text-center py-12">
         <Shield className="w-16 h-16 text-[#6B6B80] mx-auto mb-4" />
@@ -243,15 +254,15 @@ export default function OrganizationAdminPage({ params }: PageProps) {
     return <div className="text-white">Loading...</div>;
   }
 
-  const handleApproveRequest = (requestId: string) => {
+  const handleApproveRoleRequest = (requestId: string) => {
     const approved = approveRoleRequest(requestId);
     if (approved) {
-      setPendingRequests(prev => prev.filter(req => req.id !== requestId));
+      setRoleRequests(prev => prev.filter(req => req.id !== requestId));
       const newMember: Member = {
         id: approved.userId,
         name: approved.userName,
         email: approved.userEmail,
-        role: approved.requestedRole,
+        role: approved.requestedRole === "teacher" ? "teacher" : "admin",
         avatar: approved.userName.split(" ").map(n => n[0]).join(""),
         joinedAt: new Date().toISOString().split("T")[0],
         courses: 0,
@@ -263,10 +274,10 @@ export default function OrganizationAdminPage({ params }: PageProps) {
     }
   };
 
-  const handleRejectRequest = (requestId: string) => {
+  const handleRejectRoleRequest = (requestId: string) => {
     const rejected = rejectRoleRequest(requestId);
     if (rejected) {
-      setPendingRequests(prev => prev.filter(req => req.id !== requestId));
+      setRoleRequests(prev => prev.filter(req => req.id !== requestId));
       toast.info(`Request from ${rejected.userName} has been rejected`);
     }
   };
@@ -351,7 +362,7 @@ export default function OrganizationAdminPage({ params }: PageProps) {
       </div>
 
       {/* Admin Tabs */}
-      <Tabs defaultValue="members" className="w-full">
+      <Tabs defaultValue="members" value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="bg-[#12121A] border border-white/5 p-1 rounded-2xl mb-8 flex-wrap h-auto">
           <TabsTrigger value="members" className="rounded-xl px-6 py-2.5">
             <Users className="w-4 h-4 mr-2" />
@@ -361,12 +372,21 @@ export default function OrganizationAdminPage({ params }: PageProps) {
             <BookOpen className="w-4 h-4 mr-2" />
             Courses
           </TabsTrigger>
-          <TabsTrigger value="requests" className="rounded-xl px-6 py-2.5">
+          <TabsTrigger value="role-requests" className="rounded-xl px-6 py-2.5">
             <Clock className="w-4 h-4 mr-2" />
-            Pending Requests
-            {pendingRequests.length > 0 && (
+            Role Requests
+            {roleRequests.length > 0 && (
               <span className="ml-2 px-2 py-0.5 bg-yellow-500/20 text-yellow-400 rounded-full text-xs">
-                {pendingRequests.length}
+                {roleRequests.length}
+              </span>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="join-requests" className="rounded-xl px-6 py-2.5">
+            <UserPlus className="w-4 h-4 mr-2" />
+            Join Requests
+            {pendingJoinRequests.length > 0 && (
+              <span className="ml-2 px-2 py-0.5 bg-yellow-500/20 text-yellow-400 rounded-full text-xs">
+                {pendingJoinRequests.length}
               </span>
             )}
           </TabsTrigger>
@@ -380,7 +400,7 @@ export default function OrganizationAdminPage({ params }: PageProps) {
           </TabsTrigger>
         </TabsList>
 
-        {/* Members Tab - Same as before */}
+        {/* Members Tab */}
         <TabsContent value="members">
           <GlowCard>
             <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-6">
@@ -396,7 +416,7 @@ export default function OrganizationAdminPage({ params }: PageProps) {
                     className="pl-10 bg-[#12121A] border-white/10 rounded-xl w-48"
                   />
                 </div>
-                <GlowButton variant="primary" onClick={() => setIsInviteModalOpen(true)}>
+                <GlowButton variant="primary" onClick={() => setShowInviteModal(true)}>
                   <UserPlus className="w-4 h-4 mr-2" />
                   Invite Member
                 </GlowButton>
@@ -436,7 +456,7 @@ export default function OrganizationAdminPage({ params }: PageProps) {
                     <th className="text-left text-[#A0A0B5] font-medium py-3 px-4">Joined</th>
                     <th className="text-left text-[#A0A0B5] font-medium py-3 px-4">Courses</th>
                     <th className="text-left text-[#A0A0B5] font-medium py-3 px-4">Actions</th>
-                   </tr>
+                  </tr>
                 </thead>
                 <tbody>
                   {filteredMembers.map((member) => (
@@ -451,7 +471,7 @@ export default function OrganizationAdminPage({ params }: PageProps) {
                             <p className="text-sm text-[#A0A0B5]">{member.email}</p>
                           </div>
                         </div>
-                       </td>
+                      </td>
                       <td className="py-3 px-4">
                         <select
                           value={member.role}
@@ -463,7 +483,7 @@ export default function OrganizationAdminPage({ params }: PageProps) {
                           <option value="teacher">Teacher</option>
                           <option value="student">Student</option>
                         </select>
-                       </td>
+                      </td>
                       <td className="py-3 px-4">
                         <span className={`px-2 py-1 rounded-full text-xs ${
                           member.status === "active" 
@@ -472,7 +492,7 @@ export default function OrganizationAdminPage({ params }: PageProps) {
                         }`}>
                           {member.status}
                         </span>
-                       </td>
+                      </td>
                       <td className="py-3 px-4 text-[#A0A0B5] text-sm">{member.joinedAt}</td>
                       <td className="py-3 px-4 text-white">{member.courses}</td>
                       <td className="py-3 px-4">
@@ -495,8 +515,8 @@ export default function OrganizationAdminPage({ params }: PageProps) {
                             <MoreVertical className="w-4 h-4 text-[#A0A0B5]" />
                           </button>
                         </div>
-                       </td>
-                     </tr>
+                      </td>
+                    </tr>
                   ))}
                 </tbody>
               </table>
@@ -561,18 +581,18 @@ export default function OrganizationAdminPage({ params }: PageProps) {
           </GlowCard>
         </TabsContent>
 
-        {/* Pending Requests Tab */}
-        <TabsContent value="requests">
+        {/* Role Requests Tab */}
+        <TabsContent value="role-requests">
           <GlowCard>
             <h2 className="text-2xl font-bold text-white mb-6">Role Upgrade Requests</h2>
-            {pendingRequests.length === 0 ? (
+            {roleRequests.length === 0 ? (
               <div className="text-center py-8">
                 <Clock className="w-12 h-12 text-[#6B6B80] mx-auto mb-3" />
-                <p className="text-[#A0A0B5]">No pending requests</p>
+                <p className="text-[#A0A0B5]">No pending role requests</p>
               </div>
             ) : (
               <div className="space-y-4">
-                {pendingRequests.map((request) => (
+                {roleRequests.map((request) => (
                   <div
                     key={request.id}
                     className="flex items-center justify-between p-4 bg-[#12121A] rounded-xl border border-white/5"
@@ -593,7 +613,7 @@ export default function OrganizationAdminPage({ params }: PageProps) {
                       <GlowButton
                         variant="primary"
                         size="sm"
-                        onClick={() => handleApproveRequest(request.id)}
+                        onClick={() => handleApproveRoleRequest(request.id)}
                       >
                         <CheckCircle className="w-4 h-4 mr-1" />
                         Approve
@@ -601,7 +621,7 @@ export default function OrganizationAdminPage({ params }: PageProps) {
                       <GlowButton
                         variant="ghost"
                         size="sm"
-                        onClick={() => handleRejectRequest(request.id)}
+                        onClick={() => handleRejectRoleRequest(request.id)}
                       >
                         <XCircle className="w-4 h-4 mr-1" />
                         Reject
@@ -612,6 +632,18 @@ export default function OrganizationAdminPage({ params }: PageProps) {
               </div>
             )}
           </GlowCard>
+        </TabsContent>
+
+        {/* Join Requests Tab */}
+        <TabsContent value="join-requests">
+          <PendingRequestsTab
+            organizationId={organizationId}
+            requests={pendingJoinRequests}
+            onRequestProcessed={() => {
+              const updated = getPendingJoinRequests(organizationId);
+              setPendingJoinRequests(updated);
+            }}
+          />
         </TabsContent>
 
         {/* Analytics Tab */}
@@ -700,7 +732,7 @@ export default function OrganizationAdminPage({ params }: PageProps) {
                   Domain
                 </Label>
                 <Input
-                  defaultValue={organization.domain}
+                  defaultValue={organization.domain || ""}
                   className="bg-[#12121A] border-white/10 text-white"
                 />
                 <p className="text-xs text-[#6B6B80] mt-1">
@@ -712,7 +744,7 @@ export default function OrganizationAdminPage({ params }: PageProps) {
                   Description
                 </Label>
                 <Textarea
-                  defaultValue={organization.description}
+                  defaultValue={organization.description || ""}
                   rows={3}
                   className="bg-[#12121A] border-white/10 text-white resize-none"
                 />
@@ -749,9 +781,11 @@ export default function OrganizationAdminPage({ params }: PageProps) {
 
       {/* Invite Modal */}
       <InviteMemberModal
-        isOpen={isInviteModalOpen}
-        onClose={() => setIsInviteModalOpen(false)}
+        isOpen={showInviteModal}
+        onClose={() => setShowInviteModal(false)}
         organization={organization}
+        invitedByName="Current Admin"
+        currentUserRole="admin"
       />
 
       {/* Edit Member Modal */}

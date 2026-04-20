@@ -1,7 +1,7 @@
 "use client";
 
 import { use } from "react";
-import { Users, BookOpen, Settings, UserPlus, Crown } from "lucide-react";
+import { Users, BookOpen, Settings, UserPlus, Crown, Home} from "lucide-react";
 import { GlowCard, StatCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";

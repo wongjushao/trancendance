@@ -123,6 +123,7 @@ export default function OnboardingPage() {
   const router = useRouter();
   const { setRole } = useRole();
 
+
   const [currentStep, setCurrentStep] = useState(1);
   const [isSaving, setIsSaving] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -134,6 +135,8 @@ export default function OnboardingPage() {
   // Validation states
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [fieldTouched, setFieldTouched] = useState<Record<string, boolean>>({});
+
+  const [isFromInvite, setIsFromInvite] = useState(false);
 
   const [formData, setFormData] = useState<FormData>({
     avatar: null,
@@ -256,6 +259,27 @@ export default function OnboardingPage() {
     setFieldErrors(prev => ({ ...prev, [field]: error }));
   };
 
+  // Check for pending invite from sessionStorage
+  useEffect(() => {
+    const invitedOrgId = sessionStorage.getItem('pending_organization_id');
+    const invitedOrgName = sessionStorage.getItem('pending_organization_name');
+    const invitedRole = sessionStorage.getItem('pending_role');
+    
+    if (invitedOrgId && invitedOrgName) {
+      // Pre-select the organization in the form
+      setFormData(prev => ({
+        ...prev,
+        selectedOrganizationId: parseInt(invitedOrgId)
+      }));
+      
+      // Store that this is from an invite
+      setIsFromInvite(true);
+      
+      // Optionally show a message
+      toast.info(`You've been invited to join ${invitedOrgName} as ${invitedRole}`);
+    }
+  }, []);
+
   // Load user data from Google OAuth if available
   useEffect(() => {
     const loadUserData = async () => {
@@ -269,12 +293,12 @@ export default function OnboardingPage() {
       }
 
       // Fast path: check if already onboarded via the backend
-      const session = await supabase.auth.getSession();
-      if (session.data.session?.access_token) {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
         try {
           const response = await fetch('/api/auth-service/onboarding-status', {
             headers: {
-              'Authorization': `Bearer ${session.data.session.access_token}`,
+              'Authorization': `Bearer ${session.access_token}`,
             },
           });
           if (response.ok) {
@@ -532,9 +556,33 @@ export default function OnboardingPage() {
       window.dispatchEvent(new CustomEvent('profile-updated'));
     }
     
-    // Final redirect to dashboard
-    console.log('[onboarding] Redirecting to dashboard...');
-    router.push("/dashboard");
+    // After successful registration and before final redirect
+    if (isFromInvite) {
+      const orgId = sessionStorage.getItem('pending_organization_id');
+      const orgName = sessionStorage.getItem('pending_organization_name');
+      const role = sessionStorage.getItem('pending_role');
+      const courseName = sessionStorage.getItem('pending_course_name');
+      
+      // Clear session storage
+      sessionStorage.removeItem('pending_invite_token');
+      sessionStorage.removeItem('pending_invite_email');
+      sessionStorage.removeItem('pending_organization_id');
+      sessionStorage.removeItem('pending_organization_name');
+      sessionStorage.removeItem('pending_role');
+      sessionStorage.removeItem('pending_course_id');
+      sessionStorage.removeItem('pending_course_name');
+      
+      // Redirect to confirmation page
+      const params = new URLSearchParams();
+      params.set('orgId', orgId!);
+      params.set('orgName', orgName!);
+      params.set('role', role!);
+      if (courseName) params.set('courseName', courseName);
+      
+      router.push(`/organizations/join/confirm?${params.toString()}`);
+    } else {
+      router.push('/dashboard');
+    }
   };
 
   // Form helpers
@@ -932,7 +980,7 @@ export default function OnboardingPage() {
                           ))}
                         </div>
                         
-                        {formData.desiredRole === "admin" && (
+                        {formData.desiredRole === "org_admin" && (
                           <div className="mt-3 p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl">
                             <p className="text-xs text-blue-400">
                               After completing onboarding, you'll be asked to set up your organization.
@@ -952,7 +1000,7 @@ export default function OnboardingPage() {
                         <p className="text-[#A0A0B5]">
                           {formData.desiredRole === "teacher" 
                             ? "Select the organization where you'd like to teach. Your request will be sent to the organization admin for approval."
-                            : formData.desiredRole === "admin"
+                            : formData.desiredRole === "org_admin"
                             ? "You'll create a new organization after onboarding. Admin privileges will be activated after verification."
                             : "You can join organizations later from your dashboard."}
                         </p>
@@ -1053,7 +1101,7 @@ export default function OnboardingPage() {
                             </div>
                           )}
                         </div>
-                      ) : formData.desiredRole === "admin" ? (
+                      ) : formData.desiredRole === "org_admin" ? (
                         <div className="p-6 bg-purple-500/5 border border-purple-500/20 rounded-xl text-center">
                           <Building2 className="w-12 h-12 text-purple-400 mx-auto mb-3" />
                           <p className="text-white font-medium mb-2">You'll create a new organization</p>

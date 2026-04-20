@@ -2,7 +2,7 @@
 'use client';
 
 import { useState, useEffect } from "react";
-import { Mail, X, Trash2, ExternalLink } from "lucide-react";
+import { Mail, X, Trash2, ExternalLink, RefreshCw } from "lucide-react";
 import { MockEmail, getMockEmails, markEmailAsRead, clearMockEmails } from "@/lib/mock-email";
 
 interface MockEmailInboxProps {
@@ -15,7 +15,9 @@ export function MockEmailInbox({ isOpen, onClose }: MockEmailInboxProps) {
   const [selectedEmail, setSelectedEmail] = useState<MockEmail | null>(null);
 
   const loadEmails = () => {
-    setEmails(getMockEmails());
+    const loaded = getMockEmails();
+    console.log('[MockEmailInbox] Loaded emails:', loaded.length);
+    setEmails(loaded);
   };
 
   useEffect(() => {
@@ -30,9 +32,15 @@ export function MockEmailInbox({ isOpen, onClose }: MockEmailInboxProps) {
   };
 
   const handleClearAll = () => {
-    clearMockEmails();
+    if (confirm('Clear all mock emails?')) {
+      clearMockEmails();
+      loadEmails();
+      setSelectedEmail(null);
+    }
+  };
+
+  const handleRefresh = () => {
     loadEmails();
-    setSelectedEmail(null);
   };
 
   if (!isOpen) return null;
@@ -47,6 +55,13 @@ export function MockEmailInbox({ isOpen, onClose }: MockEmailInboxProps) {
           <span className="text-xs text-gray-400">({emails.length})</span>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={handleRefresh}
+            className="text-gray-400 hover:text-white transition-colors"
+            title="Refresh"
+          >
+            <RefreshCw className="h-4 w-4" />
+          </button>
           {emails.length > 0 && (
             <button
               onClick={handleClearAll}
@@ -72,6 +87,9 @@ export function MockEmailInbox({ isOpen, onClose }: MockEmailInboxProps) {
           {emails.length === 0 ? (
             <div className="p-4 text-center text-gray-400 text-sm">
               No emails yet
+              <p className="text-xs mt-2 text-gray-500">
+                Send an invitation to see it here
+              </p>
             </div>
           ) : (
             emails.map((email) => (

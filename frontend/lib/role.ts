@@ -12,6 +12,23 @@ export interface RoleData {
   pendingOrganizationName?: string | null;
 }
 
+// Add this function
+export function switchOrganization(organizationId: number | null, organizationName: string | null, role: UserRole): void {
+  const currentData = getUserRoleData();
+  const newData: RoleData = {
+    ...currentData,
+    role,
+    organizationId,
+    organizationName,
+  };
+  setUserRoleData(newData);
+  
+  // Dispatch event for other components
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('organizationSwitched', { detail: newData }));
+  }
+}
+
 export interface Organization {
   id: number;
   name: string;

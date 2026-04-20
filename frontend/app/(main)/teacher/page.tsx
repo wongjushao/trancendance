@@ -18,6 +18,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { useRole } from "@/components/providers/RoleProvider";
 import { toast } from "sonner";
+import { InviteStudentModal } from '@/components/teacher/InviteStudentModal';
 
 // Mock data for teacher dashboard
 interface Course {
@@ -249,6 +250,7 @@ export default function TeacherDashboardPage() {
   const [isCreatingLesson, setIsCreatingLesson] = useState(false);
   const [isGrading, setIsGrading] = useState(false);
   const [selectedSubmission, setSelectedSubmission] = useState<Submission | null>(null);
+  const [showInviteModal, setShowInviteModal] = useState(false);
 
   // Check if user is a teacher
   useEffect(() => {
@@ -304,6 +306,15 @@ export default function TeacherDashboardPage() {
         <StatCard icon={DollarSign} label="Total Revenue" value={`$${stats.totalRevenue.toLocaleString()}`} />
         <StatCard icon={Star} label="Average Rating" value={stats.averageRating.toFixed(1)} />
       </div>
+
+      <GlowButton 
+        variant="primary" 
+        onClick={() => setShowInviteModal(true)}
+        className="flex items-center gap-2"
+      >
+        <UserPlus className="w-4 h-4" />
+        Invite Student
+      </GlowButton>
 
       {/* Main Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
@@ -601,6 +612,18 @@ export default function TeacherDashboardPage() {
           </div>
         </TabsContent>
       </Tabs>
+
+      <InviteStudentModal
+        isOpen={showInviteModal}
+        onClose={() => setShowInviteModal(false)}
+        courses={courses.map(c => ({
+          id: c.id,
+          title: c.title,
+          organization_id: 1, // This would come from context
+          organization_name: "Current Organization"
+        }))}
+        invitedByName="Current Teacher"
+      />
 
       {/* Grading Modal */}
       {isGrading && selectedSubmission && (

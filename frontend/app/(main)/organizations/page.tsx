@@ -1,7 +1,9 @@
+// frontend/app/(main)/organizations/page.tsx
 "use client";
 
 import Link from "next/link";
-import { Building2, Users, Plus, TrendingUp } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Building2, Users, Plus, TrendingUp, Home } from "lucide-react";
 import { GlowCard, StatCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
 import { motion } from "framer-motion";
@@ -37,8 +39,13 @@ const organizations = [
 ];
 
 export default function OrganizationsPage() {
+  const router = useRouter();
   const totalMembers = organizations.reduce((acc, org) => acc + org.members, 0);
   const totalCourses = organizations.reduce((acc, org) => acc + org.courses, 0);
+
+  const handleCreateOrganization = () => {
+    router.push('/organizations/propose');
+  };
 
   return (
     <div className="space-y-10 pb-12">
@@ -52,7 +59,11 @@ export default function OrganizationsPage() {
           <p className="text-[#A0A0B5] text-lg">Manage your learning communities and institutional roles</p>
         </motion.div>
         
-        <GlowButton variant="primary" className="shadow-lg shadow-purple-500/20">
+        <GlowButton 
+          variant="primary" 
+          className="shadow-lg shadow-purple-500/20"
+          onClick={handleCreateOrganization}
+        >
           <Plus className="w-5 h-5 mr-2" />
           Create Organization
         </GlowButton>
@@ -79,12 +90,42 @@ export default function OrganizationsPage() {
       
       {/* Organizations Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+        {/* Personal Space Card - Separate from the map */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0 }}
+        >
+          <Link href="/dashboard">
+            <div className="group cursor-pointer h-full">
+              <GlowCard className="p-6 hover:border-purple-500/50 transition-all duration-300 h-full">
+                <div className="flex items-start justify-between mb-4">
+                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
+                    <Home className="w-6 h-6 text-white" />
+                  </div>
+                </div>
+                <h3 className="text-lg font-semibold text-white mb-2">Personal Space</h3>
+                <p className="text-sm text-gray-400 mb-3">
+                  Your personal learning environment. Access public courses and track your individual progress.
+                </p>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-purple-400 group-hover:text-purple-300 transition-colors">
+                    View Dashboard →
+                  </span>
+                  <span className="text-xs px-2 py-1 rounded-full bg-gray-800 text-gray-400">Student Role</span>
+                </div>
+              </GlowCard>
+            </div>
+          </Link>
+        </motion.div>
+
+        {/* Organization Cards */}
         {organizations.map((org, index) => (
           <motion.div
             key={org.id}
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: index * 0.1 }}
+            transition={{ delay: (index + 1) * 0.1 }}
           >
             <Link href={`/organizations/${org.id}`} className="block h-full">
               <GlowCard className="h-full hover:border-purple-500/50 transition-all duration-300 group relative overflow-hidden bg-white/[0.02]">
@@ -128,17 +169,20 @@ export default function OrganizationsPage() {
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: organizations.length * 0.1 }}
+          transition={{ delay: (organizations.length + 1) * 0.1 }}
+          onClick={handleCreateOrganization}
         >
-          <GlowCard className="h-full border-2 border-dashed border-white/10 hover:border-purple-500/40 hover:bg-purple-500/5 transition-all group cursor-pointer flex flex-col items-center justify-center py-12 min-h-[340px]">
-            <div className="w-16 h-16 rounded-2xl bg-[#12121A] flex items-center justify-center mb-5 group-hover:bg-purple-500/20 group-hover:rotate-90 transition-all duration-500">
-              <Plus className="w-8 h-8 text-[#6B6B80] group-hover:text-purple-400" />
-            </div>
-            <h3 className="text-xl font-bold text-white mb-2">New Campus</h3>
-            <p className="text-[#A0A0B5] text-sm max-w-[200px] text-center">
-              Scale your impact by starting a new community
-            </p>
-          </GlowCard>
+          <div className="cursor-pointer h-full">
+            <GlowCard className="h-full border-2 border-dashed border-white/10 hover:border-purple-500/40 hover:bg-purple-500/5 transition-all group flex flex-col items-center justify-center py-12">
+              <div className="w-16 h-16 rounded-2xl bg-[#12121A] flex items-center justify-center mb-5 group-hover:bg-purple-500/20 group-hover:rotate-90 transition-all duration-500">
+                <Plus className="w-8 h-8 text-[#6B6B80] group-hover:text-purple-400" />
+              </div>
+              <h3 className="text-xl font-bold text-white mb-2">New Campus</h3>
+              <p className="text-[#A0A0B5] text-sm max-w-[200px] text-center">
+                Scale your impact by starting a new community
+              </p>
+            </GlowCard>
+          </div>
         </motion.div>
       </div>
     </div>

@@ -9,6 +9,8 @@ import { TopNav } from "@/components/lms/TopNav";
 import { NotificationToast } from "@/components/lms/NotificationToast";
 import { ChatBubble } from "@/components/chat/ChatBubble";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
+import { OrganizationSwitcher } from '@/components/organization/OrganizationSwitcher';
+import { useRole } from '@/components/providers/RoleProvider';
 
 // Custom hook to listen to sidebar state
 function useSidebarState() {
@@ -46,6 +48,8 @@ export default function AppLayout({
   const isCollapsed = useSidebarState();
   const [user, setUser] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const { roleData, setRole } = useRole();
+  const [activeOrgId, setActiveOrgId] = useState<number | null>(roleData.organizationId);
 
   // Original auth and onboarding check logic (preserved, just converted to client-side)
   useEffect(() => {

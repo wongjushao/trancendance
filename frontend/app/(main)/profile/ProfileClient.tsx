@@ -722,7 +722,7 @@ export default function ProfileClient({ user }: ProfileClientProps) {
                 /* Empty State - No social links */
                 <div className="text-center py-8">
                   <div className="w-16 h-16 rounded-full bg-purple-500/10 flex items-center justify-center mx-auto mb-3">
-                    <Link className="w-8 h-8 text-purple-400" />
+                    <LinkIcon className="w-8 h-8 text-purple-400" />
                   </div>
                   <p className="text-gray-400 text-sm mb-2">No social links added yet</p>
                   <p className="text-gray-500 text-xs">Click "Add Links" to share your social profiles</p>
