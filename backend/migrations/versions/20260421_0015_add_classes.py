@@ -33,8 +33,6 @@ def upgrade():
     op.add_column('lessons', sa.Column('class_id', sa.BigInteger(), nullable=True), schema='public')
     op.drop_constraint('lessons_module_id_fkey', 'lessons', schema='public', type_='foreignkey')
     
-    # We allow class_id to be nullable first, so we don't break existing data if any
-    # Then we add foreign key
     op.create_foreign_key(None, 'lessons', 'classes', ['class_id'], ['id'], source_schema='public', referent_schema='public')
     op.drop_column('lessons', 'module_id', schema='public')
 
