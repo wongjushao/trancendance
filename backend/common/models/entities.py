@@ -170,12 +170,22 @@ class Module(Base):
     order_index: Mapped[int | None] = mapped_column(Integer)
 
 
+class Class(Base):
+    __tablename__ = "classes"
+    __table_args__ = {"schema": "public"}
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    module_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.modules.id"), nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    order_index: Mapped[int | None] = mapped_column(Integer)
+
+
 class Lesson(Base):
     __tablename__ = "lessons"
     __table_args__ = {"schema": "public"}
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    module_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.modules.id"), nullable=False)
+    class_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.classes.id"), nullable=False)
     title: Mapped[str] = mapped_column(Text, nullable=False)
     content_type: Mapped[str | None] = mapped_column(Text)
     content_url: Mapped[str | None] = mapped_column(Text)
