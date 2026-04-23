@@ -7,11 +7,7 @@ services:
     ports:
       - "5001:5001"
     environment:
-      - SUPABASE_URL=${SUPABASE_URL}
-      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
-      - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET}
-      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
-      - DATABASE_URL=${SUPABASE_DB_URL}
+      - INFISICAL_TOKEN=${INFISICAL_TOKEN}
 
   chat-service:
     image: trancendance-chat-service:latest
@@ -21,7 +17,7 @@ services:
     ports:
       - "5002:5002"
     environment:
-      - DATABASE_URL=${SUPABASE_DB_URL}
+      - INFISICAL_TOKEN=${INFISICAL_TOKEN}
 
   org-service:
     image: trancendance-org-service:latest
@@ -31,7 +27,7 @@ services:
     ports:
       - "5003:5003"
     environment:
-      - DATABASE_URL=${SUPABASE_DB_URL}
+      - INFISICAL_TOKEN=${INFISICAL_TOKEN}
 
   notification-service:
     image: trancendance-notification-service:latest
@@ -41,18 +37,16 @@ services:
     ports:
       - "5004:5004"
     environment:
-      - DATABASE_URL=${SUPABASE_DB_URL}
+      - INFISICAL_TOKEN=${INFISICAL_TOKEN}
+
   frontend:
-    image: node:20.19-alpine
+    build: ./frontend
     working_dir: /app
-    command: sh -c "npm install && npm run dev -- -H 0.0.0.0 -p 3000"
     ports:
       - "3000:3000"
     environment:
       - CHOKIDAR_USEPOLLING=true
-      - NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL}
-      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
-      - NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL}
+      - INFISICAL_TOKEN=${INFISICAL_TOKEN}
     volumes:
       - ./frontend:/app
       - /app/node_modules
@@ -60,9 +54,8 @@ services:
       - auth-service
       - chat-service
       - org-service
-    env_file:
-      - ./.env
-  
+      - notification-service
+
   node-exporter:
     image: prom/node-exporter:latest
     ports:
@@ -82,21 +75,14 @@ services:
       - --config.file=/etc/prometheus/prometheus.yml
 
   grafana:
-    image: grafana/grafana:latest
+    build:
+      context: .
+      dockerfile: grafana/Dockerfile
     ports:
       - "3001:3000"
     environment:
-      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
-      - GF_SMTP_ENABLED=${GF_SMTP_ENABLED}
-      - GF_SMTP_HOST=${GF_SMTP_HOST}
-      - GF_SMTP_USER=${GF_SMTP_USER}
-      - GF_SMTP_PASSWORD=${GF_SMTP_PASSWORD}
-      - GF_SMTP_FROM_ADDRESS=${GF_SMTP_FROM_ADDRESS}
-      - GF_SMTP_FROM_NAME=${GF_SMTP_FROM_NAME}
-      - GF_SMTP_SKIP_VERIFY=${GF_SMTP_SKIP_VERIFY}
-      - GF_SMTP_STARTTLS_POLICY=${GF_SMTP_STARTTLS_POLICY}
-      - GF_SMTP_EHLO_IDENTITY=${GF_SMTP_EHLO_IDENTITY}
+      - CHOKIDAR_USEPOLLING=true
+      - INFISICAL_TOKEN=${INFISICAL_TOKEN}
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning
       - ./grafana/dashboards:/var/lib/grafana/dashboards

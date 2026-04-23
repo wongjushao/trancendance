@@ -36,7 +36,7 @@ def serialize_message(message: Message) -> dict:
 def create_app():
     app = Flask(__name__)
 
-    database_url = os.getenv("DATABASE_URL", "")
+    database_url = os.getenv("SUPABASE_DB_URL", "")
     db_session = None
 
     if is_valid_database_url(database_url):
