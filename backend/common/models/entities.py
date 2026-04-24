@@ -443,3 +443,14 @@ class AuditLog(Base):
     entity_id: Mapped[int | None] = mapped_column(BigInteger)
     ip_address: Mapped[str | None] = mapped_column(INET)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+
+class AdminMessage(Base):
+    __tablename__ = "admin_messages"
+    __table_args__ = {"schema": "public"}
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    sender_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
+    subject: Mapped[str] = mapped_column(Text, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'open'"))
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))

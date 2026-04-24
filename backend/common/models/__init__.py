@@ -2,6 +2,7 @@ from .base import Base
 from .entities import (
     ApiKey,
     Assignment,
+    AdminMessage,
     AuditLog,
     ChatRoom,
     ChatRoomMember,
@@ -60,4 +61,5 @@ __all__ = [
     "DataExport",
     "AuditLog",
     "UserMFA",
+    "AdminMessage",
 ]
