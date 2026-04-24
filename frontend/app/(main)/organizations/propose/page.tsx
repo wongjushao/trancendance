@@ -20,9 +20,7 @@ export default function ProposeOrganizationPage() {
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
-    domain: '',
     adminEmail: '',
-    description: '',
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -187,43 +185,6 @@ export default function ProposeOrganizationPage() {
               <p className="text-gray-500 text-xs mt-1">
                 We'll send a verification email to this address. The admin will need to verify ownership.
               </p>
-            </div>
-
-            {/* Domain (Optional) */}
-            <div>
-              <Label htmlFor="domain" className="text-white mb-2 block">
-                Organization Domain (Optional)
-              </Label>
-              <Input
-                id="domain"
-                type="text"
-                placeholder="e.g., 42kl.edu.my"
-                value={formData.domain}
-                onChange={(e) => handleChange('domain', e.target.value)}
-                className={errors.domain ? 'border-red-500' : ''}
-              />
-              {errors.domain && (
-                <p className="text-red-400 text-sm mt-1 flex items-center gap-1">
-                  <AlertCircle className="w-3 h-3" /> {errors.domain}
-                </p>
-              )}
-              <p className="text-gray-500 text-xs mt-1">
-                Users with this email domain will be auto-detected and can join automatically.
-              </p>
-            </div>
-
-            {/* Description */}
-            <div>
-              <Label htmlFor="description" className="text-white mb-2 block">
-                Description (Optional)
-              </Label>
-              <Textarea
-                id="description"
-                placeholder="Tell us about your organization..."
-                value={formData.description}
-                onChange={(e) => handleChange('description', e.target.value)}
-                rows={4}
-              />
             </div>
 
             {/* Info Box */}

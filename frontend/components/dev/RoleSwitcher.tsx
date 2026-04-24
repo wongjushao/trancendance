@@ -40,13 +40,6 @@ const roleOptions: RoleOption[] = [
     organizationName: "Tech University",
     dashboardPreview: "Organization Admin Dashboard with member management"
   },
-  {
-    value: "system_admin",
-    label: "System Admin",
-    description: "Full system access",
-    icon: "👑",
-    dashboardPreview: "System Admin Dashboard with platform-wide controls"
-  },
 ];
 
 export function RoleSwitcher() {

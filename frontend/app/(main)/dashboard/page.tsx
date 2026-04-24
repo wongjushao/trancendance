@@ -5,7 +5,6 @@ import { cookies } from "next/headers";
 import StudentDashboard from "@/components/dashboard/StudentDashboard";
 import TeacherDashboard from "@/components/dashboard/TeacherDashboard";
 import AdminDashboard from "@/components/dashboard/AdminDashboard";
-import SystemAdminDashboard from "@/components/dashboard/SystemAdminDashboard";
 
 interface RoleCookieData {
   role: string;
@@ -40,8 +39,6 @@ export default async function DashboardPage() {
 
   // Render appropriate dashboard based on role
   switch (roleData.role) {
-    case "system_admin":
-      return <SystemAdminDashboard user={user} />;
     case "org_admin":
       return (
         <AdminDashboard 

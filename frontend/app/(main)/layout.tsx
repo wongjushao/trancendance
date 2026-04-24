@@ -9,7 +9,6 @@ import { TopNav } from "@/components/lms/TopNav";
 import { NotificationToast } from "@/components/lms/NotificationToast";
 import { ChatBubble } from "@/components/chat/ChatBubble";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
-import { OrganizationSwitcher } from '@/components/organization/OrganizationSwitcher';
 import { useRole } from '@/components/providers/RoleProvider';
 
 // Custom hook to listen to sidebar state

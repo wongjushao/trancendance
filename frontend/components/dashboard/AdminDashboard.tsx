@@ -1,18 +1,29 @@
 // frontend/components/dashboard/AdminDashboard.tsx
+
 "use client";
+
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { 
-  Users, Shield, Activity, Settings, Search, 
-  BarChart3, DollarSign, BookOpen, Star, TrendingUp,
-  Plus, Edit, Trash2, UserPlus, Crown, X,
-  CheckCircle, Clock, AlertCircle, Building2, Calendar,
-  Mail, Download, Filter, MoreVertical
+  Users, 
+  BookOpen, 
+  TrendingUp, 
+  Calendar,
+  Activity,
+  Award,
+  ChevronRight,
+  Clock,
+  CheckCircle,
+  MessageSquare,
+  UserPlus,
+  Star,
+  Target,
+  Zap,
+  Sparkles,
+  Settings, Trophy, Plus, BarChart3, AlertCircle
 } from "lucide-react";
 import { GlowCard, StatCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
-import { Input } from "@/components/ui/input";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useRole } from "@/components/providers/RoleProvider";
 import { motion } from "framer-motion";
 
@@ -22,107 +33,41 @@ interface AdminDashboardProps {
   organizationName?: string | null;
 }
 
-// Mock data for organization members
-const organizationMembers = [
-  {
-    id: "1",
-    name: "John Doe",
-    email: "john@example.com",
-    role: "admin" as const,
-    avatar: "JD",
-    joinedAt: new Date(2024, 0, 1),
-    courses: 5,
-    lastActive: new Date(2024, 0, 16),
-    status: "active" as const,
-  },
-  {
-    id: "2",
-    name: "Jane Smith",
-    email: "jane@example.com",
-    role: "teacher" as const,
-    avatar: "JS",
-    joinedAt: new Date(2024, 0, 5),
-    courses: 3,
-    lastActive: new Date(2024, 0, 16),
-    status: "active" as const,
-  },
-  {
-    id: "3",
-    name: "Bob Wilson",
-    email: "bob@example.com",
-    role: "student" as const,
-    avatar: "BW",
-    joinedAt: new Date(2024, 0, 10),
-    courses: 2,
-    lastActive: new Date(2024, 0, 15),
-    status: "active" as const,
-  },
-];
-
-// Mock data for organization courses
-const organizationCourses = [
-  {
-    id: 1,
-    title: "React for Enterprise",
-    description: "Advanced React for large-scale applications",
-    instructor: "Jane Smith",
-    students: 45,
-    revenue: 4455,
-    rating: 4.8,
-    status: "published" as const,
-    createdAt: new Date(2024, 0, 1),
-  },
-  {
-    id: 2,
-    title: "TypeScript Mastery",
-    description: "Complete TypeScript course for professionals",
-    instructor: "John Doe",
-    students: 38,
-    revenue: 3382,
-    rating: 4.9,
-    status: "published" as const,
-    createdAt: new Date(2024, 0, 5),
-  },
-];
-
-// Mock pending role requests
-const pendingRequests = [
-  {
-    id: "1",
-    userName: "Alice Johnson",
-    userEmail: "alice@example.com",
-    requestedRole: "teacher" as const,
-    requestedAt: new Date(2024, 0, 15),
-    message: "I have 5 years of teaching experience",
-  },
-  {
-    id: "2",
-    userName: "Carol Davis",
-    userEmail: "carol@example.com",
-    requestedRole: "teacher" as const,
-    requestedAt: new Date(2024, 0, 14),
-    message: "Former senior developer at Google",
-  },
-];
-
-// Mock analytics data
-const orgAnalytics = {
-  totalRevenue: 7837,
-  totalStudents: 83,
-  totalTeachers: 8,
-  totalCourses: 12,
+// Mock dashboard data
+const dashboardStats = {
+  totalStudents: 2847,
+  activeStudents: 2210,
+  totalCourses: 45,
+  publishedCourses: 38,
   averageRating: 4.7,
-  monthlyGrowth: 12,
   completionRate: 68,
+  monthlyGrowth: 12,
+  pendingApprovals: 3
 };
 
-export default function AdminDashboard({ 
-  user, 
-  organizationId, 
-  organizationName 
-}: AdminDashboardProps) {
+const recentActivities = [
+  { id: 1, user: "John Doe", action: "completed", item: "React Fundamentals", time: "2 hours ago", type: "completion" },
+  { id: 2, user: "Sarah Chen", action: "enrolled in", item: "Advanced TypeScript", time: "5 hours ago", type: "enrollment" },
+  { id: 3, user: "Prof. Smith", action: "published", item: "Machine Learning Basics", time: "1 day ago", type: "course" },
+  { id: 4, user: "Emma Wilson", action: "submitted", item: "Final Project", time: "2 days ago", type: "submission" },
+  { id: 5, user: "Michael Lee", action: "earned", item: "Completion Certificate", time: "3 days ago", type: "achievement" },
+];
+
+const topCourses = [
+  { id: 1, title: "Advanced React Development", students: 1234, rating: 4.8, completion: 78 },
+  { id: 2, title: "Backend with Node.js", students: 892, rating: 4.6, completion: 65 },
+  { id: 3, title: "UI/UX Design Fundamentals", students: 2341, rating: 4.9, completion: 82 },
+];
+
+const pendingItems = [
+  { id: 1, type: "role_request", user: "Carol White", role: "teacher", time: "3 days ago" },
+  { id: 2, type: "join_request", user: "David Kim", role: "student", time: "1 day ago" },
+  { id: 3, type: "course_review", course: "Advanced React", reviewer: "Prof. Smith", time: "2 days ago" },
+];
+
+export default function AdminDashboard({ user, organizationId, organizationName }: AdminDashboardProps) {
+  const { roleData } = useRole();
   const [greeting, setGreeting] = useState("");
-  const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
     const hour = new Date().getHours();
@@ -131,384 +76,314 @@ export default function AdminDashboard({
     else setGreeting("Good evening");
   }, []);
 
-  const activeMembers = organizationMembers.filter(m => m.status === "active").length;
-  const publishedCourses = organizationCourses.filter(c => c.status === "published").length;
-  const pendingApprovals = pendingRequests.length;
+  const getActivityIcon = (type: string) => {
+    switch (type) {
+      case "completion": return <CheckCircle className="w-4 h-4 text-green-400" />;
+      case "enrollment": return <UserPlus className="w-4 h-4 text-blue-400" />;
+      case "course": return <BookOpen className="w-4 h-4 text-purple-400" />;
+      case "submission": return <MessageSquare className="w-4 h-4 text-yellow-400" />;
+      case "achievement": return <Award className="w-4 h-4 text-orange-400" />;
+      default: return <Activity className="w-4 h-4 text-gray-400" />;
+    }
+  };
 
   return (
-    <div className="space-y-6">
-      {/* Welcome Header */}
+    <div className="space-y-8">
+      {/* Welcome Section */}
       <div className="flex justify-between items-start">
         <div>
           <h1 className="text-3xl font-bold text-white mb-2">
-            {greeting}, {user?.user_metadata?.first_name || user?.email?.split('@')[0]}! 👋
+            {greeting}, {user.user_metadata?.full_name || user.email?.split('@')[0]}!
           </h1>
-          <p className="text-gray-400">
-            Managing {organizationName || "Your Organization"} • {activeMembers} active members
+          <p className="text-[#A0A0B5]">
+            Welcome back to {organizationName || "your organization"} dashboard
           </p>
         </div>
         <div className="flex gap-3">
-          <GlowButton size="sm" variant="outline" className="gap-2">
-            <Download className="w-4 h-4" />
-            Export Report
-          </GlowButton>
-          <GlowButton size="sm" className="gap-2">
-            <Settings className="w-4 h-4" />
-            Organization Settings
-          </GlowButton>
+          <Link href={`/organizations/${organizationId}/admin`}>
+            <GlowButton variant="outline" className="gap-2">
+              <Settings className="w-4 h-4" />
+              Admin Panel
+            </GlowButton>
+          </Link>
         </div>
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          icon={Building2}
-          label="Organization"
-          value={organizationName || "N/A"}
-          trend={`${publishedCourses} active courses`}
-        />
-        <StatCard
-          icon={Users}
-          label="Total Members"
-          value={organizationMembers.length}
-          trend={`${activeMembers} active, ${organizationMembers.length - activeMembers} inactive`}
-        />
-        <StatCard
-          icon={BookOpen}
-          label="Total Courses"
-          value={organizationCourses.length}
-          trend={`${publishedCourses} published`}
+      {/* Stats Grid - Key Metrics */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <StatCard 
+          icon={Users} 
+          label="Total Students" 
+          value={dashboardStats.totalStudents.toLocaleString()} 
+          trend={`+${dashboardStats.monthlyGrowth}%`} 
           trendUp={true}
         />
-        <StatCard
-          icon={DollarSign}
-          label="Total Revenue"
-          value={`$${orgAnalytics.totalRevenue}`}
-          trend={`+${orgAnalytics.monthlyGrowth}% this month`}
-          trendUp={true}
+        <StatCard 
+          icon={BookOpen} 
+          label="Active Courses" 
+          value={dashboardStats.publishedCourses.toString()} 
+          trend={`${dashboardStats.totalCourses - dashboardStats.publishedCourses} drafts`}
+        />
+        <StatCard 
+          icon={TrendingUp} 
+          label="Completion Rate" 
+          value={`${dashboardStats.completionRate}%`} 
+        />
+        <StatCard 
+          icon={Star} 
+          label="Avg. Rating" 
+          value={dashboardStats.averageRating.toString()} 
         />
       </div>
 
-      {/* Main Tabs */}
-      <Tabs defaultValue="overview" className="space-y-4">
-        <TabsList className="bg-gray-800/50 border border-gray-700">
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="members">Team Members</TabsTrigger>
-          <TabsTrigger value="courses">Courses</TabsTrigger>
-          <TabsTrigger value="requests">Pending Requests</TabsTrigger>
-          <TabsTrigger value="analytics">Analytics</TabsTrigger>
-        </TabsList>
-
-        {/* Overview Tab */}
-        <TabsContent value="overview" className="space-y-4">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* Recent Activity */}
-            <GlowCard>
-              <div className="p-4">
-                <h3 className="font-semibold text-white mb-3">Recent Activity</h3>
-                <div className="space-y-3">
-                  <div className="flex items-center gap-3 text-sm">
-                    <div className="w-8 h-8 rounded-full bg-green-500/20 flex items-center justify-center">
-                      <UserPlus className="w-4 h-4 text-green-400" />
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-white">New member joined</p>
-                      <p className="text-gray-400">Alice Johnson joined as Teacher</p>
-                    </div>
-                    <span className="text-xs text-gray-500">2 hours ago</span>
-                  </div>
-                  <div className="flex items-center gap-3 text-sm">
-                    <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center">
-                      <BookOpen className="w-4 h-4 text-blue-400" />
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-white">New course published</p>
-                      <p className="text-gray-400">"Advanced React" is now live</p>
-                    </div>
-                    <span className="text-xs text-gray-500">Yesterday</span>
-                  </div>
+      {/* Second Row Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <GlowCard>
+          <div className="p-5">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-purple-500/20 rounded-lg">
+                  <Activity className="w-4 h-4 text-purple-400" />
                 </div>
+                <span className="text-sm text-[#A0A0B5]">Active Students</span>
               </div>
-            </GlowCard>
-
-            {/* Quick Stats */}
-            <GlowCard>
-              <div className="p-4">
-                <h3 className="font-semibold text-white mb-3">Organization Health</h3>
-                <div className="space-y-3">
-                  <div>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span className="text-gray-300">Course Completion Rate</span>
-                      <span className="text-white">{orgAnalytics.completionRate}%</span>
-                    </div>
-                    <div className="w-full bg-gray-700 rounded-full h-2">
-                      <div className="bg-green-500 h-2 rounded-full" style={{ width: `${orgAnalytics.completionRate}%` }} />
-                    </div>
-                  </div>
-                  <div>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span className="text-gray-300">Student Satisfaction</span>
-                      <span className="text-white">{orgAnalytics.averageRating}/5.0</span>
-                    </div>
-                    <div className="w-full bg-gray-700 rounded-full h-2">
-                      <div className="bg-yellow-500 h-2 rounded-full" style={{ width: `${(orgAnalytics.averageRating / 5) * 100}%` }} />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3 mt-4">
-                    <div className="text-center p-2 bg-purple-500/10 rounded-lg">
-                      <p className="text-2xl font-bold text-white">{orgAnalytics.totalStudents}</p>
-                      <p className="text-xs text-gray-400">Total Students</p>
-                    </div>
-                    <div className="text-center p-2 bg-purple-500/10 rounded-lg">
-                      <p className="text-2xl font-bold text-white">{orgAnalytics.totalTeachers}</p>
-                      <p className="text-xs text-gray-400">Active Teachers</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </GlowCard>
-          </div>
-        </TabsContent>
-
-        {/* Members Tab */}
-        <TabsContent value="members" className="space-y-4">
-          <GlowCard>
-            <div className="p-4">
-              <div className="flex justify-between items-center mb-4">
-                <div>
-                  <h3 className="font-semibold text-white">Team Members</h3>
-                  <p className="text-sm text-gray-400 mt-1">Manage organization members and roles</p>
-                </div>
-                <div className="flex gap-2">
-                  <div className="relative">
-                    <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                    <Input 
-                      placeholder="Search members..." 
-                      className="pl-9 w-64"
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                    />
-                  </div>
-                  <GlowButton size="sm" className="gap-2">
-                    <UserPlus className="w-4 h-4" />
-                    Invite Member
-                  </GlowButton>
-                </div>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="border-b border-gray-800">
-                    <tr className="text-left text-gray-400 text-sm">
-                      <th className="pb-3">Member</th>
-                      <th className="pb-3">Role</th>
-                      <th className="pb-3">Courses</th>
-                      <th className="pb-3">Joined</th>
-                      <th className="pb-3">Status</th>
-                      <th className="pb-3"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {organizationMembers.map((member) => (
-                      <tr key={member.id} className="border-b border-gray-800/50">
-                        <td className="py-3">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white font-semibold">
-                              {member.avatar}
-                            </div>
-                            <div>
-                              <p className="font-medium text-white">{member.name}</p>
-                              <p className="text-xs text-gray-400">{member.email}</p>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="py-3">
-                          <span className={`text-xs px-2 py-1 rounded-full ${
-                            member.role === "admin" ? "bg-purple-500/20 text-purple-400" :
-                            member.role === "teacher" ? "bg-blue-500/20 text-blue-400" :
-                            "bg-green-500/20 text-green-400"
-                          }`}>
-                            {member.role}
-                          </span>
-                        </td>
-                        <td className="py-3 text-white">{member.courses}</td>
-                        <td className="py-3 text-gray-400 text-sm">
-                          {member.joinedAt.toLocaleDateString()}
-                        </td>
-                        <td className="py-3">
-                          <span className={`inline-flex items-center gap-1 text-xs ${
-                            member.status === "active" ? "text-green-400" : "text-gray-400"
-                          }`}>
-                            <div className={`w-1.5 h-1.5 rounded-full ${
-                              member.status === "active" ? "bg-green-400" : "bg-gray-400"
-                            }`} />
-                            {member.status}
-                          </span>
-                        </td>
-                        <td className="py-3">
-                          <button className="p-1 hover:bg-gray-700 rounded">
-                            <MoreVertical className="w-4 h-4 text-gray-400" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <span className="text-2xl font-bold text-white">{dashboardStats.activeStudents.toLocaleString()}</span>
             </div>
-          </GlowCard>
-        </TabsContent>
+            <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-purple-500 rounded-full"
+                style={{ width: `${(dashboardStats.activeStudents / dashboardStats.totalStudents) * 100}%` }}
+              />
+            </div>
+            <p className="text-xs text-[#6B6B80] mt-2">
+              {Math.round((dashboardStats.activeStudents / dashboardStats.totalStudents) * 100)}% of total students active
+            </p>
+          </div>
+        </GlowCard>
 
-        {/* Courses Tab */}
-        <TabsContent value="courses" className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {organizationCourses.map((course, index) => (
-              <motion.div
-                key={course.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.1 }}
-              >
-                <GlowCard>
-                  <div className="p-4">
-                    <div className="flex justify-between items-start mb-3">
+        <GlowCard>
+          <div className="p-5">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-green-500/20 rounded-lg">
+                  <Target className="w-4 h-4 text-green-400" />
+                </div>
+                <span className="text-sm text-[#A0A0B5]">Monthly Growth</span>
+              </div>
+              <span className="text-2xl font-bold text-green-400">+{dashboardStats.monthlyGrowth}%</span>
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              <TrendingUp className="w-4 h-4 text-green-400" />
+              <span className="text-[#A0A0B5]">Increase in student enrollment</span>
+            </div>
+          </div>
+        </GlowCard>
+
+        <GlowCard>
+          <div className="p-5">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-yellow-500/20 rounded-lg">
+                  <Clock className="w-4 h-4 text-yellow-400" />
+                </div>
+                <span className="text-sm text-[#A0A0B5]">Pending Approvals</span>
+              </div>
+              <span className="text-2xl font-bold text-yellow-400">{dashboardStats.pendingApprovals}</span>
+            </div>
+            <Link href={`/organizations/${organizationId}/admin?tab=role-requests`}>
+              <button className="text-sm text-purple-400 hover:text-purple-300 flex items-center gap-1">
+                Review requests
+                <ChevronRight className="w-3 h-3" />
+              </button>
+            </Link>
+          </div>
+        </GlowCard>
+      </div>
+
+      {/* Main Content Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Left Column - Recent Activity & Top Courses */}
+        <div className="lg:col-span-2 space-y-6">
+          {/* Recent Activity */}
+          <GlowCard>
+            <div className="p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Activity className="w-5 h-5 text-purple-400" />
+                  <h3 className="text-lg font-semibold text-white">Recent Activity</h3>
+                </div>
+                <Link href={`/organizations/${organizationId}/admin`}>
+                  <button className="text-sm text-[#A0A0B5] hover:text-white transition-colors">
+                    View all
+                  </button>
+                </Link>
+              </div>
+              <div className="space-y-4">
+                {recentActivities.map((activity, index) => (
+                  <motion.div
+                    key={activity.id}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.05 }}
+                    className="flex items-center justify-between p-3 bg-gray-800/30 rounded-lg hover:bg-gray-800/50 transition-colors"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-gray-800 flex items-center justify-center">
+                        {getActivityIcon(activity.type)}
+                      </div>
                       <div>
-                        <h3 className="font-semibold text-white">{course.title}</h3>
-                        <p className="text-sm text-gray-400 mt-1">{course.instructor}</p>
-                      </div>
-                      <span className="text-xs px-2 py-1 rounded-full bg-green-500/20 text-green-400">
-                        {course.status}
-                      </span>
-                    </div>
-                    <p className="text-sm text-gray-300 mb-3">{course.description}</p>
-                    <div className="grid grid-cols-3 gap-2 text-center mb-3">
-                      <div className="bg-gray-800/50 rounded p-2">
-                        <Users className="w-4 h-4 text-blue-400 mx-auto mb-1" />
-                        <p className="text-sm font-semibold text-white">{course.students}</p>
-                        <p className="text-xs text-gray-400">Students</p>
-                      </div>
-                      <div className="bg-gray-800/50 rounded p-2">
-                        <Star className="w-4 h-4 text-yellow-400 mx-auto mb-1" />
-                        <p className="text-sm font-semibold text-white">{course.rating}</p>
-                        <p className="text-xs text-gray-400">Rating</p>
-                      </div>
-                      <div className="bg-gray-800/50 rounded p-2">
-                        <DollarSign className="w-4 h-4 text-green-400 mx-auto mb-1" />
-                        <p className="text-sm font-semibold text-white">${course.revenue}</p>
-                        <p className="text-xs text-gray-400">Revenue</p>
+                        <p className="text-white text-sm">
+                          <span className="font-medium">{activity.user}</span>{' '}
+                          <span className="text-[#A0A0B5]">{activity.action}</span>{' '}
+                          <span className="font-medium">{activity.item}</span>
+                        </p>
+                        <p className="text-xs text-[#6B6B80]">{activity.time}</p>
                       </div>
                     </div>
-                    <GlowButton size="sm" variant="outline" fullWidth>
-                      View Details
-                    </GlowButton>
-                  </div>
-                </GlowCard>
-              </motion.div>
-            ))}
-          </div>
-        </TabsContent>
-
-        {/* Requests Tab */}
-        <TabsContent value="requests" className="space-y-4">
-          <GlowCard>
-            <div className="p-4">
-              <h3 className="font-semibold text-white mb-3">Pending Role Requests</h3>
-              {pendingRequests.map((request) => (
-                <div key={request.id} className="flex items-center justify-between p-3 rounded-lg bg-gray-800/30 mb-3">
-                  <div className="flex-1">
-                    <p className="font-medium text-white">{request.userName}</p>
-                    <p className="text-sm text-gray-400">{request.userEmail}</p>
-                    <p className="text-xs text-gray-500 mt-1">Requested: {request.requestedRole}</p>
-                    {request.message && (
-                      <p className="text-xs text-gray-400 mt-1">"{request.message}"</p>
-                    )}
-                  </div>
-                  <div className="flex gap-2">
-                    <GlowButton size="sm" variant="outline" className="text-green-400">
-                      <CheckCircle className="w-4 h-4 mr-1" />
-                      Approve
-                    </GlowButton>
-                    <GlowButton size="sm" variant="outline" className="text-red-400">
-                      <X className="w-4 h-4 mr-1" />
-                      Reject
-                    </GlowButton>
-                  </div>
-                </div>
-              ))}
+                  </motion.div>
+                ))}
+              </div>
             </div>
           </GlowCard>
-        </TabsContent>
 
-        {/* Analytics Tab */}
-        <TabsContent value="analytics" className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <GlowCard>
-              <div className="p-4">
-                <h3 className="font-semibold text-white mb-3">Revenue Overview</h3>
-                <div className="text-center py-6">
-                  <p className="text-3xl font-bold text-white">${orgAnalytics.totalRevenue}</p>
-                  <p className="text-sm text-gray-400 mt-1">Total organization revenue</p>
-                  <div className="mt-3 inline-flex items-center gap-1 text-green-400 text-sm">
-                    <TrendingUp className="w-4 h-4" />
-                    <span>+{orgAnalytics.monthlyGrowth}% growth</span>
-                  </div>
+          {/* Top Performing Courses */}
+          <GlowCard>
+            <div className="p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Trophy className="w-5 h-5 text-yellow-400" />
+                  <h3 className="text-lg font-semibold text-white">Top Performing Courses</h3>
                 </div>
+                <Link href={`/organizations/${organizationId}/admin?tab=courses`}>
+                  <button className="text-sm text-[#A0A0B5] hover:text-white transition-colors">
+                    Manage courses
+                  </button>
+                </Link>
               </div>
-            </GlowCard>
-
-            <GlowCard>
-              <div className="p-4">
-                <h3 className="font-semibold text-white mb-3">Growth Metrics</h3>
-                <div className="space-y-3">
-                  <div>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span className="text-gray-300">Student Growth</span>
-                      <span className="text-white">+23%</span>
+              <div className="space-y-4">
+                {topCourses.map((course) => (
+                  <div key={course.id} className="p-3 bg-gray-800/30 rounded-lg">
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className="text-white font-medium">{course.title}</h4>
+                      <div className="flex items-center gap-1">
+                        <Star className="w-4 h-4 fill-yellow-500 text-yellow-500" />
+                        <span className="text-sm text-white">{course.rating}</span>
+                      </div>
                     </div>
-                    <div className="w-full bg-gray-700 rounded-full h-2">
-                      <div className="bg-purple-500 h-2 rounded-full" style={{ width: "23%" }} />
+                    <div className="flex items-center justify-between text-sm mb-2">
+                      <span className="text-[#A0A0B5]">{course.students} students</span>
+                      <span className="text-[#A0A0B5]">{course.completion}% completion</span>
+                    </div>
+                    <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-purple-500 rounded-full"
+                        style={{ width: `${course.completion}%` }}
+                      />
                     </div>
                   </div>
-                  <div>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span className="text-gray-300">Course Completion</span>
-                      <span className="text-white">{orgAnalytics.completionRate}%</span>
-                    </div>
-                    <div className="w-full bg-gray-700 rounded-full h-2">
-                      <div className="bg-green-500 h-2 rounded-full" style={{ width: `${orgAnalytics.completionRate}%` }} />
-                    </div>
-                  </div>
-                </div>
+                ))}
               </div>
-            </GlowCard>
-          </div>
-        </TabsContent>
-      </Tabs>
-
-      {/* Quick Actions */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Link href={`/organizations/${organizationId}/admin`}>
-          <div className="bg-gray-800/50 hover:bg-gray-800 rounded-lg p-3 text-center transition-all cursor-pointer group">
-            <Settings className="w-6 h-6 text-purple-400 mx-auto mb-2 group-hover:scale-110 transition-transform" />
-            <p className="text-sm text-gray-300">Org Settings</p>
-          </div>
-        </Link>
-        <Link href="/analytics">
-          <div className="bg-gray-800/50 hover:bg-gray-800 rounded-lg p-3 text-center transition-all cursor-pointer group">
-            <BarChart3 className="w-6 h-6 text-blue-400 mx-auto mb-2 group-hover:scale-110 transition-transform" />
-            <p className="text-sm text-gray-300">Analytics</p>
-          </div>
-        </Link>
-        <div className="bg-gray-800/50 hover:bg-gray-800 rounded-lg p-3 text-center transition-all cursor-pointer group">
-          <Mail className="w-6 h-6 text-green-400 mx-auto mb-2 group-hover:scale-110 transition-transform" />
-          <p className="text-sm text-gray-300">Send Invites</p>
+            </div>
+          </GlowCard>
         </div>
-        <Link href="/settings">
-          <div className="bg-gray-800/50 hover:bg-gray-800 rounded-lg p-3 text-center transition-all cursor-pointer group">
-            <Shield className="w-6 h-6 text-gray-400 mx-auto mb-2 group-hover:scale-110 transition-transform" />
-            <p className="text-sm text-gray-300">Permissions</p>
-          </div>
-        </Link>
+
+        {/* Right Column - Quick Actions & Pending Items */}
+        <div className="space-y-6">
+          {/* Quick Actions */}
+          <GlowCard>
+            <div className="p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <Zap className="w-5 h-5 text-purple-400" />
+                <h3 className="text-lg font-semibold text-white">Quick Actions</h3>
+              </div>
+              <div className="space-y-3">
+                <Link href={`/organizations/${organizationId}/admin?tab=members`}>
+                  <button className="w-full flex items-center justify-between p-3 bg-gray-800/30 rounded-lg hover:bg-gray-800/50 transition-colors group">
+                    <div className="flex items-center gap-3">
+                      <UserPlus className="w-4 h-4 text-purple-400" />
+                      <span className="text-white">Invite New Member</span>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-[#6B6B80] group-hover:text-white transition-colors" />
+                  </button>
+                </Link>
+                <Link href={`/organizations/${organizationId}/admin?tab=courses`}>
+                  <button className="w-full flex items-center justify-between p-3 bg-gray-800/30 rounded-lg hover:bg-gray-800/50 transition-colors group">
+                    <div className="flex items-center gap-3">
+                      <Plus className="w-4 h-4 text-purple-400" />
+                      <span className="text-white">Create New Course</span>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-[#6B6B80] group-hover:text-white transition-colors" />
+                  </button>
+                </Link>
+                <Link href={`/organizations/${organizationId}/admin?tab=analytics`}>
+                  <button className="w-full flex items-center justify-between p-3 bg-gray-800/30 rounded-lg hover:bg-gray-800/50 transition-colors group">
+                    <div className="flex items-center gap-3">
+                      <BarChart3 className="w-4 h-4 text-purple-400" />
+                      <span className="text-white">View Analytics Report</span>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-[#6B6B80] group-hover:text-white transition-colors" />
+                  </button>
+                </Link>
+                <Link href={`/organizations/${organizationId}/admin?tab=settings`}>
+                  <button className="w-full flex items-center justify-between p-3 bg-gray-800/30 rounded-lg hover:bg-gray-800/50 transition-colors group">
+                    <div className="flex items-center gap-3">
+                      <Settings className="w-4 h-4 text-purple-400" />
+                      <span className="text-white">Organization Settings</span>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-[#6B6B80] group-hover:text-white transition-colors" />
+                  </button>
+                </Link>
+              </div>
+            </div>
+          </GlowCard>
+
+          {/* Pending Items */}
+          {pendingItems.length > 0 && (
+            <GlowCard>
+              <div className="p-5">
+                <div className="flex items-center gap-2 mb-4">
+                  <AlertCircle className="w-5 h-5 text-yellow-400" />
+                  <h3 className="text-lg font-semibold text-white">Pending Items</h3>
+                  <span className="px-2 py-0.5 bg-yellow-500/20 text-yellow-400 rounded-full text-xs">
+                    {pendingItems.length}
+                  </span>
+                </div>
+                <div className="space-y-3">
+                  {pendingItems.map((item) => (
+                    <div key={item.id} className="flex items-center justify-between p-3 bg-gray-800/30 rounded-lg">
+                      <div className="flex-1">
+                        <p className="text-white text-sm">
+                          {item.type === "role_request" && `${item.user} requested ${item.role} role`}
+                          {item.type === "join_request" && `${item.user} wants to join as ${item.role}`}
+                          {item.type === "course_review" && `${item.course} needs review from ${item.reviewer}`}
+                        </p>
+                        <p className="text-xs text-[#6B6B80]">{item.time}</p>
+                      </div>
+                      <Link href={`/organizations/${organizationId}/admin?tab=role-requests`}>
+                        <button className="text-xs text-purple-400 hover:text-purple-300">
+                          Review
+                        </button>
+                      </Link>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </GlowCard>
+          )}
+
+          {/* Tip of the Day */}
+          <GlowCard>
+            <div className="p-5">
+              <div className="flex items-center gap-2 mb-3">
+                <Sparkles className="w-5 h-5 text-purple-400" />
+                <h3 className="text-lg font-semibold text-white">Tip of the Day</h3>
+              </div>
+              <p className="text-[#A0A0B5] text-sm">
+                Use the Admin Panel to manage members, courses, role requests, and organization settings in detail.
+              </p>
+            </div>
+          </GlowCard>
+        </div>
       </div>
     </div>
   );

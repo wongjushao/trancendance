@@ -5,7 +5,7 @@ import Link from "next/link";
 import { 
   BookOpen, Users, Award, TrendingUp, Plus, Edit, 
   Trash2, Eye, CheckCircle, Clock, FileText,
-  MessageSquare, DollarSign, BarChart3, Settings,
+  MessageSquare, BarChart3, Settings,
   Star, Calendar, Search, UserPlus, Crown, X,
   GraduationCap, Target, Activity, Bell, Filter,
   Download, Share2, MoreVertical, PlayCircle
@@ -32,7 +32,6 @@ const teacherCourses = [
     students: 45,
     lessons: 20,
     rating: 4.8,
-    price: 99,
     status: "published" as const,
     createdAt: new Date(2024, 0, 1),
     updatedAt: new Date(2024, 0, 15),
@@ -47,7 +46,6 @@ const teacherCourses = [
     students: 32,
     lessons: 20,
     rating: 4.9,
-    price: 89,
     status: "published" as const,
     createdAt: new Date(2024, 0, 5),
     updatedAt: new Date(2024, 0, 10),
@@ -62,7 +60,6 @@ const teacherCourses = [
     students: 28,
     lessons: 15,
     rating: 4.7,
-    price: 79,
     status: "draft" as const,
     createdAt: new Date(2024, 0, 10),
     updatedAt: new Date(2024, 0, 12),
@@ -156,7 +153,6 @@ const students = [
 
 // Mock analytics data
 const analyticsData = {
-  totalRevenue: 12450,
   totalStudents: 105,
   averageRating: 4.8,
   completionRate: 72,
@@ -439,10 +435,7 @@ export default function TeacherDashboard({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <GlowCard>
               <div className="p-4">
-                <h3 className="font-semibold text-white mb-3">Revenue Overview</h3>
                 <div className="text-center py-6">
-                  <p className="text-3xl font-bold text-white">${analyticsData.totalRevenue}</p>
-                  <p className="text-sm text-gray-400 mt-1">Total earnings</p>
                   <div className="mt-3 inline-flex items-center gap-1 text-green-400 text-sm">
                     <TrendingUp className="w-4 h-4" />
                     <span>+{analyticsData.monthlyGrowth}% this month</span>

@@ -207,3 +207,14 @@
 .animation-delay-2000 {
   animation-delay: 2s;
 }
+
+/* Keep tab content container at consistent height */
+.tabs-content-container {
+  min-height: 500px;
+  transition: min-height 0.2s ease;
+}
+
+/* For the Tabs component wrapper */
+[data-state="active"] {
+  animation: none !important;
+}

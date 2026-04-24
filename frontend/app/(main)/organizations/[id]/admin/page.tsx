@@ -17,7 +17,6 @@ import {
   Shield,
   MoreVertical,
   BarChart3,
-  DollarSign,
   BookOpen,
   TrendingUp,
   Award,
@@ -34,7 +33,8 @@ import {
   MessageSquare,
   Copy,
   Link as LinkIcon,
-  Plus
+  Plus,
+  Globe
 } from "lucide-react";
 import { GlowCard, StatCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
@@ -62,7 +62,7 @@ interface Member {
   id: string;
   name: string;
   email: string;
-  role: "admin" | "teacher" | "student";
+  role: "admin" | "sub_admin" | "teacher" | "student";
   avatar: string;
   joinedAt: string;
   courses: number;
@@ -77,7 +77,6 @@ interface Course {
   thumbnail: string;
   instructor: string;
   students: number;
-  revenue: number;
   rating: number;
   status: "published" | "draft";
   createdAt: string;
@@ -87,7 +86,6 @@ interface AnalyticsData {
   totalStudents: number;
   totalTeachers: number;
   totalCourses: number;
-  totalRevenue: number;
   averageRating: number;
   completionRate: number;
   monthlyGrowth: number;
@@ -138,6 +136,17 @@ const mockMembers: Member[] = [
     lastActive: "2024-03-19",
     status: "inactive",
   },
+  {
+    id: "5",
+    name: "Eve Adams",
+    email: "eve@tech.edu",
+    role: "sub_admin",
+    avatar: "EA",
+    joinedAt: "2024-03-01",
+    courses: 6,
+    lastActive: "2024-03-23",
+    status: "active",
+  },
 ];
 
 const mockCourses: Course[] = [
@@ -148,7 +157,6 @@ const mockCourses: Course[] = [
     thumbnail: "https://images.unsplash.com/photo-1633356122544-f134324a6cee?w=400",
     instructor: "Sarah Johnson",
     students: 1234,
-    revenue: 122166,
     rating: 4.8,
     status: "published",
     createdAt: "2024-01-15",
@@ -160,7 +168,6 @@ const mockCourses: Course[] = [
     thumbnail: "https://images.unsplash.com/photo-1627398242454-45a1465c2479?w=400",
     instructor: "Michael Chen",
     students: 892,
-    revenue: 70468,
     rating: 4.6,
     status: "published",
     createdAt: "2024-02-01",
@@ -172,7 +179,6 @@ const mockCourses: Course[] = [
     thumbnail: "https://images.unsplash.com/photo-1561070791-2526d30994b5?w=400",
     instructor: "Emily Rodriguez",
     students: 2341,
-    revenue: 208349,
     rating: 4.9,
     status: "draft",
     createdAt: "2024-03-01",
@@ -197,7 +203,6 @@ const analytics: AnalyticsData = {
   totalStudents: 2847,
   totalTeachers: 23,
   totalCourses: 45,
-  totalRevenue: 401983,
   averageRating: 4.7,
   completionRate: 68,
   monthlyGrowth: 12,
@@ -222,6 +227,15 @@ export default function OrganizationAdminPage({ params }: PageProps) {
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [pendingJoinRequests, setPendingJoinRequests] = useState<JoinRequest[]>([]);
   const [activeTab, setActiveTab] = useState("members");
+  const [domains, setDomains] = useState<Array<{ domain: string; role: 'student' | 'teacher' }>>([
+  // Example existing domains - load from your backend
+    { domain: 'student.university.com', role: 'student' },
+    { domain: 'teacher.university.com', role: 'teacher' },
+  ]);
+  const [newDomain, setNewDomain] = useState('');
+  const [newDomainRole, setNewDomainRole] = useState<'student' | 'teacher'>('student');
+
+  const [tabScrollPositions, setTabScrollPositions] = useState<Record<string, number>>({});
 
   const organizationId = parseInt(id);
 
@@ -239,8 +253,45 @@ export default function OrganizationAdminPage({ params }: PageProps) {
     }
   }, [organizationId, router]);
 
+  // Save scroll position before filters change
+  useEffect(() => {
+    // Store current scroll position before filters change
+    const previousScroll = window.scrollY;
+    
+    // Restore after filters update
+    const timer = setTimeout(() => {
+      window.scrollTo({ top: previousScroll, behavior: 'instant' });
+    }, 50);
+    
+    return () => clearTimeout(timer);
+  }, [roleFilter, statusFilter, searchQuery]);
+
+  // Handle tab changes with scroll preservation
+  const handleTabChange = (value: string) => {
+    // Save current tab's scroll position before switching
+    setTabScrollPositions(prev => ({
+      ...prev,
+      [activeTab]: window.scrollY
+    }));
+    
+    // Switch to new tab
+    setActiveTab(value);
+  };
+
+  // Restore scroll position after tab changes
+  useEffect(() => {
+    const savedPosition = tabScrollPositions[activeTab];
+    if (savedPosition !== undefined) {
+      // Small delay to ensure content is rendered
+      const timer = setTimeout(() => {
+        window.scrollTo({ top: savedPosition, behavior: 'instant' });
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [activeTab, tabScrollPositions]);
+
   // Check if user has admin permission for this organization
-  if (roleData.role !== "org_admin" && roleData.role !== "system_admin") {
+  if (roleData.role !== "org_admin") {
     return (
       <div className="text-center py-12">
         <Shield className="w-16 h-16 text-[#6B6B80] mx-auto mb-4" />
@@ -282,20 +333,30 @@ export default function OrganizationAdminPage({ params }: PageProps) {
     }
   };
 
-  const handleChangeMemberRole = (memberId: string, newRole: string) => {
-    setMembers(prev =>
-      prev.map(member =>
-        member.id === memberId ? { ...member, role: newRole as any } : member
-      )
-    );
-    toast.success(`Member role updated to ${newRole}`);
-  };
-
   const handleRemoveMember = (memberId: string, memberName: string) => {
     if (confirm(`Are you sure you want to remove ${memberName} from the organization?`)) {
       setMembers(prev => prev.filter(m => m.id !== memberId));
       toast.success(`${memberName} has been removed from the organization`);
     }
+  };
+
+  const handleUpdateMember = () => {
+    if (!editingMember) return;
+    
+    // Check permissions
+    if (roleData.role === "sub_admin" && editingMember.role === "admin") {
+      toast.error("Sub admins cannot modify admin members");
+      setEditingMember(null);
+      return;
+    }
+    
+    setMembers(prev =>
+      prev.map(member =>
+        member.id === editingMember.id ? editingMember : member
+      )
+    );
+    toast.success(`${editingMember.name}'s information updated`);
+    setEditingMember(null);
   };
 
   const handlePublishCourse = (courseId: number) => {
@@ -315,6 +376,53 @@ export default function OrganizationAdminPage({ params }: PageProps) {
     return matchesSearch && matchesRole && matchesStatus;
   });
 
+  // Domain management handlers
+  const handleAddDomain = () => {
+    if (!newDomain.trim()) return;
+    
+    // Validate domain format
+    const domainRegex = /^[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$/;
+    if (!domainRegex.test(newDomain)) {
+      toast.error('Please enter a valid domain (e.g., example.com)');
+      return;
+    }
+
+    // Check for duplicate domains
+    if (domains.some(d => d.domain === newDomain.toLowerCase())) {
+      toast.error('This domain has already been added');
+      return;
+    }
+
+    setDomains([...domains, { 
+      domain: newDomain.toLowerCase(), 
+      role: newDomainRole 
+    }]);
+    setNewDomain('');
+    toast.success(`Domain ${newDomain} added as ${newDomainRole} email`);
+  };
+
+  const handleEditDomain = (index: number) => {
+    const domain = domains[index];
+    const newRole = window.confirm(`Change ${domain.domain} from ${domain.role} to ${domain.role === 'student' ? 'teacher' : 'student'}?`)
+      ? (domain.role === 'student' ? 'teacher' : 'student')
+      : null;
+    
+    if (newRole) {
+      const updatedDomains = [...domains];
+      updatedDomains[index].role = newRole;
+      setDomains(updatedDomains);
+      toast.success(`Domain ${domain.domain} role updated to ${newRole}`);
+    }
+  };
+
+  const handleDeleteDomain = (index: number) => {
+    const domain = domains[index];
+    if (window.confirm(`Are you sure you want to remove ${domain.domain}?`)) {
+      setDomains(domains.filter((_, i) => i !== index));
+      toast.success(`Domain ${domain.domain} removed`);
+    }
+  };
+
   return (
     <div className="space-y-8 pb-12">
       {/* Header */}
@@ -326,25 +434,6 @@ export default function OrganizationAdminPage({ params }: PageProps) {
           Manage your organization's members, courses, and settings.
         </p>
         
-        {/* Navigation to System Admin */}
-        <div className="mt-4 p-4 bg-purple-500/10 border border-purple-500/20 rounded-xl">
-          <div className="flex items-start gap-3">
-            <Settings className="w-5 h-5 text-purple-400 shrink-0 mt-0.5" />
-            <div>
-              <p className="text-white font-medium mb-1">System Administration</p>
-              <p className="text-sm text-[#A0A0B5]">
-                Need to manage global platform settings or all organizations? 
-                <Link href="/admin" className="text-purple-400 hover:text-purple-300 ml-1 underline">
-                  Go to System Admin Panel →
-                </Link>
-              </p>
-            </div>
-          </div>
-        </div>
-        
-        <p className="text-sm text-[#6B6B80] mt-2">
-          This panel manages only <span className="text-purple-400">{organization.name}</span>. For platform-wide settings, use the System Admin panel.
-        </p>
       </div>
 
       {/* Stats Grid */}
@@ -352,7 +441,6 @@ export default function OrganizationAdminPage({ params }: PageProps) {
         <StatCard icon={Users} label="Total Students" value={analytics.totalStudents.toLocaleString()} />
         <StatCard icon={Users} label="Teachers" value={analytics.totalTeachers.toString()} />
         <StatCard icon={BookOpen} label="Courses" value={analytics.totalCourses.toString()} />
-        <StatCard icon={DollarSign} label="Total Revenue" value={`$${analytics.totalRevenue.toLocaleString()}`} />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -362,422 +450,526 @@ export default function OrganizationAdminPage({ params }: PageProps) {
       </div>
 
       {/* Admin Tabs */}
-      <Tabs defaultValue="members" value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="bg-[#12121A] border border-white/5 p-1 rounded-2xl mb-8 flex-wrap h-auto">
-          <TabsTrigger value="members" className="rounded-xl px-6 py-2.5">
-            <Users className="w-4 h-4 mr-2" />
-            Members
-          </TabsTrigger>
-          <TabsTrigger value="courses" className="rounded-xl px-6 py-2.5">
-            <BookOpen className="w-4 h-4 mr-2" />
-            Courses
-          </TabsTrigger>
-          <TabsTrigger value="role-requests" className="rounded-xl px-6 py-2.5">
-            <Clock className="w-4 h-4 mr-2" />
-            Role Requests
-            {roleRequests.length > 0 && (
-              <span className="ml-2 px-2 py-0.5 bg-yellow-500/20 text-yellow-400 rounded-full text-xs">
-                {roleRequests.length}
-              </span>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="join-requests" className="rounded-xl px-6 py-2.5">
-            <UserPlus className="w-4 h-4 mr-2" />
-            Join Requests
-            {pendingJoinRequests.length > 0 && (
-              <span className="ml-2 px-2 py-0.5 bg-yellow-500/20 text-yellow-400 rounded-full text-xs">
-                {pendingJoinRequests.length}
-              </span>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="analytics" className="rounded-xl px-6 py-2.5">
-            <BarChart3 className="w-4 h-4 mr-2" />
-            Analytics
-          </TabsTrigger>
-          <TabsTrigger value="settings" className="rounded-xl px-6 py-2.5">
-            <Settings className="w-4 h-4 mr-2" />
-            Settings
-          </TabsTrigger>
-        </TabsList>
+      <div className="tabs-content-wrapper">
+        <Tabs defaultValue="members" value={activeTab} onValueChange={handleTabChange} className="w-full">
+          <TabsList className="bg-[#12121A] border border-white/5 p-1 rounded-2xl mb-8 flex-wrap h-auto">
+            <TabsTrigger value="members" className="rounded-xl px-6 py-2.5">
+              <Users className="w-4 h-4 mr-2" />
+              Members
+            </TabsTrigger>
+            <TabsTrigger value="courses" className="rounded-xl px-6 py-2.5">
+              <BookOpen className="w-4 h-4 mr-2" />
+              Courses
+            </TabsTrigger>
+            <TabsTrigger value="role-requests" className="rounded-xl px-6 py-2.5">
+              <Clock className="w-4 h-4 mr-2" />
+              Role Requests
+              {roleRequests.length > 0 && (
+                <span className="ml-2 px-2 py-0.5 bg-yellow-500/20 text-yellow-400 rounded-full text-xs">
+                  {roleRequests.length}
+                </span>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="join-requests" className="rounded-xl px-6 py-2.5">
+              <UserPlus className="w-4 h-4 mr-2" />
+              Join Requests
+              {pendingJoinRequests.length > 0 && (
+                <span className="ml-2 px-2 py-0.5 bg-yellow-500/20 text-yellow-400 rounded-full text-xs">
+                  {pendingJoinRequests.length}
+                </span>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="analytics" className="rounded-xl px-6 py-2.5">
+              <BarChart3 className="w-4 h-4 mr-2" />
+              Analytics
+            </TabsTrigger>
+            <TabsTrigger value="settings" className="rounded-xl px-6 py-2.5">
+              <Settings className="w-4 h-4 mr-2" />
+              Settings
+            </TabsTrigger>
+          </TabsList>
 
-        {/* Members Tab */}
-        <TabsContent value="members">
-          <GlowCard>
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-6">
-              <h2 className="text-2xl font-bold text-white">Organization Members</h2>
-              <div className="flex gap-3">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6B6B80]" />
-                  <Input
-                    type="text"
-                    placeholder="Search members..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-10 bg-[#12121A] border-white/10 rounded-xl w-48"
-                  />
-                </div>
-                <GlowButton variant="primary" onClick={() => setShowInviteModal(true)}>
-                  <UserPlus className="w-4 h-4 mr-2" />
-                  Invite Member
-                </GlowButton>
-              </div>
-            </div>
-
-            {/* Filters */}
-            <div className="flex gap-2 mb-6">
-              <select
-                value={roleFilter}
-                onChange={(e) => setRoleFilter(e.target.value)}
-                className="px-3 py-1.5 bg-[#12121A] border border-white/10 text-white rounded-lg text-sm"
-              >
-                <option value="all">All Roles</option>
-                <option value="admin">Admin</option>
-                <option value="teacher">Teacher</option>
-                <option value="student">Student</option>
-              </select>
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="px-3 py-1.5 bg-[#12121A] border border-white/10 text-white rounded-lg text-sm"
-              >
-                <option value="all">All Status</option>
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-              </select>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-white/5">
-                    <th className="text-left text-[#A0A0B5] font-medium py-3 px-4">Member</th>
-                    <th className="text-left text-[#A0A0B5] font-medium py-3 px-4">Role</th>
-                    <th className="text-left text-[#A0A0B5] font-medium py-3 px-4">Status</th>
-                    <th className="text-left text-[#A0A0B5] font-medium py-3 px-4">Joined</th>
-                    <th className="text-left text-[#A0A0B5] font-medium py-3 px-4">Courses</th>
-                    <th className="text-left text-[#A0A0B5] font-medium py-3 px-4">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredMembers.map((member) => (
-                    <tr key={member.id} className="border-b border-white/5 hover:bg-white/5">
-                      <td className="py-3 px-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center">
-                            <span className="text-white font-semibold text-sm">{member.avatar}</span>
-                          </div>
-                          <div>
-                            <p className="text-white font-medium">{member.name}</p>
-                            <p className="text-sm text-[#A0A0B5]">{member.email}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="py-3 px-4">
-                        <select
-                          value={member.role}
-                          onChange={(e) => handleChangeMemberRole(member.id, e.target.value)}
-                          className="bg-[#12121A] border border-white/10 text-white rounded-lg px-2 py-1 text-sm"
-                          disabled={member.role === "admin" && member.name === "Alice Johnson"}
-                        >
-                          <option value="admin">Admin</option>
-                          <option value="teacher">Teacher</option>
-                          <option value="student">Student</option>
-                        </select>
-                      </td>
-                      <td className="py-3 px-4">
-                        <span className={`px-2 py-1 rounded-full text-xs ${
-                          member.status === "active" 
-                            ? "bg-green-500/20 text-green-400" 
-                            : "bg-gray-500/20 text-gray-400"
-                        }`}>
-                          {member.status}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-[#A0A0B5] text-sm">{member.joinedAt}</td>
-                      <td className="py-3 px-4 text-white">{member.courses}</td>
-                      <td className="py-3 px-4">
-                        <div className="flex gap-2">
-                          <button 
-                            onClick={() => setEditingMember(member)}
-                            className="p-1 hover:bg-white/5 rounded-lg transition-colors"
-                            title="Edit"
-                          >
-                            <Edit2 className="w-4 h-4 text-[#A0A0B5]" />
-                          </button>
-                          <button 
-                            onClick={() => handleRemoveMember(member.id, member.name)}
-                            className="p-1 hover:bg-white/5 rounded-lg transition-colors"
-                            title="Remove"
-                          >
-                            <Trash2 className="w-4 h-4 text-red-400" />
-                          </button>
-                          <button className="p-1 hover:bg-white/5 rounded-lg transition-colors">
-                            <MoreVertical className="w-4 h-4 text-[#A0A0B5]" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </GlowCard>
-        </TabsContent>
-
-        {/* Courses Tab */}
-        <TabsContent value="courses">
-          <GlowCard>
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-bold text-white">Organization Courses</h2>
-              <GlowButton variant="primary">
-                <Plus className="w-4 h-4 mr-2" />
-                Create Course
-              </GlowButton>
-            </div>
-            <div className="space-y-4">
-              {courses.map((course) => (
-                <div key={course.id} className="p-4 bg-[#12121A] rounded-xl">
-                  <div className="flex gap-4">
-                    <img src={course.thumbnail} alt={course.title} className="w-32 h-24 rounded-lg object-cover" />
-                    <div className="flex-1">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <h3 className="text-lg font-bold text-white">{course.title}</h3>
-                          <p className="text-sm text-[#A0A0B5]">{course.description}</p>
-                          <div className="flex items-center gap-4 mt-2 text-sm">
-                            <span className="flex items-center gap-1 text-[#A0A0B5]">
-                              <Users className="w-4 h-4" />
-                              {course.students} students
-                            </span>
-                            <span className="flex items-center gap-1 text-[#A0A0B5]">
-                              <Star className="w-4 h-4 fill-yellow-500 text-yellow-500" />
-                              {course.rating}
-                            </span>
-                            <span className="flex items-center gap-1 text-[#A0A0B5]">
-                              <DollarSign className="w-4 h-4" />
-                              ${course.revenue.toLocaleString()}
-                            </span>
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          {course.status === "draft" && (
-                            <GlowButton variant="primary" size="sm" onClick={() => handlePublishCourse(course.id)}>
-                              Publish
-                            </GlowButton>
-                          )}
-                          <GlowButton variant="outline" size="sm">
-                            Edit
-                          </GlowButton>
-                          <GlowButton variant="outline" size="sm">
-                            Analytics
-                          </GlowButton>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </GlowCard>
-        </TabsContent>
-
-        {/* Role Requests Tab */}
-        <TabsContent value="role-requests">
-          <GlowCard>
-            <h2 className="text-2xl font-bold text-white mb-6">Role Upgrade Requests</h2>
-            {roleRequests.length === 0 ? (
-              <div className="text-center py-8">
-                <Clock className="w-12 h-12 text-[#6B6B80] mx-auto mb-3" />
-                <p className="text-[#A0A0B5]">No pending role requests</p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {roleRequests.map((request) => (
-                  <div
-                    key={request.id}
-                    className="flex items-center justify-between p-4 bg-[#12121A] rounded-xl border border-white/5"
-                  >
-                    <div>
-                      <p className="text-white font-medium">{request.userName}</p>
-                      <p className="text-[#A0A0B5] text-sm">{request.userEmail}</p>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-xs text-yellow-400 bg-yellow-500/10 px-2 py-0.5 rounded-full">
-                          Requests {request.requestedRole} role
-                        </span>
-                        <span className="text-xs text-[#6B6B80]">
-                          {new Date(request.requestedAt).toLocaleDateString()}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <GlowButton
-                        variant="primary"
-                        size="sm"
-                        onClick={() => handleApproveRoleRequest(request.id)}
-                      >
-                        <CheckCircle className="w-4 h-4 mr-1" />
-                        Approve
-                      </GlowButton>
-                      <GlowButton
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleRejectRoleRequest(request.id)}
-                      >
-                        <XCircle className="w-4 h-4 mr-1" />
-                        Reject
-                      </GlowButton>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </GlowCard>
-        </TabsContent>
-
-        {/* Join Requests Tab */}
-        <TabsContent value="join-requests">
-          <PendingRequestsTab
-            organizationId={organizationId}
-            requests={pendingJoinRequests}
-            onRequestProcessed={() => {
-              const updated = getPendingJoinRequests(organizationId);
-              setPendingJoinRequests(updated);
-            }}
-          />
-        </TabsContent>
-
-        {/* Analytics Tab */}
-        <TabsContent value="analytics">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Members Tab */}
+          <TabsContent value="members">
             <GlowCard>
-              <h2 className="text-xl font-bold text-white mb-6">Revenue Overview</h2>
-              <div className="text-center py-12">
-                <DollarSign className="w-16 h-16 text-purple-400 mx-auto mb-4" />
-                <p className="text-3xl font-bold text-white mb-2">${analytics.totalRevenue.toLocaleString()}</p>
-                <p className="text-[#A0A0B5]">Total earnings</p>
-                <p className="text-sm text-green-400 mt-2">↑ {analytics.monthlyGrowth}% from last month</p>
-              </div>
-            </GlowCard>
-
-            <GlowCard>
-              <h2 className="text-xl font-bold text-white mb-6">Course Performance</h2>
-              <div className="space-y-4">
-                {courses.map((course) => (
-                  <div key={course.id} className="p-3 bg-[#12121A] rounded-xl">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-white font-medium">{course.title}</span>
-                      <span className="text-purple-400">{course.students} students</span>
+              <div className="min-h-[400px]">
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-6">
+                  <h2 className="text-2xl font-bold text-white">Organization Members</h2>
+                  <div className="flex gap-3">
+                    <div className="relative flex-1 sm:flex-none">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6B6B80]" />
+                      <Input
+                        type="text"
+                        placeholder="Search members..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="pl-10 bg-[#12121A] border-white/10 rounded-xl h-10 w-full sm:w-64"
+                      />
                     </div>
-                    <div className="flex items-center gap-4 text-sm text-[#A0A0B5]">
-                      <span>Rating: {course.rating} ★</span>
-                      <span>Revenue: ${course.revenue.toLocaleString()}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </GlowCard>
-
-            <GlowCard>
-              <h2 className="text-xl font-bold text-white mb-6">Member Growth</h2>
-              <div className="text-center py-12">
-                <TrendingUp className="w-16 h-16 text-purple-400 mx-auto mb-4" />
-                <p className="text-3xl font-bold text-white mb-2">{analytics.totalStudents}</p>
-                <p className="text-[#A0A0B5]">Total students</p>
-                <p className="text-sm text-green-400 mt-2">↑ {analytics.monthlyGrowth}% this month</p>
-              </div>
-            </GlowCard>
-
-            <GlowCard>
-              <h2 className="text-xl font-bold text-white mb-6">Engagement Metrics</h2>
-              <div className="space-y-4">
-                <div>
-                  <div className="flex items-center justify-between text-sm mb-1">
-                    <span className="text-[#A0A0B5]">Course Completion Rate</span>
-                    <span className="text-purple-400">{analytics.completionRate}%</span>
-                  </div>
-                  <div className="h-2 bg-[#1A1A24] rounded-full overflow-hidden">
-                    <div className="h-full bg-purple-500 rounded-full" style={{ width: `${analytics.completionRate}%` }} />
-                  </div>
-                </div>
-                <div>
-                  <div className="flex items-center justify-between text-sm mb-1">
-                    <span className="text-[#A0A0B5]">Active Students</span>
-                    <span className="text-purple-400">78%</span>
-                  </div>
-                  <div className="h-2 bg-[#1A1A24] rounded-full overflow-hidden">
-                    <div className="h-full bg-purple-500 rounded-full" style={{ width: "78%" }} />
-                  </div>
-                </div>
-              </div>
-            </GlowCard>
-          </div>
-        </TabsContent>
-
-        {/* Settings Tab */}
-        <TabsContent value="settings">
-          <GlowCard>
-            <h2 className="text-2xl font-bold text-white mb-6">Organization Settings</h2>
-            <div className="space-y-4 max-w-2xl">
-              <div>
-                <Label className="text-sm font-medium text-[#A0A0B5] mb-2 block">
-                  Organization Name
-                </Label>
-                <Input
-                  defaultValue={organization.name}
-                  className="bg-[#12121A] border-white/10 text-white"
-                />
-              </div>
-              <div>
-                <Label className="text-sm font-medium text-[#A0A0B5] mb-2 block">
-                  Domain
-                </Label>
-                <Input
-                  defaultValue={organization.domain || ""}
-                  className="bg-[#12121A] border-white/10 text-white"
-                />
-                <p className="text-xs text-[#6B6B80] mt-1">
-                  Users with this email domain will automatically join the organization
-                </p>
-              </div>
-              <div>
-                <Label className="text-sm font-medium text-[#A0A0B5] mb-2 block">
-                  Description
-                </Label>
-                <Textarea
-                  defaultValue={organization.description || ""}
-                  rows={3}
-                  className="bg-[#12121A] border-white/10 text-white resize-none"
-                />
-              </div>
-              <div>
-                <Label className="text-sm font-medium text-[#A0A0B5] mb-2 block">
-                  Verification Status
-                </Label>
-                <div className="flex items-center gap-2">
-                  <span className={`px-3 py-1 rounded-full text-sm ${
-                    organization.verified 
-                      ? "bg-green-500/20 text-green-400" 
-                      : "bg-yellow-500/20 text-yellow-400"
-                  }`}>
-                    {organization.verified ? "Verified" : "Pending Verification"}
-                  </span>
-                  {!organization.verified && (
-                    <GlowButton variant="outline" size="sm">
-                      Request Verification
+                    <GlowButton variant="primary" onClick={() => setShowInviteModal(true)} className="h-10">
+                      <UserPlus className="w-4 h-4 mr-2" />
+                      Invite Member
                     </GlowButton>
-                  )}
+                  </div>
+                </div>
+
+                {/* Filters */}
+                <div className="flex gap-2 mb-6">
+                  <select
+                    value={roleFilter}
+                    onChange={(e) => setRoleFilter(e.target.value)}
+                    className="px-3 py-2 bg-[#12121A] border border-white/10 text-white rounded-lg text-sm h-10"
+                  >
+                    <option value="all">All Roles</option>
+                    <option value="admin">Admin</option>
+                    <option value="sub_admin">Sub Admin</option>
+                    <option value="teacher">Teacher</option>
+                    <option value="student">Student</option>
+                  </select>
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                    className="px-3 py-2 bg-[#12121A] border border-white/10 text-white rounded-lg text-sm h-10"
+                  >
+                    <option value="all">All Status</option>
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                  </select>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-white/5">
+                        <th className="text-left text-[#A0A0B5] font-medium py-3 px-4">Member</th>
+                        <th className="text-left text-[#A0A0B5] font-medium py-3 px-4">Role</th>
+                        <th className="text-left text-[#A0A0B5] font-medium py-3 px-4">Status</th>
+                        <th className="text-left text-[#A0A0B5] font-medium py-3 px-4">Joined</th>
+                        <th className="text-left text-[#A0A0B5] font-medium py-3 px-4">Courses</th>
+                        <th className="text-left text-[#A0A0B5] font-medium py-3 px-4">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredMembers.map((member) => (
+                        <tr key={member.id} className="border-b border-white/5 hover:bg-white/5">
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center">
+                                <span className="text-white font-semibold text-sm">{member.avatar}</span>
+                              </div>
+                              <div>
+                                <p className="text-white font-medium">{member.name}</p>
+                                <p className="text-sm text-[#A0A0B5]">{member.email}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className={`px-2 py-1 rounded-full text-xs ${
+                              member.role === "admin" 
+                                ? "bg-purple-500/20 text-purple-400" 
+                                : member.role === "sub_admin"
+                                ? "bg-indigo-500/20 text-indigo-400"
+                                : member.role === "teacher"
+                                ? "bg-blue-500/20 text-blue-400"
+                                : "bg-green-500/20 text-green-400"
+                            }`}>
+                              {member.role === "sub_admin" ? "Sub Admin" : member.role.charAt(0).toUpperCase() + member.role.slice(1)}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className={`px-2 py-1 rounded-full text-xs ${
+                              member.status === "active" 
+                                ? "bg-green-500/20 text-green-400" 
+                                : "bg-gray-500/20 text-gray-400"
+                            }`}>
+                              {member.status}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-[#A0A0B5] text-sm">{member.joinedAt}</td>
+                          <td className="py-3 px-4 text-white">{member.courses}</td>
+                          <td className="py-3 px-4">
+                            <div className="flex gap-2">
+                              <button 
+                                onClick={() => setEditingMember(member)}
+                                className="p-1 hover:bg-white/5 rounded-lg transition-colors"
+                                title="Edit"
+                              >
+                                <Edit2 className="w-4 h-4 text-[#A0A0B5]" />
+                              </button>
+                              {member.role !== "admin" && (
+                                <button 
+                                  onClick={() => handleRemoveMember(member.id, member.name)}
+                                  className="p-1 hover:bg-white/5 rounded-lg transition-colors"
+                                  title="Remove"
+                                >
+                                  <Trash2 className="w-4 h-4 text-red-400" />
+                                </button>
+                              )}
+                              <button className="p-1 hover:bg-white/5 rounded-lg transition-colors">
+                                <MoreVertical className="w-4 h-4 text-[#A0A0B5]" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </div>
-              <div className="pt-4 flex gap-4">
-                <GlowButton variant="primary">Save Changes</GlowButton>
-                <GlowButton variant="ghost" className="text-red-400 hover:text-red-300">
-                  Delete Organization
-                </GlowButton>
+            </GlowCard>
+          </TabsContent>
+
+          {/* Courses Tab */}
+          <TabsContent value="courses">
+            <GlowCard>
+              <div className="min-h-[400px]">
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-2xl font-bold text-white">Organization Courses</h2>
+                  <GlowButton variant="primary">
+                    <Plus className="w-4 h-4 mr-2" />
+                    Create Course
+                  </GlowButton>
+                </div>
+                <div className="space-y-4">
+                  {courses.map((course) => (
+                    <div key={course.id} className="p-4 bg-[#12121A] rounded-xl">
+                      <div className="flex gap-4">
+                        <img src={course.thumbnail} alt={course.title} className="w-32 h-24 rounded-lg object-cover" />
+                        <div className="flex-1">
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <h3 className="text-lg font-bold text-white">{course.title}</h3>
+                              <p className="text-sm text-[#A0A0B5]">{course.description}</p>
+                              <div className="flex items-center gap-4 mt-2 text-sm">
+                                <span className="flex items-center gap-1 text-[#A0A0B5]">
+                                  <Users className="w-4 h-4" />
+                                  {course.students} students
+                                </span>
+                                <span className="flex items-center gap-1 text-[#A0A0B5]">
+                                  <Star className="w-4 h-4 fill-yellow-500 text-yellow-500" />
+                                  {course.rating}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex gap-2">
+                              {course.status === "draft" && (
+                                <GlowButton variant="primary" size="sm" onClick={() => handlePublishCourse(course.id)}>
+                                  Publish
+                                </GlowButton>
+                              )}
+                              <GlowButton variant="outline" size="sm">
+                                Edit
+                              </GlowButton>
+                              <GlowButton variant="outline" size="sm">
+                                Analytics
+                              </GlowButton>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </GlowCard>
+          </TabsContent>
+
+          {/* Role Requests Tab */}
+          <TabsContent value="role-requests">
+            <GlowCard>
+              <div className="min-h-[400px]">
+                <h2 className="text-2xl font-bold text-white mb-6">Role Upgrade Requests</h2>
+                {roleRequests.length === 0 ? (
+                  <div className="text-center py-8">
+                    <Clock className="w-12 h-12 text-[#6B6B80] mx-auto mb-3" />
+                    <p className="text-[#A0A0B5]">No pending role requests</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {roleRequests.map((request) => (
+                      <div
+                        key={request.id}
+                        className="flex items-center justify-between p-4 bg-[#12121A] rounded-xl border border-white/5"
+                      >
+                        <div>
+                          <p className="text-white font-medium">{request.userName}</p>
+                          <p className="text-[#A0A0B5] text-sm">{request.userEmail}</p>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-xs text-yellow-400 bg-yellow-500/10 px-2 py-0.5 rounded-full">
+                              Requests {request.requestedRole} role
+                            </span>
+                            <span className="text-xs text-[#6B6B80]">
+                              {new Date(request.requestedAt).toLocaleDateString()}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <GlowButton
+                            variant="primary"
+                            size="sm"
+                            onClick={() => handleApproveRoleRequest(request.id)}
+                          >
+                            <CheckCircle className="w-4 h-4 mr-1" />
+                            Approve
+                          </GlowButton>
+                          <GlowButton
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleRejectRoleRequest(request.id)}
+                          >
+                            <XCircle className="w-4 h-4 mr-1" />
+                            Reject
+                          </GlowButton>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </GlowCard>
+          </TabsContent>
+
+          {/* Join Requests Tab */}
+          <TabsContent value="join-requests">
+            <div className="min-h-[400px]">
+              <PendingRequestsTab
+                organizationId={organizationId}
+                requests={pendingJoinRequests}
+                onRequestProcessed={() => {
+                  const updated = getPendingJoinRequests(organizationId);
+                  setPendingJoinRequests(updated);
+                }}
+              />
+            </div>
+          </TabsContent>
+
+          {/* Analytics Tab */}
+          <TabsContent value="analytics">
+            <div className="min-h-[400px]">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <GlowCard>
+                  <h2 className="text-xl font-bold text-white mb-6">Course Performance</h2>
+                  <div className="space-y-4">
+                    {courses.map((course) => (
+                      <div key={course.id} className="p-3 bg-[#12121A] rounded-xl">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-white font-medium">{course.title}</span>
+                          <span className="text-purple-400">{course.students} students</span>
+                        </div>
+                        <div className="flex items-center gap-4 text-sm text-[#A0A0B5]">
+                          <span>Rating: {course.rating} ★</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </GlowCard>
+
+                <GlowCard>
+                  <h2 className="text-xl font-bold text-white mb-6">Member Growth</h2>
+                  <div className="text-center py-12">
+                    <TrendingUp className="w-16 h-16 text-purple-400 mx-auto mb-4" />
+                    <p className="text-3xl font-bold text-white mb-2">{analytics.totalStudents}</p>
+                    <p className="text-[#A0A0B5]">Total students</p>
+                    <p className="text-sm text-green-400 mt-2">↑ {analytics.monthlyGrowth}% this month</p>
+                  </div>
+                </GlowCard>
+
+                <GlowCard>
+                  <h2 className="text-xl font-bold text-white mb-6">Engagement Metrics</h2>
+                  <div className="space-y-4">
+                    <div>
+                      <div className="flex items-center justify-between text-sm mb-1">
+                        <span className="text-[#A0A0B5]">Course Completion Rate</span>
+                        <span className="text-purple-400">{analytics.completionRate}%</span>
+                      </div>
+                      <div className="h-2 bg-[#1A1A24] rounded-full overflow-hidden">
+                        <div className="h-full bg-purple-500 rounded-full" style={{ width: `${analytics.completionRate}%` }} />
+                      </div>
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-between text-sm mb-1">
+                        <span className="text-[#A0A0B5]">Active Students</span>
+                        <span className="text-purple-400">78%</span>
+                      </div>
+                      <div className="h-2 bg-[#1A1A24] rounded-full overflow-hidden">
+                        <div className="h-full bg-purple-500 rounded-full" style={{ width: "78%" }} />
+                      </div>
+                    </div>
+                  </div>
+                </GlowCard>
               </div>
             </div>
-          </GlowCard>
-        </TabsContent>
-      </Tabs>
+          </TabsContent>
+
+          {/* Settings Tab */}
+          <TabsContent value="settings">
+            <GlowCard>
+              <div className="min-h-[400px]">
+                <h2 className="text-2xl font-bold text-white mb-6">Organization Settings</h2>
+                <div className="space-y-6 max-w-2xl">
+                  {/* Basic Information Section */}
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-semibold text-white border-b border-white/10 pb-2">Basic Information</h3>
+                    <div>
+                      <Label className="text-sm font-medium text-[#A0A0B5] mb-2 block">
+                        Organization Name
+                      </Label>
+                      <Input
+                        defaultValue={organization.name}
+                        className="bg-[#12121A] border-white/10 text-white"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-sm font-medium text-[#A0A0B5] mb-2 block">
+                        Description
+                      </Label>
+                      <Textarea
+                        defaultValue={organization.description || ""}
+                        rows={3}
+                        className="bg-[#12121A] border-white/10 text-white resize-none"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-sm font-medium text-[#A0A0B5] mb-2 block">
+                        Verification Status
+                      </Label>
+                      <div className="flex items-center gap-2">
+                        <span className={`px-3 py-1 rounded-full text-sm ${
+                          organization.verified 
+                            ? "bg-green-500/20 text-green-400" 
+                            : "bg-yellow-500/20 text-yellow-400"
+                        }`}>
+                          {organization.verified ? "Verified" : "Pending Verification"}
+                        </span>
+                        {!organization.verified && (
+                          <GlowButton variant="outline" size="sm">
+                            Request Verification
+                          </GlowButton>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Domain Management Section */}
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-semibold text-white border-b border-white/10 pb-2">Domain Management</h3>
+                    <p className="text-sm text-[#A0A0B5]">
+                      Add email domains to automatically assign users to the correct role during onboarding.
+                      Users signing up with matching email domains will be automatically added to your organization.
+                    </p>
+
+                    {/* Add Domain Form */}
+                    <div className="bg-[#12121A]/50 rounded-lg p-4 border border-white/10">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="md:col-span-2">
+                          <Label className="text-sm font-medium text-[#A0A0B5] mb-2 block">
+                            Domain Name
+                          </Label>
+                          <Input
+                            placeholder="e.g., university.edu, company.com"
+                            value={newDomain}
+                            onChange={(e) => setNewDomain(e.target.value)}
+                            className="bg-[#12121A] border-white/10 text-white"
+                          />
+                          <p className="text-xs text-[#6B6B80] mt-1">
+                            Enter domain without @ (e.g., gmail.com)
+                          </p>
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium text-[#A0A0B5] mb-2 block">
+                            Assign Role
+                          </Label>
+                          <select
+                            value={newDomainRole}
+                            onChange={(e) => setNewDomainRole(e.target.value as 'student' | 'teacher')}
+                            className="w-full bg-[#12121A] border border-white/10 text-white rounded-xl h-12 px-4"
+                          >
+                            <option value="student">Student</option>
+                            <option value="teacher">Teacher</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div className="mt-4 flex justify-end">
+                        <GlowButton 
+                          variant="primary" 
+                          onClick={handleAddDomain}
+                          disabled={!newDomain.trim()}
+                        >
+                          Add Domain
+                        </GlowButton>
+                      </div>
+                    </div>
+
+                    {/* Domains List */}
+                    {domains.length > 0 ? (
+                      <div className="space-y-2">
+                        <div className="text-sm font-medium text-[#A0A0B5] mb-2">Configured Domains</div>
+                        {domains.map((domain, index) => (
+                          <div
+                            key={index}
+                            className="flex items-center justify-between p-3 bg-[#12121A] rounded-lg border border-white/10"
+                          >
+                            <div className="flex items-center gap-3 flex-1">
+                              <span className="text-white font-mono">{domain.domain}</span>
+                              <span className={`px-2 py-1 rounded-full text-xs ${
+                                domain.role === 'student' 
+                                  ? 'bg-blue-500/20 text-blue-400' 
+                                  : 'bg-purple-500/20 text-purple-400'
+                              }`}>
+                                {domain.role === 'student' ? 'Student Email' : 'Teacher Email'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => handleEditDomain(index)}
+                                className="p-1 text-[#A0A0B5] hover:text-white transition-colors"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteDomain(index)}
+                                className="p-1 text-[#A0A0B5] hover:text-red-400 transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-center py-8 bg-[#12121A]/30 rounded-lg border border-white/10 border-dashed">
+                        <Globe className="w-12 h-12 text-[#6B6B80] mx-auto mb-2" />
+                        <p className="text-[#A0A0B5]">No domains configured yet</p>
+                        <p className="text-sm text-[#6B6B80]">Add domains to automatically assign users to your organization</p>
+                      </div>
+                    )}
+
+                    {/* Info Box */}
+                    <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
+                      <h4 className="font-semibold text-blue-400 mb-2 flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4" />
+                        How domain auto-assignment works
+                      </h4>
+                      <ul className="text-sm text-gray-300 space-y-1">
+                        <li>• When a user signs up with an email (e.g., student@university.edu)</li>
+                        <li>• The system checks if the domain matches any configured domain</li>
+                        <li>• If matched, the user is automatically assigned the corresponding role</li>
+                        <li>• Users are automatically added to your organization during onboarding</li>
+                        <li>• Multiple domains can point to the same organization</li>
+                      </ul>
+                    </div>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="pt-4 flex gap-4">
+                    <GlowButton variant="primary">Save Changes</GlowButton>
+                  </div>
+                </div>
+              </div>
+            </GlowCard>
+          </TabsContent>
+        </Tabs>
+      </div>
 
       {/* Invite Modal */}
       <InviteMemberModal
@@ -799,26 +991,42 @@ export default function OrganizationAdminPage({ params }: PageProps) {
             <div className="p-6 space-y-4">
               <div>
                 <Label className="text-sm font-medium text-[#A0A0B5] mb-2 block">Name</Label>
-                <Input defaultValue={editingMember.name} className="bg-[#12121A] border-white/10" />
+                <Input 
+                  defaultValue={editingMember.name} 
+                  className="bg-[#12121A] border-white/10" 
+                  onChange={(e) => setEditingMember({ ...editingMember, name: e.target.value })}
+                />
               </div>
               <div>
                 <Label className="text-sm font-medium text-[#A0A0B5] mb-2 block">Email</Label>
-                <Input defaultValue={editingMember.email} className="bg-[#12121A] border-white/10" />
+                <Input 
+                  defaultValue={editingMember.email} 
+                  className="bg-[#12121A] border-white/10" 
+                  onChange={(e) => setEditingMember({ ...editingMember, email: e.target.value })}
+                />
               </div>
               <div>
                 <Label className="text-sm font-medium text-[#A0A0B5] mb-2 block">Role</Label>
-                <select defaultValue={editingMember.role} className="w-full bg-[#12121A] border border-white/10 text-white rounded-xl h-12 px-4">
-                  <option value="admin">Admin</option>
+                <select 
+                  value={editingMember.role}
+                  onChange={(e) => setEditingMember({ ...editingMember, role: e.target.value as any })}
+                  className="w-full bg-[#12121A] border border-white/10 text-white rounded-xl h-12 px-4"
+                  disabled={editingMember.role === "admin" || (roleData.role === "sub_admin" && editingMember.role === "admin")}
+                >
+                  <option value="sub_admin">Sub Admin</option>
                   <option value="teacher">Teacher</option>
                   <option value="student">Student</option>
                 </select>
+                {(editingMember.role === "admin" || (roleData.role === "sub_admin" && editingMember.role === "admin")) && (
+                  <p className="text-xs text-yellow-400 mt-1">Admin role cannot be modified</p>
+                )}
               </div>
             </div>
             <div className="flex gap-3 p-6 border-t border-white/10">
               <GlowButton variant="ghost" onClick={() => setEditingMember(null)} className="flex-1">
                 Cancel
               </GlowButton>
-              <GlowButton variant="primary" className="flex-1">
+              <GlowButton variant="primary" onClick={handleUpdateMember} className="flex-1">
                 Save Changes
               </GlowButton>
             </div>
