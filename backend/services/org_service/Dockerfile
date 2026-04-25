@@ -17,4 +17,4 @@ RUN apt-get update \
 
 COPY backend /app/backend
 
-CMD ["infisical", "run", "--projectId=648fdbd7-c908-43c5-97a2-ae62d60e3422", "--env=dev", "--", "/opt/venv/bin/gunicorn", "-b", "0.0.0.0:5003", "backend.services.org_service.app:app"]
+CMD ["infisical", "run", "--projectId=648fdbd7-c908-43c5-97a2-ae62d60e3422", "--env=dev", "--", "/opt/venv/bin/gunicorn", "-b", "0.0.0.0:5003", "--certfile", "/etc/trancendance-certs/internal-services.crt", "--keyfile", "/etc/trancendance-certs/internal-services.key", "backend.services.org_service.app:app"]

@@ -1,55 +1,82 @@
 services:
+  waf-proxy:
+    image: trancendance-waf-proxy:latest
+    build:
+      context: .
+      dockerfile: waf/Dockerfile
+    ports:
+      - "80:8080"
+      - "443:8443"
+    volumes:
+      - ./waf/certs:/etc/nginx/certs:ro
+    depends_on:
+      - frontend
+      - prometheus
+      - grafana
+
   auth-service:
     image: trancendance-auth-service:latest
     build:
       context: .
       dockerfile: backend/services/auth_service/Dockerfile
-    ports:
-      - "5001:5001"
+    expose:
+      - "5001"
     environment:
       - INFISICAL_TOKEN=${INFISICAL_TOKEN}
+    volumes:
+      - ./waf/certs:/etc/trancendance-certs:ro
 
   chat-service:
     image: trancendance-chat-service:latest
     build:
       context: .
       dockerfile: backend/services/chat_service/Dockerfile
-    ports:
-      - "5002:5002"
+    expose:
+      - "5002"
     environment:
       - INFISICAL_TOKEN=${INFISICAL_TOKEN}
+    volumes:
+      - ./waf/certs:/etc/trancendance-certs:ro
 
   org-service:
     image: trancendance-org-service:latest
     build:
       context: .
       dockerfile: backend/services/org_service/Dockerfile
-    ports:
-      - "5003:5003"
+    expose:
+      - "5003"
     environment:
       - INFISICAL_TOKEN=${INFISICAL_TOKEN}
+    volumes:
+      - ./waf/certs:/etc/trancendance-certs:ro
 
   notification-service:
     image: trancendance-notification-service:latest
     build:
       context: .
       dockerfile: backend/services/notification_service/Dockerfile
-    ports:
-      - "5004:5004"
+    expose:
+      - "5004"
     environment:
       - INFISICAL_TOKEN=${INFISICAL_TOKEN}
+    volumes:
+      - ./waf/certs:/etc/trancendance-certs:ro
 
   frontend:
     build: ./frontend
     working_dir: /app
-    ports:
-      - "3000:3000"
+    expose:
+      - "3000"
     environment:
       - CHOKIDAR_USEPOLLING=true
       - INFISICAL_TOKEN=${INFISICAL_TOKEN}
+      - NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL}
+      - NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL}
+      - NODE_EXTRA_CA_CERTS=/etc/trancendance-certs/internal-ca.crt
     volumes:
       - ./frontend:/app
       - /app/node_modules
+      - ./waf/certs:/etc/trancendance-certs:ro
     depends_on:
       - auth-service
       - chat-service
@@ -58,8 +85,8 @@ services:
 
   node-exporter:
     image: prom/node-exporter:latest
-    ports:
-      - "9101:9100"
+    expose:
+      - "9100"
     volumes:
       - /:/host:ro
     command:
@@ -69,22 +96,32 @@ services:
     image: prom/prometheus:latest
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-    ports:
-      - "9090:9090"
+      - ./prometheus/web.yml:/etc/prometheus/web.yml:ro
+      - ./waf/certs:/etc/trancendance-certs:ro
+    expose:
+      - "9090"
     command:
       - --config.file=/etc/prometheus/prometheus.yml
+      - --web.config.file=/etc/prometheus/web.yml
+      - --web.external-url=https://localhost/prometheus/
 
   grafana:
     build:
       context: .
       dockerfile: grafana/Dockerfile
-    ports:
-      - "3001:3000"
+    expose:
+      - "3000"
     environment:
       - CHOKIDAR_USEPOLLING=true
       - INFISICAL_TOKEN=${INFISICAL_TOKEN}
+      - GF_SERVER_ROOT_URL=https://localhost/grafana/
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+      - GF_SERVER_PROTOCOL=https
+      - GF_SERVER_CERT_FILE=/etc/trancendance-certs/internal-services.crt
+      - GF_SERVER_CERT_KEY=/etc/trancendance-certs/internal-services.key
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning
       - ./grafana/dashboards:/var/lib/grafana/dashboards
+      - ./waf/certs:/etc/trancendance-certs:ro
     depends_on:
       - prometheus

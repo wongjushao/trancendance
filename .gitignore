@@ -8,3 +8,8 @@ build/
 dist/
 *.log
 repomix-output.xml
+waf/certs/*.crt
+waf/certs/*.key
+waf/certs/*.csr
+waf/certs/*.ext
+waf/certs/*.srl

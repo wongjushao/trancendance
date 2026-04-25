@@ -5,25 +5,25 @@ const nextConfig: NextConfig = {
     return [
       {
         source: '/api/auth/:path*',
-        destination: 'http://auth-service:5001/:path*',
+        destination: 'https://auth-service:5001/:path*',
       },
       {
         source: '/api/chat/:path*',
-        destination: 'http://chat-service:5002/:path*',
+        destination: 'https://chat-service:5002/:path*',
       },
       {
         source: '/api/org/:path*',
-        destination: 'http://org-service:5003/:path*',
+        destination: 'https://org-service:5003/:path*',
       },
       {
         // Auth service with full path
         source: '/api/auth-service/:path*',
-        destination: 'http://auth-service:5001/api/auth-service/:path*',
+        destination: 'https://auth-service:5001/api/auth-service/:path*',
       },
       {
         // Notification service - FIXED
         source: '/api/notification-service/:path*',
-        destination: 'http://notification-service:5004/:path*',  // Added full path
+        destination: 'https://notification-service:5004/:path*',
       },
     ]
   },
