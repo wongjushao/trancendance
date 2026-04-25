@@ -26,6 +26,7 @@ def test_health(client):
 def test_notification_requires_bearer(client, monkeypatch):
     # Force db_session to look configured for this test
     fake_db_session = types.SimpleNamespace(remove=lambda: None)
+    monkeypatch.setenv("SUPABASE_DB_URL", "postgresql://user:pass@localhost/testdb")
     monkeypatch.setattr(
         "backend.services.notification_service.app.create_engine_and_session",
         lambda _url: (None, fake_db_session),

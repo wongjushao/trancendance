@@ -1,15 +1,15 @@
-# backend/services/auth_service/auth_service/routes/account.py
-from flask import Blueprint, request, jsonify, current_app
 import os
 import logging
+
+from flask import request, jsonify, current_app
+from flask_restx import Namespace, Resource
 from supabase import create_client
 from backend.common.models.entities import Profile
 from backend.services.auth_service.auth_service.utils.supabase_jwt import extract_bearer_token
 
-account_bp = Blueprint("account", __name__)
+account_ns = Namespace("account", path="/api/auth-service", description="Account management endpoints")
 logger = logging.getLogger(__name__)
 
-@account_bp.post("/update-password")
 def update_password():
     """Update user password and track status"""
     try:
@@ -101,7 +101,7 @@ def update_password():
         logger.error(f"Error in update_password: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
-@account_bp.get("/password-status")
+
 def get_password_status():
     """Check if user has a password set"""
     try:
@@ -150,3 +150,15 @@ def get_password_status():
     except Exception as e:
         logger.error(f"Error in get_password_status: {str(e)}")
         return jsonify({"error": str(e)}), 500
+
+
+@account_ns.route("/update-password")
+class AccountPasswordResource(Resource):
+    def post(self):
+        return update_password()
+
+
+@account_ns.route("/password-status")
+class PasswordStatusResource(Resource):
+    def get(self):
+        return get_password_status()

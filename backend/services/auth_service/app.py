@@ -1,16 +1,28 @@
 import os
 
-from flask import Flask
+from flask import Flask, Response
+from flask_restx import Api
+from flask_restx.representations import output_json as restx_output_json
+from flask import request
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from backend.common.db import create_engine_and_session
-from backend.services.auth_service.auth_service.routes import docs_bp, health_bp, metrics_bp, register_bp
-from backend.services.auth_service.auth_service.routes.onboarding import onboarding_bp
-from backend.services.auth_service.auth_service.routes.profile import profile_bp
-from backend.services.auth_service.auth_service.routes.metadata import metadata_bp
-from backend.services.auth_service.auth_service.routes.auth import auth_bp
-from backend.services.auth_service.auth_service.routes.avatar import avatar_bp  # Add this import
-from backend.services.auth_service.auth_service.routes.account import account_bp
-from backend.services.auth_service.auth_service.routes.MFA import mfa_bp 
+from backend.services.auth_service.auth_service.routes import (
+    AUTH_API_DESCRIPTION,
+    AUTH_API_TITLE,
+    AUTH_API_VERSION,
+    AUTH_DOC_PATH,
+    account_ns,
+    auth_ns,
+    avatar_ns,
+    health_ns,
+    metadata_ns,
+    metrics_ns,
+    mfa_ns,
+    onboarding_ns,
+    profile_ns,
+    register_ns,
+)
 
 def is_valid_database_url(database_url: str) -> bool:
     if not database_url:
@@ -24,6 +36,30 @@ def is_valid_database_url(database_url: str) -> bool:
 
 def create_app():
     app = Flask(__name__)
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_prefix=1)
+    
+    app.config["RESTX_MASK_SWAGGER"] = False
+    app.config["SWAGGER_UI_DOC_EXPANSION"] = "list"
+
+    api = Api(
+        app,
+        title=AUTH_API_TITLE,
+        version=AUTH_API_VERSION,
+        description=AUTH_API_DESCRIPTION,
+        doc=AUTH_DOC_PATH,
+        prefix="/",
+        default_label="API",
+    )
+
+    @api.representation("application/json")
+    def output_json_with_response_passthrough(data, code, headers=None):
+        if isinstance(data, Response):
+            response = data
+            response.status_code = code
+            if headers:
+                response.headers.extend(headers)
+            return response
+        return restx_output_json(data, code, headers)
 
     database_url = os.getenv("SUPABASE_DB_URL", "")
     db_session = None
@@ -33,17 +69,19 @@ def create_app():
 
     app.config["DB_SESSION"] = db_session
 
-    app.register_blueprint(docs_bp,      url_prefix="/api/auth-service")
-    app.register_blueprint(health_bp,    url_prefix="/api/auth-service")
-    app.register_blueprint(metrics_bp)
-    app.register_blueprint(register_bp,  url_prefix="/api/auth-service")
-    app.register_blueprint(onboarding_bp, url_prefix="/api/auth-service")
-    app.register_blueprint(profile_bp,   url_prefix="/api/auth-service")
-    app.register_blueprint(metadata_bp,  url_prefix="/api/auth-service")
-    app.register_blueprint(auth_bp,      url_prefix="/api/auth-service")
-    app.register_blueprint(avatar_bp,    url_prefix="/api/auth-service")  # Add this line
-    app.register_blueprint(account_bp, url_prefix="/api/auth-service")
-    app.register_blueprint(mfa_bp, url_prefix="/api/auth-service")
+    for namespace in (
+        health_ns,
+        metrics_ns,
+        register_ns,
+        onboarding_ns,
+        profile_ns,
+        metadata_ns,
+        auth_ns,
+        avatar_ns,
+        account_ns,
+        mfa_ns,
+    ):
+        api.add_namespace(namespace)
     
 
     @app.teardown_appcontext

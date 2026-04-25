@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from datetime import date
 
-from flask import Blueprint, jsonify, request, current_app
+from flask import jsonify, request, current_app
+from flask_restx import Namespace, Resource
 from sqlalchemy import func
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -11,7 +12,7 @@ from backend.common.models import Profile, Skill, UserSkill
 from backend.common.models.entities import ProfileEducation
 from backend.services.auth_service.auth_service.utils.supabase_jwt import extract_bearer_token, verify_supabase_jwt
 
-profile_bp = Blueprint("profile", __name__)
+profile_ns = Namespace("profile", path="/api/auth-service", description="Profile endpoints")
 
 
 def serialize_profile(profile: Profile) -> dict:
@@ -195,7 +196,6 @@ def _serialize_profile_educations(session, user_id) -> list[dict]:
     ]
 
 
-@profile_bp.get("/profile")
 def get_profile():
     """Get current user's profile."""
     db_session = current_app.config.get("DB_SESSION")
@@ -226,7 +226,6 @@ def get_profile():
         session.close()
 
 
-@profile_bp.put("/profile")
 def update_profile():
     """Update current user's profile."""
     db_session = current_app.config.get("DB_SESSION")
@@ -389,7 +388,6 @@ def update_profile():
         session.close()
 
 
-@profile_bp.get("/skills")
 def get_skills():
     """Get all skills. Requires valid bearer token."""
     db_session = current_app.config.get("DB_SESSION")
@@ -425,3 +423,18 @@ def get_skills():
         return jsonify({"error": str(exc)}), 500
     finally:
         session.close()
+
+
+@profile_ns.route("/profile")
+class ProfileResource(Resource):
+    def get(self):
+        return get_profile()
+
+    def put(self):
+        return update_profile()
+
+
+@profile_ns.route("/skills")
+class SkillsResource(Resource):
+    def get(self):
+        return get_skills()

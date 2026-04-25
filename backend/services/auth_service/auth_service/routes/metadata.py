@@ -4,15 +4,15 @@ from __future__ import annotations
 import os
 import uuid
 
-from flask import Blueprint, jsonify, request, current_app
+from flask import jsonify, request, current_app
+from flask_restx import Namespace, Resource
 from supabase import create_client
 
 from backend.services.auth_service.auth_service.utils.supabase_jwt import extract_bearer_token, verify_supabase_jwt
 
-metadata_bp = Blueprint("metadata", __name__)
+metadata_ns = Namespace("metadata", path="/api/auth-service", description="User metadata endpoints")
 
 
-@metadata_bp.put("/user-metadata")
 def update_user_metadata():
     """Update user metadata in Supabase Auth."""
     token = extract_bearer_token()
@@ -51,3 +51,9 @@ def update_user_metadata():
         }), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@metadata_ns.route("/user-metadata")
+class UserMetadataResource(Resource):
+    def put(self):
+        return update_user_metadata()

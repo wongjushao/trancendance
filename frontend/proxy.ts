@@ -46,10 +46,18 @@ const publicRoutes = [
 
 async function checkOnboardingStatus(token: string): Promise<boolean> {
   try {
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+    // Don't call back into the Next server via NEXT_PUBLIC_SITE_URL here.
+    // In Docker, that value is for *browser* redirects (often localhost/https) and
+    // can be unreachable from inside the runtime (leading to ECONNREFUSED).
+    // Call the auth service directly on the Docker network instead.
+    const backendUrl = (process.env.NEXT_PUBLIC_BACKEND_URL || "https://auth-service:5001").replace(
+      /\/$/,
+      ""
+    );
     const response = await fetch(
-      `${siteUrl}/api/auth-service/onboarding-status`,
+      `${backendUrl}/api/auth-service/onboarding-status`,
       {
+        cache: "no-store",
         headers: {
           Authorization: `Bearer ${token}`,
         },

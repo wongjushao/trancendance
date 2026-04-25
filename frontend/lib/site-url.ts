@@ -23,5 +23,5 @@ export function getSiteUrl(): string {
   }
 
   // Server-side fallback
-  return "http://localhost:3000";
+  return "https://localhost:3000";
 }

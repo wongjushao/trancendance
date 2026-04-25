@@ -8,7 +8,7 @@ function getSiteOrigin(): string {
   if (envUrl) {
     return envUrl.replace(/\/$/, "");
   }
-  return "http://localhost:3000";
+  return "https://localhost:3000";
 }
 
 async function createSupabaseServerClient() {
