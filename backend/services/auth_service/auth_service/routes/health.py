@@ -1,9 +1,11 @@
-from flask import Blueprint, jsonify
+from flask import jsonify
+from flask_restx import Namespace, Resource
 
 
-health_bp = Blueprint("health", __name__)
+health_ns = Namespace("health", path="/api/auth-service", description="Health check endpoints")
 
 
-@health_bp.get("/health")
-def health():
-    return jsonify({"service": "auth", "status": "ok"})
+@health_ns.route("/health")
+class HealthResource(Resource):
+    def get(self):
+        return jsonify({"service": "auth", "status": "ok"})

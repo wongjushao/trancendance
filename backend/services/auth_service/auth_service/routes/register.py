@@ -6,13 +6,14 @@ from datetime import date
 
 import jwt
 import requests
-from flask import Blueprint, current_app, jsonify, request
+from flask import current_app, jsonify, request
+from flask_restx import Namespace, Resource
 from sqlalchemy.exc import SQLAlchemyError
 
 from backend.common.models import Profile, Organization, OrganizationMember, OrganizationDomain
 from backend.services.auth_service.auth_service.utils.supabase_jwt import extract_bearer_token, verify_supabase_jwt
 
-register_bp = Blueprint("register", __name__)
+register_ns = Namespace("register", path="/api/auth-service", description="Registration endpoints")
 
 
 # ── JWT verification ──────────────────────────────────────────────────────────
@@ -88,7 +89,6 @@ def serialize_profile(profile: Profile) -> dict:
 
 # ── Route ─────────────────────────────────────────────────────────────────────
 
-@register_bp.post("/register")
 def register_profile():
     db_session = current_app.config.get("DB_SESSION")
     if db_session is None:
@@ -210,7 +210,6 @@ def register_profile():
         session.close()
 
 
-@register_bp.get("/check_org")
 def check_org():
     """Check which organizations match the email domain from the supplied Supabase JWT.
 
@@ -259,3 +258,15 @@ def check_org():
         return jsonify({"error": str(exc)}), 500
     finally:
         session.close()
+
+
+@register_ns.route("/register")
+class RegisterProfileResource(Resource):
+    def post(self):
+        return register_profile()
+
+
+@register_ns.route("/check_org")
+class CheckOrganizationResource(Resource):
+    def get(self):
+        return check_org()

@@ -1,21 +1,18 @@
-# backend/services/chat_service/app.py
-import eventlet
-eventlet.monkey_patch()
-
-import logging
 import os
+import uuid
 
-from flask import Flask
-from flask_cors import CORS
-from flask_socketio import SocketIO
+from flask import Flask, Response, jsonify, request
+from flask_restx import Api, Namespace, Resource
+from flask_restx.representations import output_json as restx_output_json
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
+from sqlalchemy.exc import SQLAlchemyError
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from backend.common.db import create_engine_and_session
-from backend.services.chat_service.chat_service.middleware.metrics import register_metrics
-from backend.services.chat_service.chat_service.routes import chat_bp
-from backend.services.chat_service.chat_service.sockets.handlers import init_socket_events
+from backend.common.models import Message
 
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger(__name__)
+
+REQUESTS = Counter("chat_requests_total", "Total chat service HTTP requests")
 
 
 def is_valid_database_url(database_url: str) -> bool:
@@ -23,72 +20,122 @@ def is_valid_database_url(database_url: str) -> bool:
         return False
     if "[YOUR-PASSWORD]" in database_url:
         return False
+    if "localhost" in database_url and "postgresql://" not in database_url and "postgres://" not in database_url:
+        return False
     return True
 
 
-def create_app() -> tuple[Flask, SocketIO]:
+def serialize_message(message: Message) -> dict:
+    return {
+        "id": message.id,
+        "room_id": message.room_id,
+        "sender_id": str(message.sender_id),
+        "content": message.content,
+        "message_type": message.message_type,
+        "created_at": message.created_at.isoformat() if message.created_at else None,
+    }
+
+
+def create_app():
     app = Flask(__name__)
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_prefix=1)
+    api = Api(app, title="Chat Service API", version="1.0", doc="/docs")
+    chat_ns = Namespace("chat", path="/", description="Chat service endpoints")
 
-    # Enable CORS for all origins in development
-    CORS(app, supports_credentials=True, origins="*")
+    @api.representation("application/json")
+    def output_json_with_response_passthrough(data, code, headers=None):
+        if isinstance(data, Response):
+            response = data
+            response.status_code = code
+            if headers:
+                response.headers.extend(headers)
+            return response
+        return restx_output_json(data, code, headers)
 
-    app.config["SECRET_KEY"] = os.getenv("FLASK_SECRET_KEY", "dev-chat-secret-key")
-
-    database_url = os.getenv("DATABASE_URL", "")
+    database_url = os.getenv("SUPABASE_DB_URL", "")
     db_session = None
-    logger.info(f"[App] Database URL configured: {'yes' if database_url else 'no'}")
 
     if is_valid_database_url(database_url):
-        _engine, db_session = create_engine_and_session(database_url)
-        logger.info("[App] Database session created")
-    else:
-        logger.warning("[App] Invalid or missing DATABASE_URL")
+        _, db_session = create_engine_and_session(database_url)
 
-    app.config["DB_SESSION"] = db_session
+    @app.before_request
+    def before_request():
+        REQUESTS.inc()
 
-    app.register_blueprint(chat_bp, url_prefix="/api/chat-service")
-    register_metrics(app)
+    @chat_ns.route("/health")
+    class HealthResource(Resource):
+        def get(self):
+            return jsonify({"service": "chat", "status": "ok"})
 
-    @app.get("/health")
-    def health():
-        return {"service": "chat", "status": "ok"}
+    @chat_ns.route("/messages")
+    class MessageListResource(Resource):
+        def get(self):
+            if db_session is None:
+                return jsonify({"error": "Database is not configured. Set valid DATABASE_URL"}), 503
 
-    @app.get("/")
-    def index():
-        return {"service": "chat", "status": "running"}
+            session = db_session()
+            try:
+                messages = session.query(Message).order_by(Message.created_at.asc()).limit(100).all()
+                return jsonify([serialize_message(message) for message in messages])
+            except SQLAlchemyError as exc:
+                return jsonify({"error": str(exc)}), 500
+            finally:
+                session.close()
 
-    # Configure Socket.IO with proper settings for eventlet
-    socketio = SocketIO(
-        app,
-        cors_allowed_origins="*",
-        path="/socket.io",
-        async_mode="eventlet",
-        ping_interval=25,
-        ping_timeout=60,
-        logger=True,
-        engineio_logger=True,
-        always_connect=True,
-    )
+        def post(self):
+            if db_session is None:
+                return jsonify({"error": "Database is not configured. Set valid DATABASE_URL"}), 503
 
-    def get_db_session():
-        if db_session:
-            return db_session()
-        return None
+            payload = request.get_json(silent=True) or {}
+            room_id = payload.get("room_id")
+            sender_id = payload.get("sender_id") or payload.get("author")
+            content = payload.get("content") or payload.get("text")
+            message_type = payload.get("message_type") or "text"
 
-    init_socket_events(socketio, get_db_session)
-    logger.info("[App] Socket events initialized")
+            if not room_id or not sender_id or not content:
+                return jsonify({"error": "Fields 'room_id', 'sender_id' (or 'author') and 'content' (or 'text') are required"}), 400
+
+            session = db_session()
+
+            try:
+                sender_uuid = uuid.UUID(str(sender_id))
+            except (TypeError, ValueError):
+                return jsonify({"error": "Field 'sender_id' must be a valid UUID"}), 400
+
+            try:
+                message = Message(
+                    room_id=room_id,
+                    sender_id=sender_uuid,
+                    content=content,
+                    message_type=message_type,
+                )
+                session.add(message)
+                session.commit()
+                session.refresh(message)
+                return jsonify(serialize_message(message)), 201
+            except SQLAlchemyError as exc:
+                session.rollback()
+                return jsonify({"error": str(exc)}), 500
+            finally:
+                session.close()
+
+    @chat_ns.route("/metrics")
+    class MetricsResource(Resource):
+        def get(self):
+            return Response(generate_latest(), mimetype=CONTENT_TYPE_LATEST)
+
+    api.add_namespace(chat_ns)
 
     @app.teardown_appcontext
     def shutdown_session(_exception=None):
         if db_session is not None:
             db_session.remove()
 
-    return app, socketio
+    return app
 
 
-app, socketio = create_app()
+app = create_app()
 
 
 if __name__ == "__main__":
-    logger.info("[App] Starting chat service on port 5002")
-    socketio.run(app, host="0.0.0.0", port=5002, debug=True, allow_unsafe_werkzeug=True)
+    app.run(host="0.0.0.0", port=5002)

@@ -4,7 +4,8 @@ from __future__ import annotations
 import os
 import uuid
 import logging
-from flask import Blueprint, jsonify, request, current_app
+from flask import jsonify, request, current_app
+from flask_restx import Namespace, Resource
 from werkzeug.utils import secure_filename
 from supabase import create_client
 from sqlalchemy.exc import SQLAlchemyError
@@ -15,7 +16,7 @@ from backend.services.auth_service.auth_service.utils.supabase_jwt import extrac
 # Set up logger
 logger = logging.getLogger(__name__)
 
-avatar_bp = Blueprint("avatar", __name__)
+avatar_ns = Namespace("avatar", path="/api/auth-service", description="Avatar upload endpoints")
 
 # Allowed file extensions
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
@@ -41,7 +42,6 @@ def ensure_avatars_bucket(supabase_admin):
             logger.warning(f"Could not create avatars bucket: {create_error}")
             # Continue anyway - the upload might still work if bucket was created by another process
 
-@avatar_bp.post("/upload-avatar")
 def upload_avatar():
     """Upload avatar image for the current user."""
     db_session = current_app.config.get("DB_SESSION")
@@ -136,3 +136,9 @@ def upload_avatar():
     except Exception as e:
         logger.error(f"Avatar upload error: {str(e)}")
         return jsonify({"error": str(e)}), 500
+
+
+@avatar_ns.route("/upload-avatar")
+class AvatarUploadResource(Resource):
+    def post(self):
+        return upload_avatar()

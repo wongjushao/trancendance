@@ -1,19 +1,18 @@
-# backend/services/auth_service/auth_service/routes/MFA.py
-from flask import Blueprint, request, current_app, jsonify
 import logging
 import pyotp
 import secrets
 import os
 from datetime import datetime
 
+from flask import request, current_app, jsonify
+from flask_restx import Namespace, Resource
 from backend.common.models.entities import Profile, UserMFA
 from ..utils.supabase_jwt import extract_bearer_token, verify_supabase_jwt
 
-mfa_bp = Blueprint("mfa", __name__)
+mfa_ns = Namespace("mfa", path="/api/auth-service", description="Multi-factor authentication endpoints")
 logger = logging.getLogger(__name__)
 
 
-@mfa_bp.get("/mfa/status")
 def get_mfa_status():
     """Return current user's MFA status."""
     db_session = current_app.config.get("DB_SESSION")
@@ -75,7 +74,6 @@ def get_mfa_status():
         session.close()
 
 
-@mfa_bp.post("/mfa/setup")
 def setup_mfa():
     """Start MFA setup for Google Authenticator.
     
@@ -136,7 +134,6 @@ def setup_mfa():
         session.close()
 
 
-@mfa_bp.post("/mfa/verify")
 def verify_mfa_setup():
     """Verify TOTP code and enable MFA.
     
@@ -199,7 +196,6 @@ def verify_mfa_setup():
         session.close()
 
 
-@mfa_bp.post("/mfa/verify-login")
 def verify_login_mfa():
     """Verify MFA code during login."""
     logger.info("=== MFA Login Verification Started ===")
@@ -296,7 +292,6 @@ def verify_login_mfa():
         session.close()
 
 
-@mfa_bp.post("/mfa/disable")
 def disable_mfa():
     """Disable MFA for the current user.
     
@@ -343,3 +338,33 @@ def disable_mfa():
         return jsonify({"error": "Internal server error"}), 500
     finally:
         session.close()
+
+
+@mfa_ns.route("/mfa/status")
+class MfaStatusResource(Resource):
+    def get(self):
+        return get_mfa_status()
+
+
+@mfa_ns.route("/mfa/setup")
+class MfaSetupResource(Resource):
+    def post(self):
+        return setup_mfa()
+
+
+@mfa_ns.route("/mfa/verify")
+class MfaVerifyResource(Resource):
+    def post(self):
+        return verify_mfa_setup()
+
+
+@mfa_ns.route("/mfa/verify-login")
+class MfaVerifyLoginResource(Resource):
+    def post(self):
+        return verify_login_mfa()
+
+
+@mfa_ns.route("/mfa/disable")
+class MfaDisableResource(Resource):
+    def post(self):
+        return disable_mfa()

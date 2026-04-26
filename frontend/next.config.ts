@@ -1,50 +1,59 @@
-// frontend/next.config.ts
-import type { NextConfig } from 'next';
+import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   async rewrites() {
     return [
       {
         source: '/api/auth/:path*',
-        destination: 'http://auth-service:5001/:path*',
+        destination: 'https://auth-service:5001/:path*',
       },
       {
         source: '/api/chat/:path*',
-        destination: 'http://chat-service:5002/:path*',
+        destination: 'https://chat-service:5002/:path*',
       },
       {
         source: '/api/org/:path*',
-        destination: 'http://org-service:5003/:path*',
+        destination: 'https://org-service:5003/:path*',
       },
       {
+        // Auth service with full path
         source: '/api/auth-service/:path*',
-        destination: 'http://auth-service:5001/api/auth-service/:path*',
+        destination: 'https://auth-service:5001/api/auth-service/:path*',
       },
       {
+        // Notification service - FIXED
         source: '/api/notification-service/:path*',
-        destination: 'http://notification-service:5004/:path*',
+        destination: 'https://notification-service:5004/:path*',
+      },
+    ]
+  },
+  // Increase body parser limit for file uploads
+  api: {
+    bodyParser: {
+      sizeLimit: '10mb',
+    },
+  },
+  images: {
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'lh3.googleusercontent.com',
+        port: '',
+        pathname: '/**',
       },
       {
-        source: '/api/chat-service/:path*',
-        destination: 'http://chat-service:5002/api/chat-service/:path*',
+        protocol: 'https',
+        hostname: 'avatars.githubusercontent.com',
+        port: '',
+        pathname: '/**',
       },
-    ];
-  },
-  // Add WebSocket proxy configuration
-  webpack: (config, { isServer }) => {
-    if (!isServer) {
-      config.resolve.fallback = {
-        ...config.resolve.fallback,
-        net: false,
-        tls: false,
-        fs: false,
-      };
-    }
-    return config;
-  },
-  // Allow WebSocket connections
-  experimental: {
-    // Add any experimental features if needed
+      {
+        protocol: 'https',
+        hostname: '*.supabase.co',
+        port: '',
+        pathname: '/storage/v1/object/public/**',
+      },
+    ],
   },
 };
 

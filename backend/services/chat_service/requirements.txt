@@ -1,6 +1,5 @@
-flask
+flask-restx
 Flask-Cors
-flask-socketio
 psycopg2-binary
 SQLAlchemy
 pydantic
@@ -10,6 +9,3 @@ cryptography
 prometheus-client
 gunicorn
 supabase
-simple-websocket
-redis>=4.5
-eventlet

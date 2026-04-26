@@ -1,4 +1,4 @@
-flask
+flask-restx
 Flask-Cors
 psycopg2-binary
 SQLAlchemy
