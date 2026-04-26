@@ -12,6 +12,9 @@ services:
       - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
       - DATABASE_URL=${SUPABASE_DB_URL}
+    networks:
+      - app-network
+    restart: unless-stopped
 
   chat-service:
     image: trancendance-chat-service:latest
@@ -22,6 +25,12 @@ services:
       - "5002:5002"
     environment:
       - DATABASE_URL=${SUPABASE_DB_URL}
+      - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET}
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+    networks:
+      - app-network
+    restart: unless-stopped
 
   org-service:
     image: trancendance-org-service:latest
@@ -32,6 +41,9 @@ services:
       - "5003:5003"
     environment:
       - DATABASE_URL=${SUPABASE_DB_URL}
+    networks:
+      - app-network
+    restart: unless-stopped
 
   notification-service:
     image: trancendance-notification-service:latest
@@ -42,6 +54,10 @@ services:
       - "5004:5004"
     environment:
       - DATABASE_URL=${SUPABASE_DB_URL}
+    networks:
+      - app-network
+    restart: unless-stopped
+
   frontend:
     image: node:20.19-alpine
     working_dir: /app
@@ -50,9 +66,14 @@ services:
       - "3000:3000"
     environment:
       - CHOKIDAR_USEPOLLING=true
+      # Frontend configuration - use localhost for browser connections
       - NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL}
       - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
       - NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL}
+      # IMPORTANT: Use localhost for browser WebSocket connections
+      - NEXT_PUBLIC_SOCKET_URL=${NEXT_PUBLIC_SOCKET_URL}
+      - NEXT_PUBLIC_CHAT_API_URL=${NEXT_PUBLIC_CHAT_API_URL}
+      - NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL}
     volumes:
       - ./frontend:/app
       - /app/node_modules
@@ -60,9 +81,13 @@ services:
       - auth-service
       - chat-service
       - org-service
+      - notification-service
     env_file:
       - ./.env
-  
+    networks:
+      - app-network
+    restart: unless-stopped
+
   node-exporter:
     image: prom/node-exporter:latest
     ports:
@@ -71,6 +96,9 @@ services:
       - /:/host:ro
     command:
       - '--path.rootfs=/host'
+    networks:
+      - app-network
+    restart: unless-stopped
 
   prometheus:
     image: prom/prometheus:latest
@@ -80,6 +108,9 @@ services:
       - "9090:9090"
     command:
       - --config.file=/etc/prometheus/prometheus.yml
+    networks:
+      - app-network
+    restart: unless-stopped
 
   grafana:
     image: grafana/grafana:latest
@@ -102,3 +133,11 @@ services:
       - ./grafana/dashboards:/var/lib/grafana/dashboards
     depends_on:
       - prometheus
+    networks:
+      - app-network
+    restart: unless-stopped
+
+# Define the network for all services to communicate
+networks:
+  app-network:
+    driver: bridge

@@ -1,306 +1,438 @@
+// frontend/app/(main)/messages/page.tsx
 "use client";
 
-import { useState, useEffect } from "react";
-import { Search, Send, Paperclip, MoreVertical, Phone, Video } from "lucide-react";
-import { GlowCard } from "@/components/lms/Cards";
-import { GlowButton } from "@/components/lms/GlowButton";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Send, Loader2, Paperclip, Search, MessageCircle } from "lucide-react";
+import { useChat } from "@/contexts/ChatContext";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
+import { forceRefreshMessages, clearRoomCache } from "@/lib/chatViewSync";
 
-// ── Static mock data ──────────────────────────────────────────────────────────
-
-const chatRooms = [
-  {
-    id: 1,
-    name: "Advanced React - Discussion",
-    type: "course",
-    lastMessage: "Great question about hooks!",
-    lastTime: "2 min ago",
-    unread: 3,
-    avatar: "📚",
-  },
-  {
-    id: 2,
-    name: "Sarah Johnson",
-    type: "direct",
-    lastMessage: "The assignment is due tomorrow",
-    lastTime: "1 hour ago",
-    unread: 0,
-    avatar: "SJ",
-  },
-  {
-    id: 3,
-    name: "Tech University",
-    type: "organization",
-    lastMessage: "Welcome to the community!",
-    lastTime: "3 hours ago",
-    unread: 1,
-    avatar: "🏛",
-  },
-  {
-    id: 4,
-    name: "Study Group Alpha",
-    type: "group",
-    lastMessage: "Let's meet at 3pm",
-    lastTime: "Yesterday",
-    unread: 0,
-    avatar: "👥",
-  },
-];
-
-// messagesData uses a placeholder for the "me" avatar that gets replaced
-// at render time with the real user's initials
-const messagesData = [
-  {
-    id: 1,
-    sender: "Sarah Johnson",
-    avatar: "SJ",
-    text: "Hi! How are you progressing with the React Hooks assignment?",
-    time: "10:30 AM",
-    isMe: false,
-  },
-  {
-    id: 2,
-    sender: "You",
-    avatar: "__ME__", // replaced with real initials at render
-    text: "Going well! I'm almost done with the custom hooks part.",
-    time: "10:32 AM",
-    isMe: true,
-  },
-  {
-    id: 3,
-    sender: "Sarah Johnson",
-    avatar: "SJ",
-    text: "That's great! Remember to add proper error handling and tests.",
-    time: "10:33 AM",
-    isMe: false,
-  },
-  {
-    id: 4,
-    sender: "You",
-    avatar: "__ME__", // replaced with real initials at render
-    text: "Will do! Quick question - should the validation hook return an object or array?",
-    time: "10:35 AM",
-    isMe: true,
-  },
-  {
-    id: 5,
-    sender: "Sarah Johnson",
-    avatar: "SJ",
-    text: "An object would be more flexible. You can structure it like { errors, isValid, validate }",
-    time: "10:36 AM",
-    isMe: false,
-  },
-];
-
-// ── Page ──────────────────────────────────────────────────────────────────────
+interface Message {
+  id: number | string;
+  room_id: number;
+  sender_id: string;
+  sender_name: string;
+  sender_avatar?: string;
+  content: string;
+  message_type: string;
+  created_at: string;
+  timestamp: string;
+  is_me: boolean;
+}
 
 export default function MessagesPage() {
-  const [selectedChat, setSelectedChat] = useState(chatRooms[1]);
-  const [messageText, setMessageText] = useState("");
+  const {
+    rooms,
+    currentRoom,
+    messages,
+    isLoading,
+    sendMessage,
+    selectRoom,
+    isConnected,
+    loadMessages,
+  } = useChat();
 
-  // Real user initials — replaces the hardcoded "JD"
-  const [myInitials, setMyInitials] = useState("ME");
+  const [newMessage, setNewMessage] = useState("");
+  const [activeTab, setActiveTab] = useState<"dm" | "course">("dm");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
 
+  // Get auth credentials
   useEffect(() => {
-    const loadUser = async () => {
+    const getAuth = async () => {
       const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const fullName: string =
-        user.user_metadata?.full_name ||
-        user.user_metadata?.name ||
-        user.email?.split("@")[0] ||
-        "";
-
-      const initials = fullName
-        .split(" ")
-        .map((p) => p[0])
-        .join("")
-        .slice(0, 2)
-        .toUpperCase() || user.email?.[0]?.toUpperCase() || "ME";
-
-      setMyInitials(initials);
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        setAccessToken(session.access_token);
+        setCurrentUserId(session.user.id);
+      }
     };
-
-    loadUser();
+    getAuth();
   }, []);
 
-  // Resolve avatar — swap __ME__ placeholder with real initials
-  const resolveAvatar = (avatar: string) =>
-    avatar === "__ME__" ? myInitials : avatar;
+  // Filter rooms based on active tab and search
+  const filteredRooms = rooms.filter((room) => {
+    const matchesTab =
+      activeTab === "dm" ? room.type === "direct" : room.type === "course";
+    const matchesSearch = room.display_name
+      .toLowerCase()
+      .includes(searchQuery.toLowerCase());
+    return matchesTab && matchesSearch;
+  });
+
+  // Force refresh messages from database on room change (single source of truth)
+  useEffect(() => {
+    if (currentRoom && accessToken && currentUserId) {
+      clearRoomCache(currentRoom.id);
+      forceRefreshMessages(currentRoom.id, accessToken, currentUserId, 50).catch(
+        (err) => {
+          console.error("[MessagesPage] Error force refreshing messages:", err);
+        },
+      );
+    }
+  }, [currentRoom?.id, accessToken, currentUserId]);
+
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const handleSendMessage = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newMessage.trim() && currentRoom && isConnected) {
+      sendMessage(newMessage);
+      setNewMessage("");
+    }
+  };
+
+  // Sort messages by created_at to ensure proper order
+  const sortedMessages = [...messages].sort((a, b) => {
+    const dateA = new Date(a.created_at || a.timestamp);
+    const dateB = new Date(b.created_at || b.timestamp);
+    return dateA.getTime() - dateB.getTime();
+  });
+
+  // Group messages by date
+  const groupMessagesByDate = (msgs: Message[]) => {
+    const groups: { [key: string]: Message[] } = {};
+    msgs.forEach((msg) => {
+      const date = new Date(msg.created_at || msg.timestamp);
+      const dateKey = date.toLocaleDateString();
+      if (!groups[dateKey]) {
+        groups[dateKey] = [];
+      }
+      groups[dateKey].push(msg);
+    });
+    return groups;
+  };
+
+  const messageGroups = groupMessagesByDate(sortedMessages as Message[]);
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-[calc(100dvh-4rem)] bg-[#0B0B0F]">
+        <Loader2 className="h-8 w-8 animate-spin text-purple-500" />
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6 h-full flex flex-col">
-      <h1 className="text-4xl font-bold text-white shrink-0">Messages</h1>
+    <div className="flex flex-col md:flex-row h-[calc(100dvh-4rem)] bg-[#0B0B0F] rounded-none sm:rounded-xl overflow-hidden border border-white/5">
+      {/* Sidebar - Hidden on mobile when chat is open */}
+      <div
+        className={`${
+          currentRoom ? "hidden md:flex" : "flex"
+        } w-full md:w-72 lg:w-80 xl:w-96 border-r border-white/10 bg-[#14141C] flex-col min-h-0`}
+      >
+        <div className="p-3 sm:p-4 border-b border-white/10 bg-[#14141C]">
+          <h1 className="text-xl sm:text-2xl font-bold text-white mb-3 sm:mb-4 tracking-tight">
+            Messages
+          </h1>
 
-      <div className="grid grid-cols-12 gap-6 flex-1 min-h-0 pb-6">
+          {/* Search Bar */}
+          <div className="relative mb-3 sm:mb-4 group">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6B6B80] group-focus-within:text-purple-400 transition-colors" />
+            <Input
+              type="text"
+              placeholder="Search messages..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10 bg-[#0B0B0F] border-white/10 text-white rounded-xl h-10 focus-visible:ring-2 focus-visible:ring-purple-500/40 focus-visible:border-purple-500/40 transition-all"
+            />
+          </div>
 
-        {/* Chat List Sidebar */}
-        <div className="col-span-12 lg:col-span-4 h-[500px] lg:h-full">
-          <GlowCard className="h-full flex flex-col p-0 overflow-hidden">
+          {/* Tabs */}
+          <div className="flex gap-2">
+            <button
+              onClick={() => setActiveTab("dm")}
+              className={`flex-1 py-2 px-3 sm:px-4 rounded-xl text-xs sm:text-sm font-medium transition-all duration-200 active:scale-[0.98] ${
+                activeTab === "dm"
+                  ? "bg-gradient-to-r from-purple-500 to-violet-600 text-white shadow-lg shadow-purple-500/30"
+                  : "bg-[#0B0B0F] text-[#A0A0B5] hover:text-white hover:bg-white/5 border border-white/10"
+              }`}
+            >
+              Direct Messages
+            </button>
+            <button
+              onClick={() => setActiveTab("course")}
+              className={`flex-1 py-2 px-3 sm:px-4 rounded-xl text-xs sm:text-sm font-medium transition-all duration-200 active:scale-[0.98] ${
+                activeTab === "course"
+                  ? "bg-gradient-to-r from-purple-500 to-violet-600 text-white shadow-lg shadow-purple-500/30"
+                  : "bg-[#0B0B0F] text-[#A0A0B5] hover:text-white hover:bg-white/5 border border-white/10"
+              }`}
+            >
+              Course Chats
+            </button>
+          </div>
+        </div>
 
-            {/* Search */}
-            <div className="p-4 border-b border-white/5 bg-[#0A0A0F]/50">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[#6B6B80]" />
-                <Input
-                  type="text"
-                  placeholder="Search messages..."
-                  className="pl-10 bg-[#12121A] border-white/10 text-white rounded-xl focus:ring-purple-500/50"
-                />
+        {/* Connection Status */}
+        <div className="px-4 py-2 border-b border-white/10">
+          <div className="flex items-center gap-2">
+            <span className="relative flex h-2 w-2">
+              {isConnected && (
+                <span className="absolute inline-flex h-full w-full rounded-full bg-green-500 opacity-60 animate-ping" />
+              )}
+              <span
+                className={`relative inline-flex rounded-full h-2 w-2 ${
+                  isConnected ? "bg-green-500" : "bg-red-500"
+                }`}
+              />
+            </span>
+            <span className="text-xs text-[#A0A0B5]">
+              {isConnected ? "Connected" : "Reconnecting..."}
+            </span>
+          </div>
+        </div>
+
+        {/* Rooms List */}
+        <ScrollArea className="flex-1 min-h-0">
+          <div className="p-2 space-y-1">
+            {filteredRooms.length === 0 ? (
+              <div className="text-center py-12 px-4">
+                <MessageCircle className="h-12 w-12 text-[#6B6B80] mx-auto mb-3 opacity-30" />
+                <p className="text-[#A0A0B5]">
+                  No {activeTab === "dm" ? "direct messages" : "course chats"} found
+                </p>
+                <p className="text-sm text-[#6B6B80] mt-2">
+                  {activeTab === "dm"
+                    ? "Start a conversation from a friend's profile"
+                    : "Join a course to see its chat"}
+                </p>
               </div>
-            </div>
-
-            {/* Chat List */}
-            <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-white/5">
-              {chatRooms.map((room) => (
+            ) : (
+              filteredRooms.map((room) => (
                 <button
                   key={room.id}
-                  onClick={() => setSelectedChat(room)}
-                  className={`
-                    w-full p-4 flex items-center gap-3 hover:bg-white/5 transition-all border-b border-white/5
-                    ${selectedChat.id === room.id ? "bg-white/10" : ""}
-                  `}
+                  onClick={() => selectRoom(room)}
+                  className={`w-full p-2.5 sm:p-3 text-left rounded-xl transition-all duration-200 active:scale-[0.99] ${
+                    currentRoom?.id === room.id
+                      ? "bg-purple-500/10 border border-purple-500/30 shadow-[0_0_0_1px_rgba(168,85,247,0.15),0_8px_24px_-12px_rgba(168,85,247,0.4)]"
+                      : "border border-transparent hover:bg-white/5 hover:border-white/5"
+                  }`}
                 >
-                  <div className="relative shrink-0">
-                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center">
-                      <span className="text-white font-semibold text-sm">{room.avatar}</span>
-                    </div>
-                    {room.unread > 0 && (
-                      <div className="absolute -top-1 -right-1 w-5 h-5 bg-purple-500 rounded-full flex items-center justify-center text-[10px] text-white border-2 border-[#0A0A0F]">
-                        {room.unread}
+                  <div className="flex items-center gap-3">
+                    <Avatar className="h-11 w-11 sm:h-12 sm:w-12 ring-1 ring-white/5">
+                      <AvatarFallback className="bg-gradient-to-br from-purple-500 to-violet-600 text-white text-base sm:text-lg font-semibold">
+                        {room.display_name.charAt(0).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex justify-between items-start gap-2">
+                        <p className="text-white font-medium truncate text-sm sm:text-base">
+                          {room.display_name}
+                        </p>
+                        {room.last_message_time && (
+                          <span className="text-[10px] sm:text-xs text-[#6B6B80] flex-shrink-0 mt-0.5">
+                            {new Date(room.last_message_time).toLocaleDateString(
+                              [],
+                              { month: "short", day: "numeric" },
+                            )}
+                          </span>
+                        )}
                       </div>
-                    )}
-                  </div>
-
-                  <div className="flex-1 min-w-0 text-left">
-                    <div className="flex items-center justify-between mb-1">
-                      <p className="text-white font-medium truncate">{room.name}</p>
-                      <span className="text-[#6B6B80] text-xs">{room.lastTime}</span>
+                      {room.last_message && (
+                        <p className="text-xs sm:text-sm text-[#A0A0B5] truncate mt-1">
+                          {room.last_message}
+                        </p>
+                      )}
+                      {room.unread_count > 0 && (
+                        <div className="mt-1.5">
+                          <span className="bg-gradient-to-r from-purple-500 to-violet-600 text-white text-[10px] sm:text-xs rounded-full px-2 py-0.5 font-medium shadow-sm shadow-purple-500/40">
+                            {room.unread_count} new
+                          </span>
+                        </div>
+                      )}
                     </div>
-                    <p className="text-[#A0A0B5] text-sm truncate">{room.lastMessage}</p>
                   </div>
                 </button>
-              ))}
-            </div>
-          </GlowCard>
-        </div>
-
-        {/* Chat Window */}
-        <div className="col-span-12 lg:col-span-8 h-[600px] lg:h-full">
-          <GlowCard className="h-full flex flex-col p-0 overflow-hidden">
-
-            {/* Chat Header */}
-            <div className="p-4 border-b border-white/5 flex items-center justify-between bg-[#0A0A0F]/50">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center shrink-0">
-                  <span className="text-white font-semibold text-sm">{selectedChat.avatar}</span>
-                </div>
-                <div className="min-w-0">
-                  <p className="text-white font-medium truncate">{selectedChat.name}</p>
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                    <p className="text-[#6B6B80] text-xs">Active now</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-1 sm:gap-2">
-                <button className="p-2 hover:bg-white/5 rounded-lg transition-colors group">
-                  <Phone className="w-5 h-5 text-[#A0A0B5] group-hover:text-purple-400" />
-                </button>
-                <button className="p-2 hover:bg-white/5 rounded-lg transition-colors group">
-                  <Video className="w-5 h-5 text-[#A0A0B5] group-hover:text-purple-400" />
-                </button>
-                <button className="p-2 hover:bg-white/5 rounded-lg transition-colors group">
-                  <MoreVertical className="w-5 h-5 text-[#A0A0B5] group-hover:text-purple-400" />
-                </button>
-              </div>
-            </div>
-
-            {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 bg-white/[0.01]">
-              {messagesData.map((message) => (
-                <div
-                  key={message.id}
-                  className={`flex gap-3 ${message.isMe ? "flex-row-reverse" : ""}`}
-                >
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center shrink-0 mt-1">
-                    {/* Real initials on "me" messages, static on others */}
-                    <span className="text-white font-semibold text-[10px]">
-                      {resolveAvatar(message.avatar)}
-                    </span>
-                  </div>
-
-                  <div className={`flex flex-col max-w-[80%] sm:max-w-[70%] ${message.isMe ? "items-end" : ""}`}>
-                    {!message.isMe && (
-                      <span className="text-[#A0A0B5] text-xs mb-1 ml-1">{message.sender}</span>
-                    )}
-                    <div className={`
-                      px-4 py-3 rounded-2xl text-sm sm:text-base shadow-lg
-                      ${message.isMe
-                        ? "bg-gradient-to-r from-purple-500 to-violet-600 text-white rounded-tr-none"
-                        : "bg-[#12121A] text-white rounded-tl-none border border-white/5"
-                      }
-                    `}>
-                      <p className="leading-relaxed">{message.text}</p>
-                    </div>
-                    <span className="text-[#6B6B80] text-[10px] mt-1.5 px-1">{message.time}</span>
-                  </div>
-                </div>
-              ))}
-
-              {/* Typing Indicator */}
-              <div className="flex gap-3">
-                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center shrink-0">
-                  <span className="text-white font-semibold text-[10px]">SJ</span>
-                </div>
-                <div className="bg-[#12121A] px-4 py-3 rounded-2xl rounded-tl-none border border-white/5">
-                  <div className="flex gap-1.5 items-center h-4">
-                    <div className="w-1.5 h-1.5 bg-purple-500/50 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                    <div className="w-1.5 h-1.5 bg-purple-500/70 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                    <div className="w-1.5 h-1.5 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Message Input */}
-            <div className="p-4 border-t border-white/5 bg-[#0A0A0F]/50">
-              <div className="flex items-center gap-2 sm:gap-3">
-                <button className="p-2 hover:bg-white/5 rounded-lg transition-colors shrink-0">
-                  <Paperclip className="w-5 h-5 text-[#A0A0B5]" />
-                </button>
-
-                <Input
-                  type="text"
-                  placeholder="Type a message..."
-                  value={messageText}
-                  onChange={(e) => setMessageText(e.target.value)}
-                  className="flex-1 bg-[#12121A] border-white/10 text-white rounded-xl focus:ring-purple-500/50"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && messageText.trim()) {
-                      setMessageText("");
-                    }
-                  }}
-                />
-
-                <GlowButton
-                  variant="primary"
-                  disabled={!messageText.trim()}
-                  onClick={() => setMessageText("")}
-                  className="shrink-0 p-3 sm:px-4"
-                >
-                  <Send className="w-5 h-5" />
-                  <span className="hidden sm:inline ml-2">Send</span>
-                </GlowButton>
-              </div>
-            </div>
-          </GlowCard>
-        </div>
+              ))
+            )}
+          </div>
+        </ScrollArea>
       </div>
+
+      {/* Chat Area */}
+      {currentRoom ? (
+        <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-gradient-to-b from-[#0F0F15] via-[#0F0F15] to-[#0B0B0F]">
+          {/* Chat Header */}
+          <div className="h-14 sm:h-16 border-b border-white/10 bg-[#14141C]/95 backdrop-blur-sm px-3 sm:px-4 md:px-6 flex items-center flex-shrink-0">
+            <button
+              onClick={() => selectRoom(null)}
+              className="md:hidden mr-2 p-2 text-[#A0A0B5] hover:text-white rounded-lg hover:bg-white/5 active:scale-95 transition-all"
+              aria-label="Back to conversations"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-5 w-5"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </button>
+            <div className="flex items-center gap-3 min-w-0">
+              <Avatar className="h-9 w-9 sm:h-10 sm:w-10 ring-1 ring-white/5 flex-shrink-0">
+                <AvatarFallback className="bg-gradient-to-br from-purple-500 to-violet-600 text-white font-semibold">
+                  {currentRoom.display_name.charAt(0).toUpperCase()}
+                </AvatarFallback>
+              </Avatar>
+              <div className="min-w-0">
+                <h2 className="font-semibold text-white truncate text-sm sm:text-base">
+                  {currentRoom.display_name}
+                </h2>
+                <p className="text-[10px] sm:text-xs text-[#A0A0B5]">
+                  {currentRoom.type === "direct" ? "Direct Message" : "Course Chat"}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Messages Area */}
+          <ScrollArea
+            className="flex-1 min-h-0 px-3 py-4 sm:p-4 md:p-6"
+            ref={scrollAreaRef}
+          >
+            <div className="max-w-4xl mx-auto space-y-4 md:space-y-6">
+              {sortedMessages.length === 0 ? (
+                <div className="text-center py-12 px-4">
+                  <MessageCircle className="h-12 w-12 text-[#6B6B80] mx-auto mb-3 opacity-30" />
+                  <p className="text-[#A0A0B5]">No messages yet</p>
+                  <p className="text-sm text-[#6B6B80] mt-2">
+                    Start the conversation!
+                  </p>
+                </div>
+              ) : (
+                Object.entries(messageGroups).map(([date, dateMessages]) => (
+                  <div key={date} className="space-y-3 md:space-y-4">
+                    {/* Date separator */}
+                    <div className="flex justify-center sticky top-0 z-10 pointer-events-none">
+                      <span className="text-[10px] sm:text-xs text-[#A0A0B5] bg-[#1A1A24]/90 backdrop-blur-sm px-3 py-1 rounded-full border border-white/5 shadow-sm pointer-events-auto">
+                        {date === new Date().toLocaleDateString() ? "Today" : date}
+                      </span>
+                    </div>
+
+                    {/* Messages for this date */}
+                    {dateMessages.map((msg) => (
+                      <div
+                        key={msg.id}
+                        className={`flex gap-2 md:gap-3 ${
+                          msg.is_me ? "justify-end" : "justify-start"
+                        } animate-in fade-in slide-in-from-bottom-1 duration-200`}
+                      >
+                        {!msg.is_me && (
+                          <Avatar className="h-7 w-7 sm:h-8 sm:w-8 flex-shrink-0 ring-1 ring-white/5">
+                            <AvatarImage src={msg.sender_avatar} />
+                            <AvatarFallback className="bg-gradient-to-br from-purple-500 to-violet-600 text-white text-[10px] sm:text-xs font-semibold">
+                              {msg.sender_name?.charAt(0).toUpperCase() || "U"}
+                            </AvatarFallback>
+                          </Avatar>
+                        )}
+                        <div
+                          className={`flex flex-col ${
+                            msg.is_me ? "items-end" : "items-start"
+                          } max-w-[80%] sm:max-w-[75%] md:max-w-[70%] min-w-0`}
+                        >
+                          {!msg.is_me && (
+                            <span className="text-[10px] sm:text-xs text-[#A0A0B5] mb-1 ml-1 truncate max-w-full">
+                              {msg.sender_name}
+                            </span>
+                          )}
+                          <div
+                            className={`px-3 py-2 md:px-4 md:py-2.5 rounded-2xl text-sm break-words whitespace-pre-wrap transition-shadow ${
+                              msg.is_me
+                                ? "bg-gradient-to-br from-purple-500 to-violet-600 text-white rounded-tr-sm shadow-lg shadow-purple-500/20 hover:shadow-purple-500/30"
+                                : "bg-[#252530] text-white rounded-tl-sm border border-white/10 hover:border-white/20"
+                            }`}
+                          >
+                            {msg.content}
+                          </div>
+                          <span className="text-[10px] sm:text-xs text-[#6B6B80] mt-1 px-1">
+                            {msg.timestamp}
+                          </span>
+                        </div>
+                        {msg.is_me && (
+                          <Avatar className="h-7 w-7 sm:h-8 sm:w-8 flex-shrink-0 ring-1 ring-white/5">
+                            <AvatarFallback className="bg-gradient-to-br from-purple-500 to-violet-600 text-white text-[10px] sm:text-xs font-semibold">
+                              Me
+                            </AvatarFallback>
+                          </Avatar>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ))
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+          </ScrollArea>
+
+          {/* Input Area */}
+          <div className="p-3 sm:p-4 border-t border-white/10 bg-[#14141C]/95 backdrop-blur-sm flex-shrink-0 pb-[env(safe-area-inset-bottom)]">
+            <form
+              onSubmit={handleSendMessage}
+              className="max-w-4xl mx-auto flex items-center gap-1.5 sm:gap-2"
+            >
+              <button
+                type="button"
+                className="p-2 text-[#A0A0B5] hover:text-purple-400 transition-colors rounded-lg hover:bg-white/5 active:scale-95 flex-shrink-0"
+                title="Attach file (coming soon)"
+                aria-label="Attach file"
+              >
+                <Paperclip className="h-5 w-5" />
+              </button>
+              <Input
+                value={newMessage}
+                onChange={(e) => setNewMessage(e.target.value)}
+                placeholder="Type a message..."
+                className="flex-1 min-w-0 bg-[#0B0B0F] border-white/10 text-white rounded-full px-4 h-10 sm:h-11 focus-visible:ring-2 focus-visible:ring-purple-500/40 focus-visible:border-purple-500/40 transition-all"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSendMessage(e);
+                  }
+                }}
+              />
+              <Button
+                type="submit"
+                size="icon"
+                className="bg-gradient-to-r from-purple-500 to-violet-600 hover:shadow-lg hover:shadow-purple-500/40 active:scale-95 rounded-full h-10 w-10 sm:h-11 sm:w-11 transition-all flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={!newMessage.trim() || !isConnected}
+              >
+                <Send className="h-4 w-4" />
+              </Button>
+            </form>
+          </div>
+        </div>
+      ) : (
+        <div className="hidden md:flex flex-1 items-center justify-center bg-gradient-to-br from-[#0F0F15] to-[#0B0B0F]">
+          <div className="text-center px-6">
+            <div className="relative inline-block mb-4">
+              <div className="absolute inset-0 bg-purple-500/20 blur-2xl rounded-full" />
+              <MessageCircle className="relative h-16 w-16 text-purple-400/60 mx-auto" />
+            </div>
+            <p className="text-[#E0E0F0] text-lg font-medium">
+              Select a chat to start messaging
+            </p>
+            <p className="text-sm text-[#6B6B80] mt-2">
+              Choose a conversation from the sidebar
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

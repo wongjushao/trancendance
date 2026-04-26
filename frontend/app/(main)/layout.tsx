@@ -8,9 +8,8 @@ import { Sidebar } from "@/components/lms/Sidebar";
 import { TopNav } from "@/components/lms/TopNav";
 import { NotificationToast } from "@/components/lms/NotificationToast";
 import { ChatBubble } from "@/components/chat/ChatBubble";
+import { ChatProvider } from "@/contexts/ChatContext";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
-import { OrganizationSwitcher } from '@/components/organization/OrganizationSwitcher';
-import { useRole } from '@/components/providers/RoleProvider';
 
 // Custom hook to listen to sidebar state
 function useSidebarState() {
@@ -48,8 +47,6 @@ export default function AppLayout({
   const isCollapsed = useSidebarState();
   const [user, setUser] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const { roleData, setRole } = useRole();
-  const [activeOrgId, setActiveOrgId] = useState<number | null>(roleData.organizationId);
 
   // Original auth and onboarding check logic (preserved, just converted to client-side)
   useEffect(() => {
@@ -113,32 +110,34 @@ export default function AppLayout({
   }
 
   return (
-    <div className="min-h-screen bg-[#0B0B0F] relative">
-      {/* Background blobs - preserved from original */}
-      <div className="fixed top-0 left-0 w-full h-full pointer-events-none overflow-hidden">
-        <div className="absolute top-20 left-20 w-[500px] h-[500px] bg-purple-600/10 rounded-full blur-[150px]" />
-        <div className="absolute bottom-40 right-40 w-[500px] h-[500px] bg-violet-600/10 rounded-full blur-[150px]" />
-      </div>
-
-      <div className="relative z-10 flex">
-        <Sidebar user={user} />
-        {/* ADDED: Dynamic margin based on sidebar state */}
-        <div 
-          className="flex-1 flex flex-col min-h-screen transition-all duration-300"
-          style={{ 
-            marginLeft: isCollapsed ? "5rem" : "16rem",
-            width: `calc(100% - ${isCollapsed ? "5rem" : "16rem"})`
-          }}
-        >
-          <TopNav user={user} />
-          <main className="flex-1 p-8">
-            {children}
-          </main>
+    <ChatProvider>
+      <div className="min-h-screen bg-[#0B0B0F] relative">
+        {/* Background blobs - preserved from original */}
+        <div className="fixed top-0 left-0 w-full h-full pointer-events-none overflow-hidden">
+          <div className="absolute top-20 left-20 w-[500px] h-[500px] bg-purple-600/10 rounded-full blur-[150px]" />
+          <div className="absolute bottom-40 right-40 w-[500px] h-[500px] bg-violet-600/10 rounded-full blur-[150px]" />
         </div>
-      </div>
 
-      <ChatBubble />
-      <NotificationToast />
-    </div>
+        <div className="relative z-10 flex">
+          <Sidebar user={user} />
+          {/* ADDED: Dynamic margin based on sidebar state */}
+          <div 
+            className="flex-1 flex flex-col min-h-screen transition-all duration-300"
+            style={{ 
+              marginLeft: isCollapsed ? "5rem" : "16rem",
+              width: `calc(100% - ${isCollapsed ? "5rem" : "16rem"})`
+            }}
+          >
+            <TopNav user={user} />
+            <main className="flex-1 p-8">
+              {children}
+            </main>
+          </div>
+        </div>
+
+        <ChatBubble />
+        <NotificationToast />
+      </div>
+    </ChatProvider>
   );
 }

@@ -1,122 +1,454 @@
 // frontend/components/chat/ChatBubble.tsx
-import { useState } from "react";
-import { useRouter } from "next/navigation"; // Add this import
-import { MessageCircle, X, Send, Search } from "lucide-react";
-import { Input } from "@/components/ui/input";
+'use client';
 
-interface Conversation {
-  id: string;
-  name: string;
-  avatar: string;
-  lastMessage: string;
-  time: string;
-  unread: number;
+import { useState, useEffect, useRef, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import { MessageCircle, X, Send, Maximize2, Paperclip, Loader2, ChevronLeft, RefreshCw } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { useChat } from "@/contexts/ChatContext";
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
+import { forceRefreshMessages, clearRoomCache } from "@/lib/chatViewSync";
+
+interface Message {
+  id: number | string;
+  room_id: number;
+  sender_id: string;
+  sender_name: string;
+  sender_avatar?: string;
+  content: string;
+  message_type: string;
+  created_at: string;
+  timestamp: string;
+  is_me: boolean;
 }
 
-// Mock conversations data
-const mockConversations: Conversation[] = [
-  {
-    id: "1",
-    name: "Alice Johnson",
-    avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150",
-    lastMessage: "Hey, have you submitted the assignment?",
-    time: "2m ago",
-    unread: 2,
-  },
-  // ... other conversations
-];
-
 export function ChatBubble() {
-  const router = useRouter(); // Add this
+  const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
+  const [view, setView] = useState<'list' | 'chat'>('list');
+  const [newMessage, setNewMessage] = useState("");
+  const [activeTab, setActiveTab] = useState<'dm' | 'course'>('dm');
+  const [searchQuery, setSearchQuery] = useState("");
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const { 
+    rooms, 
+    messages, 
+    sendMessage, 
+    selectRoom, 
+    currentRoom, 
+    isLoading, 
+    isConnected,
+    isConnecting,
+    reconnect,
+    loadMessages 
+  } = useChat();
 
-  const toggleChat = () => setIsOpen(!isOpen);
+  // Get auth credentials
+  useEffect(() => {
+    const getAuth = async () => {
+      const supabase = getSupabaseBrowserClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        setAccessToken(session.access_token);
+        setCurrentUserId(session.user.id);
+      }
+    };
+    getAuth();
+  }, []);
 
-  const handleConversationClick = (conversationId: string) => {
-    // Navigate to messages page instead of opening modal
-    router.push(`/messages?conversation=${conversationId}`);
-    setIsOpen(false); // Close the bubble
+  // Auto-scroll to bottom function
+  const scrollToBottom = useCallback(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+    if (scrollAreaRef.current) {
+      const scrollElement = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]');
+      if (scrollElement) {
+        scrollElement.scrollTop = scrollElement.scrollHeight;
+      }
+    }
+  }, []);
+
+  // Scroll to bottom when messages change (new messages arrive)
+  useEffect(() => {
+    if (isOpen && view === 'chat' && messages.length > 0) {
+      scrollToBottom();
+    }
+  }, [messages, isOpen, view, scrollToBottom]);
+
+  // Reload messages when entering chat view - force refresh from database
+  useEffect(() => {
+    if (view === 'chat' && currentRoom && accessToken && currentUserId) {
+      console.log('[ChatBubble] Entering chat view, force refreshing messages from database for room:', currentRoom.id);
+      // Clear cache to ensure fresh data
+      clearRoomCache(currentRoom.id);
+      // Force refresh from database (single source of truth)
+      forceRefreshMessages(currentRoom.id, accessToken, currentUserId, 50)
+        .then(refreshedMessages => {
+          console.log('[ChatBubble] Force refreshed', refreshedMessages.length, 'messages');
+        })
+        .catch(err => {
+          console.error('[ChatBubble] Error force refreshing messages:', err);
+        });
+    }
+  }, [view, currentRoom?.id, accessToken, currentUserId]);
+
+  // Listen for chat message received events
+  useEffect(() => {
+    const handleMessageReceived = (event: CustomEvent) => {
+      if (isOpen && view === 'chat' && event.detail?.roomId === currentRoom?.id) {
+        scrollToBottom();
+      }
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('chat-message-received', handleMessageReceived as EventListener);
+      return () => {
+        window.removeEventListener('chat-message-received', handleMessageReceived as EventListener);
+      };
+    }
+  }, [isOpen, view, currentRoom, scrollToBottom]);
+
+  // Filter rooms based on active tab and search
+  const filteredRooms = rooms.filter(room => {
+    const matchesTab = activeTab === 'dm' ? room.type === 'direct' : room.type === 'course';
+    const matchesSearch = room.display_name.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchesTab && matchesSearch;
+  });
+
+  const toggleChat = () => {
+    const newOpenState = !isOpen;
+    setIsOpen(newOpenState);
+    
+    if (newOpenState) {
+      // Reset to list view when opening
+      setView('list');
+    }
   };
+
+  const handleSendMessage = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newMessage.trim() && currentRoom && isConnected) {
+      sendMessage(newMessage);
+      setNewMessage("");
+      setTimeout(scrollToBottom, 100);
+    }
+  };
+
+  const goToMessagesPage = () => {
+    setIsOpen(false);
+    router.push("/messages");
+  };
+
+  const handleSelectRoom = (room: any) => {
+    selectRoom(room);
+    setView('chat');
+    setSearchQuery("");
+    setTimeout(scrollToBottom, 200);
+  };
+
+  const handleBackToList = () => {
+    setView('list');
+  };
+
+  const handleManualReconnect = () => {
+    reconnect();
+  };
+
+  // Sort messages by created_at to ensure proper order
+  const sortedMessages = [...messages].sort((a, b) => {
+    const dateA = new Date(a.created_at || a.timestamp);
+    const dateB = new Date(b.created_at || b.timestamp);
+    return dateA.getTime() - dateB.getTime();
+  });
+
+  // Group messages by date
+  const groupMessagesByDate = (msgs: Message[]) => {
+    const groups: { [key: string]: Message[] } = {};
+    msgs.forEach(msg => {
+      const date = new Date(msg.created_at || msg.timestamp);
+      const dateKey = date.toLocaleDateString();
+      if (!groups[dateKey]) {
+        groups[dateKey] = [];
+      }
+      groups[dateKey].push(msg);
+    });
+    return groups;
+  };
+
+  const messageGroups = groupMessagesByDate(sortedMessages);
+
+  // Deduplicate rooms for display
+  const uniqueFilteredRooms = filteredRooms.filter(
+    (room, index, self) => index === self.findIndex((r) => r.id === room.id)
+  );
 
   return (
     <>
-      {/* Floating Button */}
       <button
         onClick={toggleChat}
-        className="fixed bottom-6 right-6 z-50 p-4 bg-purple-600 rounded-full shadow-lg hover:bg-purple-700 transition-all duration-200"
+        className="fixed bottom-4 right-4 z-50 rounded-full bg-gradient-to-r from-purple-500 to-violet-600 p-3 text-white shadow-lg hover:shadow-xl hover:scale-105 transition-all"
+        aria-label="Open chat"
       >
-        <MessageCircle className="w-6 h-6 text-white" />
+        {isOpen ? <X className="h-6 w-6" /> : <MessageCircle className="h-6 w-6" />}
       </button>
 
-      {/* Chat Modal */}
       {isOpen && (
-        <div className="fixed bottom-24 right-6 z-50 w-80 bg-gray-900 rounded-lg shadow-xl border border-gray-700">
+        <div className="fixed bottom-20 right-4 z-50 h-[550px] w-[400px] rounded-xl bg-[#1A1A24] shadow-2xl flex flex-col overflow-hidden border border-white/10">
           {/* Header */}
-          <div className="flex justify-between items-center p-4 border-b border-gray-700">
-            <h3 className="text-white font-semibold">Messages</h3>
-            <button
-              onClick={() => router.push("/messages")}
-              className="text-sm text-purple-400 hover:text-purple-300"
-            >
-              View All
-            </button>
-          </div>
-
-          {/* Search */}
-          <div className="p-3 border-b border-gray-700">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <Input
-                type="text"
-                placeholder="Search conversations..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-9 bg-gray-800 border-gray-600 text-white"
-              />
+          <div className="bg-gradient-to-r from-purple-500 to-violet-600 p-4">
+            <div className="flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                {view === 'chat' && (
+                  <button
+                    onClick={handleBackToList}
+                    className="text-white hover:text-gray-200 transition-colors p-1 rounded hover:bg-white/20"
+                    title="Back to list"
+                  >
+                    <ChevronLeft className="h-5 w-5" />
+                  </button>
+                )}
+                <h3 className="text-white font-semibold text-lg">
+                  {view === 'chat' && currentRoom ? currentRoom.display_name : 'Messages'}
+                </h3>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={goToMessagesPage}
+                  className="text-white hover:text-gray-200 transition-colors p-1 rounded hover:bg-white/20"
+                  title="Open full messages page"
+                >
+                  <Maximize2 className="h-4 w-4" />
+                </button>
+                <div className={`h-2 w-2 rounded-full ${isConnected ? 'bg-green-400' : isConnecting ? 'bg-yellow-400 animate-pulse' : 'bg-red-400'}`} />
+                <button onClick={toggleChat} className="text-white hover:text-gray-200 p-1 rounded hover:bg-white/20">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
             </div>
           </div>
 
-          {/* Conversations List */}
-          <div className="max-h-96 overflow-y-auto">
-            {mockConversations.map((conv) => (
-              <div
-                key={conv.id}
-                onClick={() => handleConversationClick(conv.id)}
-                className="flex items-center gap-3 p-3 hover:bg-gray-800 cursor-pointer transition-colors"
-              >
-                <div className="relative">
-                  <img
-                    src={conv.avatar}
-                    alt={conv.name}
-                    className="w-10 h-10 rounded-full object-cover"
-                  />
-                  {conv.unread > 0 && (
-                    <span className="absolute -top-1 -right-1 w-5 h-5 bg-purple-600 rounded-full text-xs text-white flex items-center justify-center">
-                      {conv.unread}
-                    </span>
-                  )}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex justify-between items-center">
-                    <p className="text-white font-medium truncate">{conv.name}</p>
-                    <span className="text-xs text-gray-400">{conv.time}</span>
-                  </div>
-                  <p className="text-gray-400 text-sm truncate">{conv.lastMessage}</p>
-                </div>
+          {view === 'list' ? (
+            <>
+              {/* Search Input */}
+              <div className="p-3 border-b border-white/10 bg-[#1A1A24]">
+                <Input
+                  type="text"
+                  placeholder="Search conversations..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="bg-[#0B0B0F] border-white/10 text-white rounded-xl h-9 text-sm"
+                />
               </div>
-            ))}
-          </div>
 
-          {/* New Message Button */}
-          <div className="p-3 border-t border-gray-700">
-            <button
-              onClick={() => router.push("/messages")}
-              className="w-full py-2 bg-purple-600 hover:bg-purple-700 rounded-md text-white text-sm transition-colors"
-            >
-              New Message
-            </button>
-          </div>
+              {/* Tabs */}
+              <div className="flex border-b border-white/10 bg-[#1A1A24]">
+                <button
+                  onClick={() => setActiveTab('dm')}
+                  className={`flex-1 py-3 text-sm font-medium transition-all relative ${
+                    activeTab === 'dm' 
+                      ? 'text-purple-400' 
+                      : 'text-[#A0A0B5] hover:text-white'
+                  }`}
+                >
+                  Direct Messages
+                  {activeTab === 'dm' && (
+                    <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-purple-500 to-violet-600" />
+                  )}
+                </button>
+                <button
+                  onClick={() => setActiveTab('course')}
+                  className={`flex-1 py-3 text-sm font-medium transition-all relative ${
+                    activeTab === 'course' 
+                      ? 'text-purple-400' 
+                      : 'text-[#A0A0B5] hover:text-white'
+                  }`}
+                >
+                  Course Chats
+                  {activeTab === 'course' && (
+                    <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-purple-500 to-violet-600" />
+                  )}
+                </button>
+              </div>
+
+              {/* Room List */}
+              <div className="flex-1 overflow-y-auto bg-[#1A1A24]">
+                {isLoading ? (
+                  <div className="flex justify-center py-8">
+                    <Loader2 className="h-5 w-5 animate-spin text-purple-400" />
+                  </div>
+                ) : uniqueFilteredRooms.length === 0 ? (
+                  <div className="text-center py-8 text-sm text-[#A0A0B5]">
+                    No {activeTab === 'dm' ? 'direct messages' : 'course chats'} yet
+                  </div>
+                ) : (
+                  uniqueFilteredRooms.map((room) => (
+                    <button
+                      key={room.id}
+                      onClick={() => handleSelectRoom(room)}
+                      className="w-full p-3 text-left hover:bg-white/5 transition-colors border-b border-white/5"
+                    >
+                      <div className="flex justify-between items-center">
+                        <div className="flex items-center gap-3">
+                          <Avatar className="h-10 w-10">
+                            <AvatarFallback className="bg-gradient-to-br from-purple-500 to-violet-600 text-white">
+                              {room.display_name.charAt(0).toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-white text-sm font-medium truncate">{room.display_name}</p>
+                            {room.last_message && (
+                              <p className="text-xs text-[#A0A0B5] truncate">{room.last_message}</p>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-end gap-1">
+                          {room.last_message_time && (
+                            <span className="text-xs text-[#6B6B80]">
+                              {new Date(room.last_message_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          )}
+                          {room.unread_count > 0 && (
+                            <span className="bg-purple-500 text-white text-xs rounded-full px-2 py-0.5">
+                              {room.unread_count}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Chat Messages Area */}
+              <div className="flex-1 overflow-hidden bg-[#13131A]">
+                <ScrollArea className="h-full p-4" ref={scrollAreaRef}>
+                  <div className="space-y-4">
+                    {Object.entries(messageGroups).length === 0 ? (
+                      <div className="text-center py-8">
+                        <MessageCircle className="h-12 w-12 text-[#6B6B80] mx-auto mb-3 opacity-30" />
+                        <p className="text-[#A0A0B5] text-sm">No messages yet</p>
+                        <p className="text-xs text-[#6B6B80] mt-1">Start the conversation!</p>
+                      </div>
+                    ) : (
+                      Object.entries(messageGroups).map(([date, dateMessages]) => (
+                        <div key={date} className="space-y-3">
+                          {/* Date separator */}
+                          <div className="flex justify-center">
+                            <span className="text-xs text-[#6B6B80] bg-[#1A1A24] px-3 py-1 rounded-full">
+                              {date === new Date().toLocaleDateString() ? 'Today' : date}
+                            </span>
+                          </div>
+                          
+                          {/* Messages for this date */}
+                          {dateMessages.map((msg) => (
+                            <div
+                              key={msg.id}
+                              className={`flex gap-2 ${msg.is_me ? 'justify-end' : 'justify-start'}`}
+                            >
+                              {!msg.is_me && (
+                                <Avatar className="h-8 w-8 flex-shrink-0">
+                                  <AvatarImage src={msg.sender_avatar} />
+                                  <AvatarFallback className="bg-gradient-to-br from-purple-500 to-violet-600 text-white text-xs">
+                                    {msg.sender_name?.charAt(0).toUpperCase() || 'U'}
+                                  </AvatarFallback>
+                                </Avatar>
+                              )}
+                              <div className={`flex flex-col ${msg.is_me ? 'items-end' : 'items-start'} max-w-[70%]`}>
+                                {!msg.is_me && (
+                                  <span className="text-xs text-[#A0A0B5] mb-1 ml-1">{msg.sender_name}</span>
+                                )}
+                                <div
+                                  className={`px-4 py-2.5 rounded-2xl text-sm break-words ${
+                                    msg.is_me
+                                      ? 'bg-gradient-to-r from-purple-500 to-violet-600 text-white rounded-tr-none'
+                                      : 'bg-[#252530] text-white rounded-tl-none border border-white/10'
+                                  }`}
+                                >
+                                  {msg.content}
+                                </div>
+                                <span className="text-xs text-[#6B6B80] mt-1 px-1">{msg.timestamp}</span>
+                              </div>
+                              {msg.is_me && (
+                                <Avatar className="h-8 w-8 flex-shrink-0">
+                                  <AvatarFallback className="bg-gradient-to-br from-purple-500 to-violet-600 text-white text-xs">
+                                    Me
+                                  </AvatarFallback>
+                                </Avatar>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ))
+                    )}
+                    <div ref={messagesEndRef} />
+                  </div>
+                </ScrollArea>
+              </div>
+
+              {/* Input Area */}
+              {isConnected ? (
+                <form onSubmit={handleSendMessage} className="p-3 border-t border-white/10 bg-[#1A1A24]">
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      className="p-2 text-[#A0A0B5] hover:text-purple-400 transition-colors rounded-lg hover:bg-white/5"
+                      title="Attach file (coming soon)"
+                    >
+                      <Paperclip className="h-5 w-5" />
+                    </button>
+                    <Input
+                      value={newMessage}
+                      onChange={(e) => setNewMessage(e.target.value)}
+                      placeholder="Type a message..."
+                      className="flex-1 bg-[#0B0B0F] border-white/10 text-white text-sm rounded-full px-4 focus:ring-2 focus:ring-purple-500/50"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSendMessage(e);
+                        }
+                      }}
+                    />
+                    <button
+                      type="submit"
+                      className="bg-gradient-to-r from-purple-500 to-violet-600 text-white rounded-full px-4 hover:shadow-lg transition-all disabled:opacity-50"
+                      disabled={!newMessage.trim()}
+                    >
+                      <Send className="h-4 w-4" />
+                    </button>
+                  </div>
+                </form>
+              ) : isConnecting ? (
+                <div className="p-3 border-t border-white/10 text-center bg-[#1A1A24]">
+                  <div className="flex flex-col items-center gap-2">
+                    <Loader2 className="h-5 w-5 animate-spin text-purple-400" />
+                    <p className="text-xs text-yellow-400">Connecting...</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-3 border-t border-white/10 text-center bg-[#1A1A24]">
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="h-5 w-5 text-red-400">⚠️</div>
+                    <p className="text-xs text-red-400">Disconnected from server</p>
+                    <button 
+                      onClick={handleManualReconnect}
+                      className="text-xs text-purple-400 hover:text-purple-300 transition-colors flex items-center gap-1"
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                      Reconnect
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
     </>

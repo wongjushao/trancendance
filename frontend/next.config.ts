@@ -1,4 +1,5 @@
-import type { NextConfig } from "next";
+// frontend/next.config.ts
+import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   async rewrites() {
@@ -16,44 +17,34 @@ const nextConfig: NextConfig = {
         destination: 'http://org-service:5003/:path*',
       },
       {
-        // Auth service with full path
         source: '/api/auth-service/:path*',
         destination: 'http://auth-service:5001/api/auth-service/:path*',
       },
       {
-        // Notification service - FIXED
         source: '/api/notification-service/:path*',
-        destination: 'http://notification-service:5004/:path*',  // Added full path
+        destination: 'http://notification-service:5004/:path*',
       },
-    ]
+      {
+        source: '/api/chat-service/:path*',
+        destination: 'http://chat-service:5002/api/chat-service/:path*',
+      },
+    ];
   },
-  // Increase body parser limit for file uploads
-  api: {
-    bodyParser: {
-      sizeLimit: '10mb',
-    },
+  // Add WebSocket proxy configuration
+  webpack: (config, { isServer }) => {
+    if (!isServer) {
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        net: false,
+        tls: false,
+        fs: false,
+      };
+    }
+    return config;
   },
-  images: {
-    remotePatterns: [
-      {
-        protocol: 'https',
-        hostname: 'lh3.googleusercontent.com',
-        port: '',
-        pathname: '/**',
-      },
-      {
-        protocol: 'https',
-        hostname: 'avatars.githubusercontent.com',
-        port: '',
-        pathname: '/**',
-      },
-      {
-        protocol: 'https',
-        hostname: '*.supabase.co',
-        port: '',
-        pathname: '/storage/v1/object/public/**',
-      },
-    ],
+  // Allow WebSocket connections
+  experimental: {
+    // Add any experimental features if needed
   },
 };
 

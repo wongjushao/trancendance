@@ -41,7 +41,8 @@ const publicRoutes = [
   "/auth/callback",
   "/auth/confirm",
   "/auth/error",
-  "/accept-invite",  // ADD THIS - invitation acceptance should be accessible to both
+  "/accept-invite",
+  "/invite/accept", // Add this for invite acceptance
 ];
 
 async function checkOnboardingStatus(token: string): Promise<boolean> {
@@ -80,7 +81,7 @@ export async function proxy(request: NextRequest) {
   }
 
   // Allow public routes without any checks (including accept-invite)
-  if (publicRoutes.some(route => pathname === route)) {
+  if (publicRoutes.some(route => pathname === route || pathname.startsWith(route + "/"))) {
     console.log("[proxy] Public route, allowing access:", pathname);
     return NextResponse.next();
   }
