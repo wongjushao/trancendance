@@ -4,11 +4,10 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { 
-  BookOpen, Users, Award, TrendingUp, Plus, Edit, 
-  Trash2, Eye, CheckCircle, XCircle, Clock, FileText,
-  MessageSquare, DollarSign, BarChart3, Settings,
-  Star, Calendar, Download, Upload, Filter, Search,
-  ChevronRight, MoreVertical, Copy, Link
+  BookOpen, Users, TrendingUp, Plus, Edit, Eye, CheckCircle, FileText,
+  MessageSquare, BarChart3,
+  Star, Calendar, Search,
+  Link
 } from "lucide-react";
 import { GlowCard, StatCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
@@ -29,7 +28,6 @@ interface Course {
   students: number;
   lessons: number;
   rating: number;
-  price: number;
   status: "published" | "draft" | "archived";
   createdAt: Date;
   updatedAt: Date;
@@ -93,7 +91,6 @@ const mockCourses: Course[] = [
     students: 1234,
     lessons: 24,
     rating: 4.8,
-    price: 99,
     status: "published",
     createdAt: new Date("2024-01-15"),
     updatedAt: new Date("2024-03-10"),
@@ -108,7 +105,6 @@ const mockCourses: Course[] = [
     students: 892,
     lessons: 18,
     rating: 4.6,
-    price: 79,
     status: "published",
     createdAt: new Date("2024-02-01"),
     updatedAt: new Date("2024-03-15"),
@@ -123,7 +119,6 @@ const mockCourses: Course[] = [
     students: 2341,
     lessons: 32,
     rating: 4.9,
-    price: 89,
     status: "draft",
     createdAt: new Date("2024-03-01"),
     updatedAt: new Date("2024-03-20"),
@@ -266,7 +261,6 @@ export default function TeacherDashboardPage() {
   const stats = {
     totalStudents: mockCourses.reduce((acc, c) => acc + c.students, 0),
     totalCourses: mockCourses.length,
-    totalRevenue: mockCourses.reduce((acc, c) => acc + (c.students * c.price), 0),
     averageRating: mockCourses.reduce((acc, c) => acc + c.rating, 0) / mockCourses.length,
   };
 
@@ -303,7 +297,6 @@ export default function TeacherDashboardPage() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <StatCard icon={BookOpen} label="Total Courses" value={stats.totalCourses.toString()} />
         <StatCard icon={Users} label="Total Students" value={stats.totalStudents.toLocaleString()} />
-        <StatCard icon={DollarSign} label="Total Revenue" value={`$${stats.totalRevenue.toLocaleString()}`} />
         <StatCard icon={Star} label="Average Rating" value={stats.averageRating.toFixed(1)} />
       </div>
 
@@ -435,10 +428,6 @@ export default function TeacherDashboardPage() {
                       <span className="flex items-center gap-1 text-[#A0A0B5]">
                         <Star className="w-4 h-4 fill-yellow-500 text-yellow-500" />
                         {course.rating}
-                      </span>
-                      <span className="flex items-center gap-1 text-[#A0A0B5]">
-                        <DollarSign className="w-4 h-4" />
-                        ${course.price}
                       </span>
                       <span className={`px-2 py-1 rounded-full text-xs ${
                         course.status === "published" ? "bg-green-500/20 text-green-400" :
@@ -592,21 +581,10 @@ export default function TeacherDashboardPage() {
                     </div>
                     <div className="flex items-center gap-4 text-sm text-[#A0A0B5]">
                       <span>Rating: {course.rating} ★</span>
-                      <span>Revenue: ${(course.students * course.price).toLocaleString()}</span>
                       <span>Completion: 72%</span>
                     </div>
                   </div>
                 ))}
-              </div>
-            </GlowCard>
-
-            <GlowCard>
-              <h2 className="text-xl font-bold text-white mb-6">Revenue Overview</h2>
-              <div className="text-center py-12">
-                <DollarSign className="w-16 h-16 text-purple-400 mx-auto mb-4" />
-                <p className="text-3xl font-bold text-white mb-2">${stats.totalRevenue.toLocaleString()}</p>
-                <p className="text-[#A0A0B5]">Total earnings from course sales</p>
-                <p className="text-sm text-green-400 mt-2">↑ 12% from last month</p>
               </div>
             </GlowCard>
           </div>

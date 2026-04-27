@@ -1,7 +1,7 @@
 // frontend/lib/role.ts
 "use client";
 
-export type UserRole = 'student' | 'teacher' | 'org_admin' | 'system_admin' | 'pending_teacher' | 'pending_org_admin';
+export type UserRole = 'student' | 'teacher' | 'org_admin' | 'pending_teacher' | 'pending_org_admin';
 
 export interface RoleData {
   role: UserRole;
@@ -145,7 +145,6 @@ export function hasPermission(requiredRole: UserRole): boolean {
     pending_org_admin: 1,
     teacher: 2,
     org_admin: 3,
-    system_admin: 4,
   };
   return roleHierarchy[role] >= roleHierarchy[requiredRole];
 }

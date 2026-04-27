@@ -89,7 +89,6 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
       pending_org_admin: 1,
       teacher: 2,
       org_admin: 3,
-      system_admin: 4,
     };
     return roleHierarchy[roleData.role] >= roleHierarchy[requiredRole];
   }, [roleData.role]);

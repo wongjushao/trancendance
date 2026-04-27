@@ -15,7 +15,7 @@ import {
   Cloud, Brain, Shield as ShieldIcon, Heart, Music, Camera as CameraIcon,
   Coffee, Gamepad, Film, Mic, Dumbbell, Target, Award as AwardIcon,
   ExternalLink, ThumbsUp, MessageCircle as MessageCircleIcon, Linkedin, Github, Twitter, Instagram, Link,
-  ShieldOff
+  ShieldOff, Clock
 } from "lucide-react";
 import { GlowCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
@@ -151,6 +151,7 @@ export default function SettingsPage() {
   const [showMFARequestModal, setShowMFARequestModal] = useState(false);
   const [mfaRequestReason, setMfaRequestReason] = useState("");
   const [isSubmittingMFARequest, setIsSubmittingMFARequest] = useState(false);
+  const [loadingOrgs, setLoadingOrgs] = useState(false);
 
   
   // Profile form state
@@ -237,6 +238,26 @@ export default function SettingsPage() {
     order_index: number;
   }
 
+  // Organization deletion state
+  interface Organization {
+    id: number;
+    name: string;
+    memberCount?: number;
+  }
+
+  interface DeleteCooldown {
+    organizationId: number;
+    requestedAt: string;
+    scheduledDeletionDate: string;
+    daysRemaining: number;
+  }
+
+  const [userOrganizations, setUserOrganizations] = useState<Organization[]>([]);
+  const [selectedOrgForDeletion, setSelectedOrgForDeletion] = useState<Organization | null>(null);
+  const [deleteCooldown, setDeleteCooldown] = useState<DeleteCooldown | null>(null);
+  const [deletionStep, setDeletionStep] = useState<'select' | 'confirm' | 'cooldown' | 'recovery-request'>('select');
+  const [recoveryReason, setRecoveryReason] = useState('');
+
   const [educationList, setEducationList] = useState<Education[]>([]);
   const [isAddingEducation, setIsAddingEducation] = useState(false);
   const [editingEducation, setEditingEducation] = useState<Education & { index: number } | null>(null);
@@ -272,7 +293,8 @@ export default function SettingsPage() {
         await fetchProfile();
         await checkAuthProvider();
         await fetchMFAStatus();
-        await fetchNotificationPrefs(); // This should complete
+        await fetchNotificationPrefs();
+        await loadUserOrganizations();
       } catch (error) {
         console.error('Error loading data:', error);
       } finally {
@@ -300,6 +322,162 @@ export default function SettingsPage() {
         
         setPendingScrollTarget(null);
       });
+    }
+  };
+
+  // Load user's organizations (where they are admin)
+  const loadUserOrganizations = async () => {
+    setLoadingOrgs(true);
+    try {
+      // Mock data - replace with actual API call
+      const mockOrganizations: Organization[] = [
+        { id: 1, name: "Tech University", memberCount: 2847 },
+        { id: 2, name: "Design Academy", memberCount: 543 },
+      ];
+      
+      const adminOrgs = mockOrganizations;
+      setUserOrganizations(adminOrgs);
+      checkPendingDeletions();
+    } finally {
+      setLoadingOrgs(false);
+    }
+  };
+
+  // Check for pending deletions
+  const checkPendingDeletions = () => {
+    const savedDeletions = localStorage.getItem('pending_organization_deletions');
+    if (savedDeletions) {
+      const deletions = JSON.parse(savedDeletions);
+      const now = new Date();
+      
+      // Find if any pending deletion exists for user's orgs
+      for (const org of userOrganizations) {
+        const pendingDeletion = deletions.find((d: any) => d.organizationId === org.id);
+        if (pendingDeletion) {
+          const scheduledDate = new Date(pendingDeletion.scheduledDeletionDate);
+          const daysRemaining = Math.ceil((scheduledDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+          
+          if (daysRemaining > 0) {
+            setSelectedOrgForDeletion(org);
+            setDeleteCooldown({
+              organizationId: org.id,
+              requestedAt: pendingDeletion.requestedAt,
+              scheduledDeletionDate: pendingDeletion.scheduledDeletionDate,
+              daysRemaining: daysRemaining
+            });
+            setDeletionStep('cooldown');
+            break;
+          } else if (daysRemaining <= 0) {
+            // Deletion should have happened, remove from localStorage
+            const updatedDeletions = deletions.filter((d: any) => d.organizationId !== org.id);
+            localStorage.setItem('pending_organization_deletions', JSON.stringify(updatedDeletions));
+          }
+        }
+      }
+    }
+  };
+
+  // Start organization deletion (30-day cooldown)
+  const startOrganizationDeletion = () => {
+    if (!selectedOrgForDeletion) return;
+    
+    const now = new Date();
+    const scheduledDate = new Date();
+    scheduledDate.setDate(now.getDate() + 30);
+    
+    const cooldownData = {
+      organizationId: selectedOrgForDeletion.id,
+      requestedAt: now.toISOString(),
+      scheduledDeletionDate: scheduledDate.toISOString(),
+      daysRemaining: 30
+    };
+    
+    // Save to localStorage
+    const existingDeletions = localStorage.getItem('pending_organization_deletions');
+    let deletions = existingDeletions ? JSON.parse(existingDeletions) : [];
+    
+    // Remove any existing deletion for this org
+    deletions = deletions.filter((d: any) => d.organizationId !== selectedOrgForDeletion.id);
+    deletions.push(cooldownData);
+    
+    localStorage.setItem('pending_organization_deletions', JSON.stringify(deletions));
+    
+    setDeleteCooldown({
+      ...cooldownData,
+      daysRemaining: 30
+    });
+    setDeletionStep('cooldown');
+    
+    toast.success(`Deletion scheduled for ${selectedOrgForDeletion.name}. You have 30 days to cancel.`);
+    
+    // In production, you would also send this to backend
+    // await fetch(`/api/org-service/organizations/${selectedOrgForDeletion.id}/schedule-deletion`, {
+    //   method: 'POST',
+    //   body: JSON.stringify({ scheduledDate: scheduledDate.toISOString() })
+    // });
+  };
+
+  // Cancel organization deletion
+  const cancelOrganizationDeletion = () => {
+    if (!selectedOrgForDeletion || !deleteCooldown) return;
+    
+    if (confirm(`Are you sure you want to cancel the deletion of ${selectedOrgForDeletion.name}?`)) {
+      // Remove from localStorage
+      const existingDeletions = localStorage.getItem('pending_organization_deletions');
+      if (existingDeletions) {
+        let deletions = JSON.parse(existingDeletions);
+        deletions = deletions.filter((d: any) => d.organizationId !== selectedOrgForDeletion.id);
+        localStorage.setItem('pending_organization_deletions', JSON.stringify(deletions));
+      }
+      
+      setDeleteCooldown(null);
+      setSelectedOrgForDeletion(null);
+      setDeletionStep('select');
+      
+      toast.success(`Deletion of ${selectedOrgForDeletion.name} has been cancelled.`);
+      
+      // In production, notify backend
+      // await fetch(`/api/org-service/organizations/${selectedOrgForDeletion.id}/cancel-deletion`, {
+      //   method: 'POST'
+      // });
+    }
+  };
+
+  // Request recovery from system admin
+  const requestRecoveryFromAdmin = async () => {
+    if (!selectedOrgForDeletion || !recoveryReason.trim()) {
+      toast.error("Please provide a reason for recovery request");
+      return;
+    }
+    
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      // Send recovery request to backend
+      const response = await fetch('/api/auth-service/contact-support', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session?.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          subject: `Organization Recovery Request: ${selectedOrgForDeletion.name}`,
+          message: `Organization ID: ${selectedOrgForDeletion.id}\n\nReason for recovery:\n${recoveryReason}\n\nRequesting cancellation of scheduled deletion.`,
+          type: 'org_recovery'
+        }),
+      });
+      
+      if (response.ok) {
+        toast.success("Recovery request submitted. System admin will review and contact you.");
+        setDeletionStep('cooldown');
+        setRecoveryReason("");
+      } else {
+        throw new Error("Failed to submit request");
+      }
+    } catch (error) {
+      console.error("Error submitting recovery request:", error);
+      toast.error("Failed to submit recovery request. Please try again.");
     }
   };
 
@@ -1391,7 +1569,6 @@ export default function SettingsPage() {
                               {index > 0 && (
                                 <button
                                   onClick={() => reorderEducation(index, 'up')}
-                                  disabled={isReordering}
                                   className="p-1 hover:bg-gray-700 rounded transition-colors"
                                   title="Move up"
                                 >
@@ -1872,6 +2049,176 @@ export default function SettingsPage() {
                     Delete Account
                   </GlowButton>
                 </div>
+                
+                {/* Organization Deletion Section - Only for org admins */}
+                {userOrganizations.length > 0 && (
+                  <div className="p-4 bg-red-500/5 rounded-lg border border-red-500/20">
+                    <div className="flex items-start justify-between mb-4">
+                      <div>
+                        <h3 className="font-semibold text-white flex items-center gap-2">
+                          <Building2 className="w-5 h-5 text-red-400" />
+                          Delete Organization
+                        </h3>
+                        <p className="text-sm text-gray-400 mt-1">
+                          Permanently delete an organization you administer
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Organization Selector */}
+                    <div className="mb-4">
+                      <Label className="text-gray-300 mb-2 block">Select Organization to Delete</Label>
+                      <select
+                        value={selectedOrgForDeletion?.id || ""}
+                        onChange={(e) => {
+                          const org = userOrganizations.find(o => o.id.toString() === e.target.value);
+                          setSelectedOrgForDeletion(org || null);
+                          // Reset cooldown when org changes
+                          setDeleteCooldown(null);
+                          setDeletionStep('select');
+                        }}
+                        className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      >
+                        <option value="">Select an organization...</option>
+                        {userOrganizations.map((org) => (
+                          <option key={org.id} value={org.id}>
+                            {org.name} ({org.memberCount || 0} members)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Cooldown Timer Display */}
+                    {selectedOrgForDeletion && (
+                      <div className="space-y-3">
+                        {deletionStep === 'select' && (
+                          <>
+                            <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3">
+                              <p className="text-sm text-yellow-300 flex items-center gap-2">
+                                <AlertCircle className="w-4 h-4" />
+                                ⚠️ Deleting an organization will permanently remove all courses, members, and data.
+                              </p>
+                            </div>
+                            <GlowButton 
+                              onClick={() => setDeletionStep('confirm')}
+                              className="w-full bg-red-600 hover:bg-red-700"
+                            >
+                              Delete Organization
+                            </GlowButton>
+                          </>
+                        )}
+
+                        {deletionStep === 'confirm' && (
+                          <div className="space-y-3">
+                            <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                              <p className="text-sm text-red-300 flex items-center gap-2">
+                                <AlertTriangle className="w-4 h-4" />
+                                Are you sure? This action cannot be undone immediately.
+                              </p>
+                            </div>
+                            <div className="flex gap-3">
+                              <GlowButton 
+                                variant="outline" 
+                                onClick={() => setDeletionStep('select')}
+                                className="flex-1"
+                              >
+                                Cancel
+                              </GlowButton>
+                              <GlowButton 
+                                onClick={startOrganizationDeletion}
+                                className="flex-1 bg-red-600 hover:bg-red-700"
+                              >
+                                Confirm Deletion Request
+                              </GlowButton>
+                            </div>
+                          </div>
+                        )}
+
+                        {deletionStep === 'cooldown' && deleteCooldown && (
+                          <div className="space-y-3">
+                            <div className="bg-orange-500/10 border border-orange-500/30 rounded-lg p-3">
+                              <div className="flex items-center gap-2 mb-2">
+                                <Clock className="w-4 h-4 text-orange-400" />
+                                <span className="text-sm font-medium text-orange-400">Deletion Scheduled</span>
+                              </div>
+                              <p className="text-sm text-gray-300">
+                                Organization <strong>{selectedOrgForDeletion.name}</strong> will be permanently deleted on:
+                              </p>
+                              <p className="text-lg font-semibold text-orange-400 my-2">
+                                {new Date(deleteCooldown.scheduledDeletionDate).toLocaleDateString()} at{' '}
+                                {new Date(deleteCooldown.scheduledDeletionDate).toLocaleTimeString()}
+                              </p>
+                              <div className="mt-3 p-2 bg-gray-800/50 rounded-lg">
+                                <div className="flex justify-between text-sm mb-1">
+                                  <span className="text-gray-400">Days remaining:</span>
+                                  <span className="text-orange-400 font-semibold">{deleteCooldown.daysRemaining} days</span>
+                                </div>
+                                <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
+                                  <div 
+                                    className="h-full bg-orange-500 rounded-full transition-all"
+                                    style={{ width: `${((30 - deleteCooldown.daysRemaining) / 30) * 100}%` }}
+                                  />
+                                </div>
+                                <p className="text-xs text-gray-500 mt-2">
+                                  {deleteCooldown.daysRemaining} days remaining until permanent deletion
+                                </p>
+                              </div>
+                            </div>
+
+                            <GlowButton 
+                              variant="outline" 
+                              onClick={() => setDeletionStep('recovery-request')}
+                              className="w-full border-blue-500/50 text-blue-400 hover:bg-blue-500/10"
+                            >
+                              Request Recovery from Admin
+                            </GlowButton>
+                            
+                            <GlowButton 
+                              variant="outline" 
+                              onClick={cancelOrganizationDeletion}
+                              className="w-full border-yellow-500/50 text-yellow-400 hover:bg-yellow-500/10"
+                            >
+                              Cancel Deletion
+                            </GlowButton>
+                          </div>
+                        )}
+
+                        {deletionStep === 'recovery-request' && (
+                          <div className="space-y-3">
+                            <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
+                              <p className="text-sm text-blue-300 mb-2 flex items-center gap-2">
+                                <MessageCircle className="w-4 h-4" />
+                                Request organization recovery from system admin
+                              </p>
+                              <textarea
+                                value={recoveryReason}
+                                onChange={(e) => setRecoveryReason(e.target.value)}
+                                placeholder="Explain why you need to recover this organization..."
+                                rows={3}
+                                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm mt-2"
+                              />
+                            </div>
+                            <div className="flex gap-3">
+                              <GlowButton 
+                                variant="outline" 
+                                onClick={() => setDeletionStep('cooldown')}
+                                className="flex-1"
+                              >
+                                Back
+                              </GlowButton>
+                              <GlowButton 
+                                onClick={requestRecoveryFromAdmin}
+                                className="flex-1 bg-blue-600 hover:bg-blue-700"
+                              >
+                                Submit Recovery Request
+                              </GlowButton>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* MFA Section */}
                 <div className="border border-gray-800 rounded-xl overflow-hidden">
