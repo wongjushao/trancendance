@@ -5,12 +5,13 @@ import os
 import uuid
 import re
 
-from flask import Blueprint, jsonify, request, current_app
+from flask import jsonify, request, current_app
+from flask_restx import Namespace, Resource
 from supabase import create_client
 
 from backend.services.auth_service.auth_service.utils.supabase_jwt import extract_bearer_token, verify_supabase_jwt
 
-auth_bp = Blueprint("auth", __name__)
+auth_ns = Namespace("auth", path="/api/auth-service", description="Authentication endpoints")
 
 def validate_password_strength(password: str) -> tuple[bool, str]:
     """Validate password strength."""
@@ -25,7 +26,6 @@ def validate_password_strength(password: str) -> tuple[bool, str]:
     return True, ""
 
 
-@auth_bp.put("/update-password")
 def update_password():
     """Update user's password."""
     token = extract_bearer_token()
@@ -68,3 +68,9 @@ def update_password():
         }), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@auth_ns.route("/update-password")
+class UpdatePasswordResource(Resource):
+    def put(self):
+        return update_password()

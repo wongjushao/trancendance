@@ -117,13 +117,13 @@ docker compose --profile dev up frontend-dev auth-service chat-service org-servi
 
 ## Endpoints
 
-- Frontend (Next.js): `http://localhost:3000`
+- Frontend (Next.js): `https://localhost`
 - Frontend dev profile: `http://localhost:5173`
-- Auth service (direct): `http://localhost:5001`
-- Chat service (direct): `http://localhost:5002`
-- Org service (direct): `http://localhost:5003`
-- Prometheus: `http://localhost:9090`
-- Grafana: `http://localhost:3001`
+- Auth service (internal): `http://auth-service:5001`
+- Chat service (internal): `http://chat-service:5002`
+- Org service (internal): `http://org-service:5003`
+- Prometheus: `https://localhost/prometheus/`
+- Grafana: `https://localhost/grafana/`
 
 Frontend proxy routes (`frontend/next.config.ts`):
 - `/api/auth/*` -> `http://auth-service:5001/*`

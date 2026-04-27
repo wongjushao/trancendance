@@ -4,6 +4,8 @@ datasources:
     uid: prometheus
     type: prometheus
     access: proxy
-    url: http://prometheus:9090
+    url: https://prometheus:9090/prometheus
+    jsonData:
+      tlsSkipVerify: true
     isDefault: true
     editable: true

@@ -5,7 +5,8 @@ import os
 import uuid
 import logging
 
-from flask import Blueprint, jsonify, request, current_app
+from flask import jsonify, request, current_app
+from flask_restx import Namespace, Resource
 from sqlalchemy.exc import SQLAlchemyError
 
 from backend.common.models import Profile
@@ -14,7 +15,7 @@ from backend.services.auth_service.auth_service.utils.supabase_jwt import extrac
 # Set up logger
 logger = logging.getLogger(__name__)
 
-onboarding_bp = Blueprint("onboarding", __name__)
+onboarding_ns = Namespace("onboarding", path="/api/auth-service", description="Onboarding endpoints")
 
 
 # Required fields for onboarding completion
@@ -46,7 +47,6 @@ def _is_profile_complete(profile: Profile | None) -> bool:
     return True
 
 
-@onboarding_bp.get("/onboarding-status")
 def get_onboarding_status():
     """Check if the current user has completed onboarding by verifying required fields."""
     db_session = current_app.config.get("DB_SESSION")
@@ -97,3 +97,9 @@ def get_onboarding_status():
         return jsonify({"error": str(exc)}), 500
     finally:
         session.close()
+
+
+@onboarding_ns.route("/onboarding-status")
+class OnboardingStatusResource(Resource):
+    def get(self):
+        return get_onboarding_status()

@@ -3,17 +3,26 @@ global:
 
 scrape_configs:
   - job_name: 'auth-service'
+    scheme: https
     metrics_path: /metrics
+    tls_config:
+      ca_file: /etc/trancendance-certs/internal-ca.crt
     static_configs:
       - targets: ['auth-service:5001']
 
   - job_name: 'chat-service'
+    scheme: https
     metrics_path: /metrics
+    tls_config:
+      ca_file: /etc/trancendance-certs/internal-ca.crt
     static_configs:
       - targets: ['chat-service:5002']
 
   - job_name: 'org-service'
+    scheme: https
     metrics_path: /metrics
+    tls_config:
+      ca_file: /etc/trancendance-certs/internal-ca.crt
     static_configs:
       - targets: ['org-service:5003']
 
