@@ -1,9 +1,11 @@
 # Trancendance Stack (Flask Microservices + Next.js + Prometheus + Grafana)
 
 This repository runs a loosely-coupled service architecture in Docker Compose:
+- `waf-proxy`: Nginx/ModSecurity edge proxy for HTTPS traffic
 - `auth-service`: Supabase token verification + profile sync endpoints
 - `chat-service`: chat message read/write endpoints
 - `org-service`: organization read/write endpoints
+- `notification-service`: notification endpoints
 - `frontend`: Next.js app with `/api/*` rewrites to backend services
 - `prometheus`: metrics collection
 - `grafana`: dashboards and alerting
@@ -16,7 +18,7 @@ This repository runs a loosely-coupled service architecture in Docker Compose:
 	- Built and served from `node:20.19-alpine`
 	- Uses Next.js rewrites for backend proxying
 - Backend:
-	- 3 independent Flask services (`auth`, `chat`, `org`)
+	- 4 independent Flask services (`auth`, `chat`, `org`, `notification`)
 	- Run with Gunicorn in `python:3.11-slim`
 	- Expose REST endpoints + `/metrics`
 - Database and auth:
@@ -29,11 +31,12 @@ This repository runs a loosely-coupled service architecture in Docker Compose:
 
 ## Request/data flow
 
-1. Client calls the frontend on port `3000`.
-2. Frontend routes `/api/auth/*`, `/api/chat/*`, `/api/org/*` to backend services via Next.js rewrites.
-3. Protected auth operations validate bearer tokens against Supabase Auth.
-4. Services read/write Supabase Postgres through SQLAlchemy.
-5. Prometheus scrapes `/metrics`; Grafana visualizes and alerts.
+1. Client calls `https://localhost` through the WAF proxy.
+2. WAF terminates local TLS and routes frontend, backend API, Prometheus, and Grafana traffic.
+3. Frontend routes `/api/auth/*`, `/api/chat/*`, `/api/org/*`, and `/api/notification-service/*` to backend services.
+4. Protected auth operations validate bearer tokens against Supabase Auth.
+5. Services read/write Supabase Postgres through SQLAlchemy.
+6. Prometheus scrapes `/metrics`; Grafana visualizes and alerts.
 
 ## Program structure
 
@@ -100,14 +103,23 @@ trancendance/
 
 ```bash
 cd /path/to/trancendance
-docker compose up --build
+make start-server
 ```
+
+`make start-server` checks for local WAF TLS certs in `waf/certs` before starting Docker. If any required cert/key is missing or empty, it runs `./scripts/generate-local-certs.sh` automatically.
 
 Useful Make targets:
 - `make start-server` (detached)
+- `make start-server-wsl2` (detached, disables `node-exporter`)
 - `make start-server-fg` (foreground)
 - `make down`
 - `make logs`
+
+To generate the local WAF certs manually:
+
+```bash
+./scripts/generate-local-certs.sh
+```
 
 Run frontend dev server profile (hot reload):
 
@@ -119,16 +131,19 @@ docker compose --profile dev up frontend-dev auth-service chat-service org-servi
 
 - Frontend (Next.js): `https://localhost`
 - Frontend dev profile: `http://localhost:5173`
-- Auth service (internal): `http://auth-service:5001`
-- Chat service (internal): `http://chat-service:5002`
-- Org service (internal): `http://org-service:5003`
+- Auth service (internal): `https://auth-service:5001`
+- Chat service (internal): `https://chat-service:5002`
+- Org service (internal): `https://org-service:5003`
+- Notification service (internal): `https://notification-service:5004`
 - Prometheus: `https://localhost/prometheus/`
 - Grafana: `https://localhost/grafana/`
 
 Frontend proxy routes (`frontend/next.config.ts`):
-- `/api/auth/*` -> `http://auth-service:5001/*`
-- `/api/chat/*` -> `http://chat-service:5002/*`
-- `/api/org/*` -> `http://org-service:5003/*`
+- `/api/auth/*` -> `https://auth-service:5001/*`
+- `/api/chat/*` -> `https://chat-service:5002/*`
+- `/api/org/*` -> `https://org-service:5003/*`
+- `/api/auth-service/*` -> `https://auth-service:5001/api/auth-service/*`
+- `/api/notification-service/*` -> `https://notification-service:5004/*`
 
 Common service endpoints:
 - Auth: `POST /api/auth-service/register` (requires `Authorization: Bearer <api-key>`), `GET /api/auth-service/health`, `GET /api/auth-service/metrics`, `GET /api/auth-service/docs`
