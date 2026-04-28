@@ -1,208 +1,523 @@
+// frontend/app/(main)/courses/page.tsx
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Search, Filter, BookOpen, Users, Star } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Search, BookOpen, Users, Plus, Clock, ChevronRight, Eye, Edit } from "lucide-react";
 import { GlowCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useRole } from "@/components/providers/RoleProvider";
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 
-const courses = [
-  {
-    id: 1,
-    title: "Advanced React Development",
-    instructor: "Sarah Johnson",
-    description: "Master React hooks, context, and advanced patterns",
-    thumbnail: "https://images.unsplash.com/photo-1633356122544-f134324a6cee?w=400",
-    students: 1234,
-    lessons: 24,
-    rating: 4.8,
-    level: "Advanced",
-    category: "Web Development",
-    duration: "8 weeks",
-  },
-  {
-    id: 2,
-    title: "Backend with Node.js",
-    instructor: "Michael Chen",
-    description: "Build scalable backend services with Node.js and Express",
-    thumbnail: "https://images.unsplash.com/photo-1627398242454-45a1465c2479?w=400",
-    students: 892,
-    lessons: 18,
-    rating: 4.6,
-    level: "Intermediate",
-    category: "Backend",
-    duration: "6 weeks",
-  },
-  {
-    id: 3,
-    title: "UI/UX Design Fundamentals",
-    instructor: "Emily Rodriguez",
-    description: "Learn design principles and create stunning user interfaces",
-    thumbnail: "https://images.unsplash.com/photo-1561070791-2526d30994b5?w=400",
-    students: 2341,
-    lessons: 32,
-    rating: 4.9,
-    level: "Beginner",
-    category: "Design",
-    duration: "10 weeks",
-  },
-  {
-    id: 4,
-    title: "Python for Data Science",
-    instructor: "David Park",
-    description: "Analyze data and build ML models with Python",
-    thumbnail: "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=400",
-    students: 1567,
-    lessons: 28,
-    rating: 4.7,
-    level: "Intermediate",
-    category: "Data Science",
-    duration: "9 weeks",
-  },
-  {
-    id: 5,
-    title: "Mobile App Development",
-    instructor: "Lisa Anderson",
-    description: "Create native mobile apps for iOS and Android",
-    thumbnail: "https://images.unsplash.com/photo-1512941937669-90a1b58e7e9c?w=400",
-    students: 934,
-    lessons: 22,
-    rating: 4.5,
-    level: "Advanced",
-    category: "Mobile",
-    duration: "7 weeks",
-  },
-  {
-    id: 6,
-    title: "Cloud Computing with AWS",
-    instructor: "James Wilson",
-    description: "Deploy and manage applications on AWS cloud",
-    thumbnail: "https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=400",
-    students: 1123,
-    lessons: 20,
-    rating: 4.8,
-    level: "Intermediate",
-    category: "Cloud",
-    duration: "8 weeks",
-  },
-];
+// Types based on existing schema
+interface Course {
+  id: number;
+  title: string;
+  description: string | null;
+  visibility: "public" | "org" | "private";
+  organization_id: number;
+  created_by: string;
+  created_at: string;
+  instructor_name?: string;
+  instructor_avatar?: string;
+  enrolled?: boolean;
+  progress?: number;
+  total_lessons?: number;
+  completed_lessons?: number;
+}
+
+interface EnrolledCourse extends Course {
+  progress: number;
+  last_accessed?: string;
+}
 
 export default function CoursesPage() {
+  const router = useRouter();
+  const { roleData } = useRole();
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedLevel, setSelectedLevel] = useState<string>("all");
+  const [activeTab, setActiveTab] = useState<"my" | "discover" | "created">("discover");
+  const [loading, setLoading] = useState(true);
+  const [enrolledCourses, setEnrolledCourses] = useState<EnrolledCourse[]>([]);
+  const [discoverCourses, setDiscoverCourses] = useState<Course[]>([]);
+  const [createdCourses, setCreatedCourses] = useState<Course[]>([]);
+  const [userId, setUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        setLoading(false);
+        return;
+      }
+      
+      setUserId(user.id);
+      
+      // 1. Fetch all profiles for instructor names
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("id, first_name, last_name, avatar_url");
+      
+      const profileMap = new Map(profiles?.map(p => [p.id, p]) || []);
+      
+      // 2. Fetch enrolled courses (where user is a member)
+      const { data: memberships, error: membershipError } = await supabase
+        .from("course_members")
+        .select(`
+          course_id,
+          role,
+          joined_at,
+          status
+        `)
+        .eq("user_id", user.id)
+        .eq("status", "active");
+      
+      if (!membershipError && memberships) {
+        const enrolledIds = memberships.map(m => m.course_id);
+        
+        if (enrolledIds.length > 0) {
+          // Fetch course details for enrolled courses
+          const { data: coursesData } = await supabase
+            .from("courses")
+            .select("*")
+            .in("id", enrolledIds);
+          
+          if (coursesData) {
+            // Calculate progress for each course
+            const coursesWithProgress = await Promise.all(
+              coursesData.map(async (course) => {
+                // Get all modules for this course
+                const { data: modules } = await supabase
+                  .from("modules")
+                  .select("id")
+                  .eq("course_id", course.id);
+                
+                if (!modules || modules.length === 0) {
+                  return {
+                    ...course,
+                    instructor_name: getInstructorName(course.created_by, profileMap),
+                    instructor_avatar: getInstructorAvatar(course.created_by, profileMap),
+                    enrolled: true,
+                    progress: 0,
+                    total_lessons: 0,
+                    completed_lessons: 0,
+                  };
+                }
+                
+                const moduleIds = modules.map(m => m.id);
+                
+                // Get all lessons for these modules
+                const { data: lessons } = await supabase
+                  .from("lessons")
+                  .select("id")
+                  .in("module_id", moduleIds);
+                
+                const totalLessons = lessons?.length || 0;
+                
+                // Get completed lessons count
+                const { data: completedProgress } = await supabase
+                  .from("lesson_progress")
+                  .select("lesson_id")
+                  .eq("user_id", user.id)
+                  .eq("status", "completed")
+                  .in("lesson_id", lessons?.map(l => l.id) || []);
+                
+                const completedLessons = completedProgress?.length || 0;
+                const progress = totalLessons > 0 ? Math.round((completedLessons / totalLessons) * 100) : 0;
+                
+                return {
+                  ...course,
+                  instructor_name: getInstructorName(course.created_by, profileMap),
+                  instructor_avatar: getInstructorAvatar(course.created_by, profileMap),
+                  enrolled: true,
+                  progress,
+                  total_lessons: totalLessons,
+                  completed_lessons: completedLessons,
+                  last_accessed: memberships.find(m => m.course_id === course.id)?.joined_at,
+                };
+              })
+            );
+            
+            setEnrolledCourses(coursesWithProgress);
+          }
+        }
+      }
+      
+      // 3. Fetch discoverable courses (public courses user is not enrolled in)
+      const enrolledIds = memberships?.map(m => m.course_id) || [];
+      
+      let discoverQuery = supabase
+        .from("courses")
+        .select("*")
+        .eq("visibility", "public");
+      
+      if (enrolledIds.length > 0) {
+        discoverQuery = discoverQuery.not("id", "in", `(${enrolledIds.join(",")})`);
+      }
+      
+      const { data: discoverData, error: discoverError } = await discoverQuery;
+      
+      if (!discoverError && discoverData) {
+        const formattedCourses = discoverData.map(course => ({
+          ...course,
+          instructor_name: getInstructorName(course.created_by, profileMap),
+          instructor_avatar: getInstructorAvatar(course.created_by, profileMap),
+          enrolled: false,
+        }));
+        setDiscoverCourses(formattedCourses);
+      }
+      
+      // 4. Fetch created courses (for teachers/admins)
+      if (roleData.role === "teacher" || roleData.role === "org_admin") {
+        const { data: createdData, error: createdError } = await supabase
+          .from("courses")
+          .select("*")
+          .eq("created_by", user.id);
+        
+        if (!createdError && createdData) {
+          const formattedCreated = createdData.map(course => ({
+            ...course,
+            instructor_name: "You",
+            enrolled: false,
+          }));
+          setCreatedCourses(formattedCreated);
+        }
+      }
+      
+    } catch (error) {
+      console.error("Error fetching courses:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
   
-  const filteredCourses = courses.filter(course => {
-    const matchesSearch = course.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          course.description.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesLevel = selectedLevel === "all" || course.level.toLowerCase() === selectedLevel;
-    return matchesSearch && matchesLevel;
-  });
+  const getInstructorName = (createdBy: string, profileMap: Map<string, any>): string => {
+    const profile = profileMap.get(createdBy);
+    if (profile) {
+      const firstName = profile.first_name || "";
+      const lastName = profile.last_name || "";
+      if (firstName || lastName) return `${firstName} ${lastName}`.trim();
+    }
+    return "Instructor";
+  };
   
+  const getInstructorAvatar = (createdBy: string, profileMap: Map<string, any>): string | undefined => {
+    return profileMap.get(createdBy)?.avatar_url;
+  };
+
+  const filterCourses = (courses: Course[]) => {
+    if (!searchQuery) return courses;
+    return courses.filter(course => 
+      course.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (course.description && course.description.toLowerCase().includes(searchQuery.toLowerCase()))
+    );
+  };
+
+  const filteredDiscoverCourses = filterCourses(discoverCourses);
+  const filteredEnrolledCourses = filterCourses(enrolledCourses);
+  const filteredCreatedCourses = filterCourses(createdCourses);
+
+  const handleCreateCourse = () => {
+    router.push("/courses/create");
+  };
+
+  const handleContinueLearning = (courseId: number) => {
+    router.push(`/courses/${courseId}/learn`);
+  };
+
+  const handleViewCourse = (courseId: number) => {
+    router.push(`/courses/${courseId}`);
+  };
+
+  const handleEditCourse = (courseId: number) => {
+    router.push(`/courses/${courseId}/edit`);
+  };
+
+  const handleManageStudents = (courseId: number) => {
+    router.push(`/courses/${courseId}/students`);
+  };
+
+  const isTeacher = roleData.role === "teacher" || roleData.role === "org_admin";
+  const isStudent = roleData.role === "student" || roleData.role === "teacher";
+
   return (
     <div className="space-y-8">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-4xl font-bold text-white mb-2">Explore Courses</h1>
-          <p className="text-[#A0A0B5]">Discover and enroll in new courses</p>
+          <h1 className="text-4xl font-bold text-white mb-2">Courses</h1>
+          <p className="text-gray-400">
+            {isTeacher 
+              ? "Manage your courses or discover new ones" 
+              : "Explore and continue your learning journey"}
+          </p>
         </div>
-        <GlowButton variant="primary">
-          Create Course
-        </GlowButton>
+        {isTeacher && (
+          <GlowButton variant="primary" onClick={handleCreateCourse}>
+            <Plus className="w-4 h-4 mr-2" />
+            Create Course
+          </GlowButton>
+        )}
       </div>
-      
-      {/* Filters */}
+
+      {/* Search */}
       <div className="flex flex-col sm:flex-row gap-4">
         <div className="flex-1 relative">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[#6B6B80]" />
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
           <Input
             type="text"
             placeholder="Search courses..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-12 bg-[#12121A] border-white/10 text-white rounded-xl h-12"
+            className="pl-12 bg-gray-900/50 border-purple-500/20 text-white rounded-xl h-12"
           />
         </div>
-        
-        <div className="flex gap-2">
-          <select
-            value={selectedLevel}
-            onChange={(e) => setSelectedLevel(e.target.value)}
-            className="px-4 py-3 bg-[#12121A] border border-white/10 text-white rounded-xl outline-none focus:ring-2 focus:ring-purple-500/50 transition-all"
-          >
-            <option value="all">All Levels</option>
-            <option value="beginner">Beginner</option>
-            <option value="intermediate">Intermediate</option>
-            <option value="advanced">Advanced</option>
-          </select>
-          
-          <GlowButton variant="secondary">
-            <Filter className="w-5 h-5" />
-            Filters
-          </GlowButton>
-        </div>
       </div>
-      
-      {/* Course Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredCourses.map((course) => (
-          <Link key={course.id} href={`/courses/${course.id}`}>
-            <GlowCard className="h-full hover:scale-[1.02] transition-all cursor-pointer group">
-              <div className="relative overflow-hidden rounded-xl mb-4">
-                <img 
-                  src={course.thumbnail} 
-                  alt={course.title}
-                  className="w-full h-48 object-cover group-hover:scale-110 transition-transform duration-500"
-                />
-                <div className="absolute top-3 right-3 px-3 py-1 bg-[#0B0B0F]/90 backdrop-blur-sm rounded-full text-xs text-white border border-white/10">
-                  {course.level}
-                </div>
-              </div>
-              
-              <div className="space-y-3">
-                <div>
-                  <h3 className="text-xl font-semibold text-white mb-2 group-hover:text-purple-400 transition-colors">
-                    {course.title}
-                  </h3>
-                  <p className="text-[#A0A0B5] text-sm line-clamp-2">{course.description}</p>
-                </div>
-                
-                <div className="flex items-center gap-2 text-sm">
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center">
-                    <span className="text-white text-xs font-semibold">
-                      {course.instructor.split(' ').map(n => n[0]).join('')}
-                    </span>
-                  </div>
-                  <span className="text-[#A0A0B5]">{course.instructor}</span>
-                </div>
-                
-                <div className="flex items-center justify-between text-sm text-[#6B6B80] pt-3 border-t border-white/5">
-                  <span className="flex items-center gap-1">
-                    <BookOpen className="w-4 h-4" />
-                    {course.lessons} lessons
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Users className="w-4 h-4" />
-                    {course.students.toLocaleString()}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Star className="w-4 h-4 fill-yellow-500 text-yellow-500" />
-                    {course.rating}
-                  </span>
-                </div>
-              </div>
-            </GlowCard>
-          </Link>
-        ))}
-      </div>
-      
-      {filteredCourses.length === 0 && (
-        <div className="text-center py-12">
-          <BookOpen className="w-16 h-16 text-[#6B6B80] mx-auto mb-4" />
-          <h3 className="text-xl font-semibold text-white mb-2">No courses found</h3>
-          <p className="text-[#A0A0B5]">Try adjusting your search or filters</p>
+
+      {/* Loading State */}
+      {loading ? (
+        <div className="flex justify-center py-12">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500"></div>
         </div>
+      ) : (
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)} className="w-full">
+          <TabsList className="bg-gray-900/50 border border-gray-800">
+            {isStudent && enrolledCourses.length > 0 && (
+              <TabsTrigger value="my">My Courses</TabsTrigger>
+            )}
+            <TabsTrigger value="discover">Discover</TabsTrigger>
+            {isTeacher && createdCourses.length > 0 && (
+              <TabsTrigger value="created">My Created Courses</TabsTrigger>
+            )}
+          </TabsList>
+
+          {/* My Courses Tab */}
+          {isStudent && (
+            <TabsContent value="my" className="mt-6">
+              {filteredEnrolledCourses.length > 0 ? (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {filteredEnrolledCourses.map((course) => (
+                    <GlowCard key={course.id} className="overflow-hidden group cursor-pointer hover:scale-[1.02] transition-all">
+                      <div className="flex flex-col md:flex-row">
+                        {/* Thumbnail Placeholder */}
+                        <div className="relative md:w-48 h-48 md:h-auto overflow-hidden bg-gradient-to-br from-purple-500/20 to-pink-500/20 flex items-center justify-center">
+                          <BookOpen className="w-12 h-12 text-gray-500" />
+                          <div className="absolute top-3 left-3 px-2 py-1 bg-purple-500/90 backdrop-blur-sm rounded text-xs text-white">
+                            {course.progress || 0}% Complete
+                          </div>
+                        </div>
+                        
+                        {/* Content */}
+                        <div className="flex-1 p-5">
+                          <div>
+                            <h3 className="text-xl font-semibold text-white mb-1 group-hover:text-purple-400 transition-colors">
+                              {course.title}
+                            </h3>
+                            <p className="text-sm text-gray-400">{course.instructor_name || "Instructor"}</p>
+                          </div>
+                          
+                          <p className="text-gray-400 text-sm mb-4 line-clamp-2">{course.description}</p>
+                          
+                          {/* Progress Bar */}
+                          <div className="mb-4">
+                            <div className="flex justify-between text-xs text-gray-400 mb-1">
+                              <span>Your Progress</span>
+                              <span>{course.progress || 0}%</span>
+                            </div>
+                            <div className="w-full bg-gray-800 rounded-full h-2">
+                              <div 
+                                className="bg-purple-500 rounded-full h-2 transition-all duration-500"
+                                style={{ width: `${course.progress || 0}%` }}
+                              />
+                            </div>
+                          </div>
+                          
+                          {/* Stats */}
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3 text-sm text-gray-400">
+                              <span className="flex items-center gap-1">
+                                <BookOpen className="w-4 h-4" />
+                                {course.total_lessons || 0} lessons
+                              </span>
+                              <span className="flex items-center gap-1">
+                                <Clock className="w-4 h-4" />
+                                {course.completed_lessons || 0} completed
+                              </span>
+                            </div>
+                            <GlowButton 
+                              size="sm" 
+                              variant="primary"
+                              onClick={() => handleContinueLearning(course.id)}
+                            >
+                              Continue
+                              <ChevronRight className="w-4 h-4 ml-1" />
+                            </GlowButton>
+                          </div>
+                        </div>
+                      </div>
+                    </GlowCard>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-12">
+                  <BookOpen className="w-16 h-16 text-gray-600 mx-auto mb-4" />
+                  <h3 className="text-xl font-semibold text-white mb-2">No enrolled courses yet</h3>
+                  <p className="text-gray-400 mb-4">Start your learning journey by exploring courses</p>
+                  <GlowButton variant="primary" onClick={() => setActiveTab("discover")}>
+                    Discover Courses
+                  </GlowButton>
+                </div>
+              )}
+            </TabsContent>
+          )}
+
+          {/* Discover Courses Tab */}
+          <TabsContent value="discover" className="mt-6">
+            {filteredDiscoverCourses.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filteredDiscoverCourses.map((course) => (
+                  <GlowCard key={course.id} className="h-full hover:scale-[1.02] transition-all cursor-pointer group">
+                    <div className="relative overflow-hidden rounded-xl mb-4 bg-gradient-to-br from-purple-500/20 to-pink-500/20 h-48 flex items-center justify-center">
+                      <BookOpen className="w-12 h-12 text-gray-500" />
+                      {course.visibility === "org" && (
+                        <div className="absolute bottom-3 left-3 px-2 py-1 bg-blue-500/90 backdrop-blur-sm rounded text-xs text-white">
+                          Organization Only
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div className="space-y-3">
+                      <div>
+                        <h3 className="text-xl font-semibold text-white mb-2 group-hover:text-purple-400 transition-colors">
+                          {course.title}
+                        </h3>
+                        <p className="text-gray-400 text-sm line-clamp-2">{course.description}</p>
+                      </div>
+                      
+                      <div className="flex items-center gap-2 text-sm">
+                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
+                          <span className="text-white text-xs font-semibold">
+                            {course.instructor_name?.charAt(0) || "I"}
+                          </span>
+                        </div>
+                        <span className="text-gray-400">{course.instructor_name || "Instructor"}</span>
+                      </div>
+                      
+                      <GlowButton 
+                        variant="outline" 
+                        fullWidth
+                        onClick={() => handleViewCourse(course.id)}
+                      >
+                        View Course
+                      </GlowButton>
+                    </div>
+                  </GlowCard>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-12">
+                <BookOpen className="w-16 h-16 text-gray-600 mx-auto mb-4" />
+                <h3 className="text-xl font-semibold text-white mb-2">No courses found</h3>
+                <p className="text-gray-400">Try adjusting your search</p>
+              </div>
+            )}
+          </TabsContent>
+
+          {/* Created Courses Tab */}
+          {isTeacher && (
+            <TabsContent value="created" className="mt-6">
+              {filteredCreatedCourses.length > 0 ? (
+                <div className="space-y-4">
+                  {filteredCreatedCourses.map((course) => (
+                    <GlowCard key={course.id} className="overflow-hidden group">
+                      <div className="flex flex-col md:flex-row">
+                        <div className="md:w-48 h-32 md:h-auto overflow-hidden bg-gradient-to-br from-purple-500/20 to-pink-500/20 flex items-center justify-center">
+                          <BookOpen className="w-8 h-8 text-gray-500" />
+                        </div>
+                        <div className="flex-1 p-5">
+                          <div className="flex items-start justify-between mb-2 flex-wrap gap-2">
+                            <div>
+                              <h3 className="text-xl font-semibold text-white mb-1">
+                                {course.title}
+                              </h3>
+                              <div className="flex items-center gap-3 text-sm text-gray-400">
+                                {course.visibility === "public" && (
+                                  <span className="px-2 py-0.5 bg-green-500/20 text-green-400 rounded-full text-xs">
+                                    Public
+                                  </span>
+                                )}
+                                {course.visibility === "org" && (
+                                  <span className="px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded-full text-xs">
+                                    Organization
+                                  </span>
+                                )}
+                                {course.visibility === "private" && (
+                                  <span className="px-2 py-0.5 bg-red-500/20 text-red-400 rounded-full text-xs">
+                                    Private
+                                  </span>
+                                )}
+                                <span className="flex items-center gap-1">
+                                  <Clock className="w-4 h-4" />
+                                  {new Date(course.created_at).toLocaleDateString()}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex gap-2">
+                              <GlowButton 
+                                size="sm" 
+                                variant="secondary"
+                                onClick={() => handleViewCourse(course.id)}
+                              >
+                                <Eye className="w-4 h-4 mr-1" />
+                                View
+                              </GlowButton>
+                              <GlowButton 
+                                size="sm" 
+                                variant="secondary"
+                                onClick={() => handleEditCourse(course.id)}
+                              >
+                                <Edit className="w-4 h-4 mr-1" />
+                                Edit
+                              </GlowButton>
+                              <GlowButton 
+                                size="sm" 
+                                variant="primary"
+                                onClick={() => handleManageStudents(course.id)}
+                              >
+                                <Users className="w-4 h-4 mr-1" />
+                                Students
+                              </GlowButton>
+                            </div>
+                          </div>
+                          <p className="text-gray-400 text-sm line-clamp-2">{course.description}</p>
+                        </div>
+                      </div>
+                    </GlowCard>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-12">
+                  <BookOpen className="w-16 h-16 text-gray-600 mx-auto mb-4" />
+                  <h3 className="text-xl font-semibold text-white mb-2">No courses created yet</h3>
+                  <p className="text-gray-400 mb-4">Start creating your first course</p>
+                  <GlowButton variant="primary" onClick={handleCreateCourse}>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Create Course
+                  </GlowButton>
+                </div>
+              )}
+            </TabsContent>
+          )}
+        </Tabs>
       )}
     </div>
   );

@@ -127,7 +127,7 @@ export default function CreateClassPage() {
     });
 
     toast.success("Class created successfully!");
-    router.push(`/teacher/courses/${courseId}/classes`);
+    router.push(`/courses/${courseId}/classes`);
   };
 
   return (
@@ -140,7 +140,7 @@ export default function CreateClassPage() {
 
       <div className="relative z-10 max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <Link
-          href={`/teacher/courses/${courseId}/classes`}
+          href={`/courses/${courseId}/classes`}
           className="inline-flex items-center text-gray-400 hover:text-white transition-colors mb-6"
         >
           <ArrowLeft className="w-4 h-4 mr-2" />
