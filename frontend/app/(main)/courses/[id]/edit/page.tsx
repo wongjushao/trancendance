@@ -14,18 +14,15 @@ import {
   FileText,
   FileQuestion,
   ClipboardList,
-  Save,
-  Eye,
   Settings,
   Users,
   BarChart3,
-  MoveUp,
-  MoveDown,
-  CheckCircle,
+  GripVertical,
   AlertCircle,
-  HelpCircle,
   FolderOpen,
   Layers,
+  Rocket,
+  Archive,
 } from "lucide-react";
 import { GlowCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
@@ -52,11 +49,31 @@ import { toast } from "sonner";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 
+// Drag and drop imports
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+
 interface Class {
   id: number;
   title: string;
   module_id: number;
   order_index: number;
+  lessons?: Lesson[];
 }
 
 interface Lesson {
@@ -67,6 +84,7 @@ interface Lesson {
   content_json: any;
   order_index: number;
   class_id: number;
+  assignment?: any;
 }
 
 interface Module {
@@ -83,17 +101,7 @@ interface Course {
   description: string | null;
   visibility: string;
   created_by: string;
-}
-
-// Note: assignments table does NOT have a points column in your schema
-// Only: id, course_id, lesson_id, title, description, due_at, created_at
-interface Assignment {
-  id: number;
-  title: string;
-  description: string | null;
-  due_at: string | null;
-  lesson_id: number;
-  course_id: number;
+  status?: "draft" | "published" | "archived";
 }
 
 const contentTypes = [
@@ -101,6 +109,198 @@ const contentTypes = [
   { value: "text", label: "Text Lesson", icon: FileText, color: "green" },
   { value: "quiz", label: "Quiz", icon: FileQuestion, color: "purple" },
 ];
+
+// Sortable Module Item Component
+function SortableModuleItem({ module, index, expandedModules, toggleModule, onEdit, onDelete, children }: any) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: module.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} {...attributes}>
+      <div className="border border-gray-800 rounded-lg overflow-hidden">
+        <div className="bg-gray-800/50 p-4 flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            <div {...listeners} className="cursor-grab active:cursor-grabbing p-1 hover:bg-gray-700 rounded">
+              <GripVertical className="w-5 h-5 text-gray-400" />
+            </div>
+            <button
+              onClick={() => toggleModule(module.id)}
+              className="text-gray-400 hover:text-white"
+            >
+              {expandedModules.includes(module.id) ? (
+                <ChevronDown className="w-5 h-5" />
+              ) : (
+                <ChevronRight className="w-5 h-5" />
+              )}
+            </button>
+            <h3 className="text-white font-medium text-lg">
+              Module {index + 1}: {module.title}
+            </h3>
+            <Badge variant="outline" className="text-xs">
+              {module.classes.length} classes
+            </Badge>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => onEdit(module)}
+              className="px-3 py-1.5 text-sm bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded-lg transition-colors flex items-center gap-2"
+            >
+              <Edit className="w-4 h-4" />
+              Edit
+            </button>
+            <button
+              onClick={() => onDelete(module.id)}
+              className="px-3 py-1.5 text-sm bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded-lg transition-colors flex items-center gap-2"
+            >
+              <Trash2 className="w-4 h-4" />
+              Delete
+            </button>
+          </div>
+        </div>
+        {expandedModules.includes(module.id) && (
+          <div className="p-4">{children}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Sortable Class Item Component
+function SortableClassItem({ classItem, index, moduleId, onEdit, onDelete, children }: any) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: `${moduleId}-class-${classItem.id}` });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} {...attributes}>
+      <div className="border-l-2 border-purple-500/30 ml-2">
+        <div className="bg-gray-800/30 rounded-lg p-3">
+          <div className="flex items-center justify-between flex-wrap gap-3 mb-3">
+            <div className="flex items-center gap-2">
+              <div {...listeners} className="cursor-grab active:cursor-grabbing p-1 hover:bg-gray-700 rounded">
+                <GripVertical className="w-4 h-4 text-gray-400" />
+              </div>
+              <h4 className="text-white font-medium">
+                Class {index + 1}: {classItem.title}
+              </h4>
+              <Badge className="bg-purple-600/20 text-purple-400 text-xs">
+                {classItem.lessons?.length || 0} lessons
+              </Badge>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => onEdit(classItem, moduleId)}
+                className="px-2 py-1 text-xs bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded-lg transition-colors flex items-center gap-1"
+              >
+                <Edit className="w-3 h-3" />
+                Edit
+              </button>
+              <button
+                onClick={() => onDelete(classItem.id, moduleId)}
+                className="px-2 py-1 text-xs bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded-lg transition-colors flex items-center gap-1"
+              >
+                <Trash2 className="w-3 h-3" />
+                Delete
+              </button>
+            </div>
+          </div>
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Sortable Lesson Item Component
+function SortableLessonItem({ lesson, index, classId, moduleId, onEdit, onDelete, onAssignment, getContentTypeIcon }: any) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: `${moduleId}-${classId}-lesson-${lesson.id}` });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} {...attributes}>
+      <div className="flex items-center justify-between bg-gray-800/50 rounded p-3 group">
+        <div className="flex items-center gap-3">
+          <div {...listeners} className="cursor-grab active:cursor-grabbing p-1 hover:bg-gray-700 rounded">
+            <GripVertical className="w-4 h-4 text-gray-400" />
+          </div>
+          {getContentTypeIcon(lesson.content_type)}
+          <span className="text-white">{lesson.title}</span>
+          <span className="text-xs text-gray-500 capitalize px-2 py-0.5 bg-gray-700 rounded">
+            {lesson.content_type}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => onEdit(lesson, classId, moduleId)}
+            className="px-2 py-1 text-xs bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded-lg transition-colors flex items-center gap-1"
+          >
+            <Edit className="w-3 h-3" />
+            Edit
+          </button>
+          {!lesson.assignment ? (
+            <button
+              onClick={() => onAssignment(lesson)}
+              className="px-2 py-1 text-xs bg-green-600/20 hover:bg-green-600/40 text-green-400 rounded-lg transition-colors flex items-center gap-1"
+            >
+              <ClipboardList className="w-3 h-3" />
+              Add
+            </button>
+          ) : (
+            <button
+              onClick={() => onAssignment(lesson)}
+              className="px-2 py-1 text-xs bg-purple-600/20 hover:bg-purple-600/40 text-purple-400 rounded-lg transition-colors flex items-center gap-1"
+            >
+              <ClipboardList className="w-3 h-3" />
+              Edit
+            </button>
+          )}
+          <button
+            onClick={() => onDelete(lesson.id, classId, moduleId)}
+            className="px-2 py-1 text-xs bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded-lg transition-colors flex items-center gap-1"
+          >
+            <Trash2 className="w-3 h-3" />
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function CourseEditPage() {
   const params = useParams();
@@ -112,6 +312,7 @@ export default function CourseEditPage() {
   const [expandedModules, setExpandedModules] = useState<number[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [showPublishModal, setShowPublishModal] = useState(false);
   
   // Modal states
   const [isModuleModalOpen, setIsModuleModalOpen] = useState(false);
@@ -132,12 +333,9 @@ export default function CourseEditPage() {
   const [lessonForm, setLessonForm] = useState({
     title: "",
     content_type: "video",
-    // Video lesson fields
     video_url: "",
     video_notes: "",
-    // Text lesson fields
     text_content: "",
-    // Quiz lesson fields
     quiz_questions: [] as Array<{
       question: string;
       type: "multiple_choice" | "true_false" | "short_answer";
@@ -152,6 +350,18 @@ export default function CourseEditPage() {
   });
   const [activeTab, setActiveTab] = useState("curriculum");
 
+  // Setup drag and drop sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 5,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
   // Load course data
   useEffect(() => {
     if (courseId) {
@@ -164,7 +374,6 @@ export default function CourseEditPage() {
     try {
       const supabase = getSupabaseBrowserClient();
       
-      // Fetch course
       const { data: courseData, error: courseError } = await supabase
         .from("courses")
         .select("*")
@@ -172,9 +381,8 @@ export default function CourseEditPage() {
         .single();
       
       if (courseError) throw courseError;
-      setCourse(courseData);
+      setCourse({ ...courseData, status: courseData.status || "draft" });
       
-      // Fetch modules
       const { data: modulesData, error: modulesError } = await supabase
         .from("modules")
         .select("*")
@@ -183,7 +391,6 @@ export default function CourseEditPage() {
       
       if (modulesError) throw modulesError;
       
-      // For each module, fetch its classes
       const modulesWithClasses = await Promise.all(
         (modulesData || []).map(async (module) => {
           const { data: classesData, error: classesError } = await supabase
@@ -194,7 +401,6 @@ export default function CourseEditPage() {
           
           if (classesError) throw classesError;
           
-          // For each class, fetch its lessons
           const classesWithLessons = await Promise.all(
             (classesData || []).map(async (classItem) => {
               const { data: lessonsData, error: lessonsError } = await supabase
@@ -205,7 +411,6 @@ export default function CourseEditPage() {
               
               if (lessonsError) throw lessonsError;
               
-              // For each lesson, fetch assignment if exists
               const lessonsWithAssignments = await Promise.all(
                 (lessonsData || []).map(async (lesson) => {
                   const { data: assignmentData, error: assignmentError } = await supabase
@@ -213,8 +418,6 @@ export default function CourseEditPage() {
                     .select("*")
                     .eq("lesson_id", lesson.id)
                     .maybeSingle();
-                  
-                  if (assignmentError && assignmentError.code !== "PGRST116") throw assignmentError;
                   
                   return { ...lesson, assignment: assignmentData || null };
                 })
@@ -230,7 +433,6 @@ export default function CourseEditPage() {
       
       setModules(modulesWithClasses);
       
-      // Auto-expand first module
       if (modulesWithClasses.length > 0 && expandedModules.length === 0) {
         setExpandedModules([modulesWithClasses[0].id]);
       }
@@ -240,6 +442,172 @@ export default function CourseEditPage() {
       toast.error("Failed to load course data");
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Drag and drop handlers with Supabase save
+  const handleDragEndModules = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    
+    if (!over) return;
+    if (active.id === over.id) return;
+    
+    const oldIndex = modules.findIndex((m) => m.id === active.id);
+    const newIndex = modules.findIndex((m) => m.id === over.id);
+    
+    if (oldIndex === -1 || newIndex === -1) return;
+    
+    const reorderedModules = arrayMove(modules, oldIndex, newIndex);
+    const finalModules = reorderedModules.map((module, idx) => ({
+      ...module,
+      order_index: idx,
+    }));
+    
+    // Update local state immediately for UI feedback
+    setModules(finalModules);
+    
+    // Save to Supabase
+    setSaving(true);
+    try {
+      const supabase = getSupabaseBrowserClient();
+      
+      for (const module of finalModules) {
+        const { error } = await supabase
+          .from("modules")
+          .update({ order_index: module.order_index })
+          .eq("id", module.id);
+        
+        if (error) throw error;
+      }
+      
+      toast.success("Module order saved");
+    } catch (error: any) {
+      console.error("Error saving module order:", error);
+      toast.error("Failed to save order");
+      await fetchCourseData();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDragEndClasses = async (moduleId: number, event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over) return;
+    if (active.id === over.id) return;
+    
+    const module = modules.find(m => m.id === moduleId);
+    if (!module) return;
+    
+    const activeId = String(active.id);
+    const overId = String(over.id);
+    
+    const activeClassId = parseInt(activeId.split("-class-")[1]);
+    const overClassId = parseInt(overId.split("-class-")[1]);
+    
+    const oldIndex = module.classes.findIndex((c) => c.id === activeClassId);
+    const newIndex = module.classes.findIndex((c) => c.id === overClassId);
+    
+    if (oldIndex === -1 || newIndex === -1) return;
+    
+    const reorderedClasses = arrayMove(module.classes, oldIndex, newIndex);
+    const finalClasses = reorderedClasses.map((classItem, idx) => ({
+      ...classItem,
+      order_index: idx,
+    }));
+    
+    // Update local state
+    setModules(prevModules =>
+      prevModules.map(m =>
+        m.id === moduleId ? { ...m, classes: finalClasses } : m
+      )
+    );
+    
+    // Save to Supabase
+    setSaving(true);
+    try {
+      const supabase = getSupabaseBrowserClient();
+      
+      for (const classItem of finalClasses) {
+        const { error } = await supabase
+          .from("classes")
+          .update({ order_index: classItem.order_index })
+          .eq("id", classItem.id);
+        
+        if (error) throw error;
+      }
+      
+      toast.success("Class order saved");
+    } catch (error: any) {
+      console.error("Error saving class order:", error);
+      toast.error("Failed to save order");
+      await fetchCourseData();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDragEndLessons = async (moduleId: number, classId: number, event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over) return;
+    if (active.id === over.id) return;
+    
+    const module = modules.find(m => m.id === moduleId);
+    if (!module) return;
+    const classItem = module.classes.find(c => c.id === classId);
+    if (!classItem) return;
+    
+    const activeId = String(active.id);
+    const overId = String(over.id);
+    
+    const activeLessonId = parseInt(activeId.split("-lesson-")[1]);
+    const overLessonId = parseInt(overId.split("-lesson-")[1]);
+    
+    const oldIndex = classItem.lessons.findIndex((l) => l.id === activeLessonId);
+    const newIndex = classItem.lessons.findIndex((l) => l.id === overLessonId);
+    
+    if (oldIndex === -1 || newIndex === -1) return;
+    
+    const reorderedLessons = arrayMove(classItem.lessons, oldIndex, newIndex);
+    const finalLessons = reorderedLessons.map((lesson, idx) => ({
+      ...lesson,
+      order_index: idx,
+    }));
+    
+    // Update local state
+    setModules(prevModules =>
+      prevModules.map(m =>
+        m.id === moduleId
+          ? {
+              ...m,
+              classes: m.classes.map(c =>
+                c.id === classId ? { ...c, lessons: finalLessons } : c
+              ),
+            }
+          : m
+      )
+    );
+    
+    // Save to Supabase
+    setSaving(true);
+    try {
+      const supabase = getSupabaseBrowserClient();
+      
+      for (const lesson of finalLessons) {
+        const { error } = await supabase
+          .from("lessons")
+          .update({ order_index: lesson.order_index })
+          .eq("id", lesson.id);
+        
+        if (error) throw error;
+      }
+      
+      toast.success("Lesson order saved");
+    } catch (error: any) {
+      console.error("Error saving lesson order:", error);
+      toast.error("Failed to save order");
+      await fetchCourseData();
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -318,11 +686,23 @@ export default function CourseEditPage() {
       
       if (error) throw error;
       
-      setModules(modules.filter(m => m.id !== moduleId));
+      const filteredModules = modules.filter(m => m.id !== moduleId);
+      const reorderedModules = filteredModules.map((m, idx) => ({ ...m, order_index: idx }));
+      setModules(reorderedModules);
+      
+      // Update order_index for remaining modules in database
+      for (const module of reorderedModules) {
+        await supabase
+          .from("modules")
+          .update({ order_index: module.order_index })
+          .eq("id", module.id);
+      }
+      
       toast.success("Module deleted");
     } catch (error: any) {
       console.error("Error deleting module:", error);
       toast.error(error.message || "Failed to delete module");
+      await fetchCourseData();
     } finally {
       setSaving(false);
     }
@@ -336,8 +716,9 @@ export default function CourseEditPage() {
     setIsClassModalOpen(true);
   };
 
-  const openEditClassModal = (classItem: Class, module: Module) => {
-    setSelectedModuleForClass(module);
+  const openEditClassModal = (classItem: Class, moduleId: number) => {
+    const module = modules.find(m => m.id === moduleId);
+    setSelectedModuleForClass(module || null);
     setEditingClass(classItem);
     setClassTitle(classItem.title);
     setIsClassModalOpen(true);
@@ -417,15 +798,32 @@ export default function CourseEditPage() {
       
       if (error) throw error;
       
-      setModules(modules.map(m =>
+      const updatedModules = modules.map(m =>
         m.id === moduleId
-          ? { ...m, classes: m.classes.filter(c => c.id !== classId) }
+          ? {
+              ...m,
+              classes: m.classes.filter(c => c.id !== classId).map((c, idx) => ({ ...c, order_index: idx })),
+            }
           : m
-      ));
+      );
+      setModules(updatedModules);
+      
+      // Update order_index for remaining classes in database
+      const module = updatedModules.find(m => m.id === moduleId);
+      if (module) {
+        for (const classItem of module.classes) {
+          await supabase
+            .from("classes")
+            .update({ order_index: classItem.order_index })
+            .eq("id", classItem.id);
+        }
+      }
+      
       toast.success("Class deleted");
     } catch (error: any) {
       console.error("Error deleting class:", error);
       toast.error(error.message || "Failed to delete class");
+      await fetchCourseData();
     } finally {
       setSaving(false);
     }
@@ -446,8 +844,10 @@ export default function CourseEditPage() {
     setIsLessonModalOpen(true);
   };
 
-  const openEditLessonModal = async (lesson: Lesson, classItem: Class) => {
-    setSelectedClassForLesson(classItem);
+  const openEditLessonModal = async (lesson: Lesson, classId: number, moduleId: number) => {
+    const module = modules.find(m => m.id === moduleId);
+    const classItem = module?.classes.find(c => c.id === classId);
+    setSelectedClassForLesson(classItem || null);
     setEditingLesson(lesson);
     
     let video_url = "";
@@ -513,7 +913,6 @@ export default function CourseEditPage() {
         
         if (error) throw error;
         
-        // Update local state
         setModules(modules.map(m =>
           m.id === selectedClassForLesson.module_id
             ? {
@@ -582,24 +981,14 @@ export default function CourseEditPage() {
   };
 
   const deleteLesson = async (lessonId: number, classId: number, moduleId: number) => {
-    if (!confirm("Are you sure you want to delete this lesson? This will also delete any assignments attached to it.")) return;
+    if (!confirm("Are you sure you want to delete this lesson?")) return;
     
     setSaving(true);
     try {
       const supabase = getSupabaseBrowserClient();
       
-      // First, delete any assignments linked to this lesson
-      const { error: assignmentError } = await supabase
-        .from("assignments")
-        .delete()
-        .eq("lesson_id", lessonId);
+      await supabase.from("assignments").delete().eq("lesson_id", lessonId);
       
-      if (assignmentError) {
-        console.error("Error deleting assignment:", assignmentError);
-        // Continue anyway - try to delete the lesson
-      }
-      
-      // Then delete the lesson
       const { error: lessonError } = await supabase
         .from("lessons")
         .delete()
@@ -607,24 +996,39 @@ export default function CourseEditPage() {
       
       if (lessonError) throw lessonError;
       
-      // Update local state
-      setModules(modules.map(m =>
+      const updatedModules = modules.map(m =>
         m.id === moduleId
           ? {
               ...m,
               classes: m.classes.map(c =>
                 c.id === classId
-                  ? { ...c, lessons: c.lessons.filter(l => l.id !== lessonId) }
+                  ? { ...c, lessons: c.lessons.filter(l => l.id !== lessonId).map((l, idx) => ({ ...l, order_index: idx })) }
                   : c
               ),
             }
           : m
-      ));
-      toast.success("Lesson deleted successfully");
+      );
+      setModules(updatedModules);
       
+      // Update order_index for remaining lessons in database
+      const module = updatedModules.find(m => m.id === moduleId);
+      if (module) {
+        const classItem = module.classes.find(c => c.id === classId);
+        if (classItem) {
+          for (const lesson of classItem.lessons) {
+            await supabase
+              .from("lessons")
+              .update({ order_index: lesson.order_index })
+              .eq("id", lesson.id);
+          }
+        }
+      }
+      
+      toast.success("Lesson deleted");
     } catch (error: any) {
       console.error("Error deleting lesson:", error);
       toast.error(error.message || "Failed to delete lesson");
+      await fetchCourseData();
     } finally {
       setSaving(false);
     }
@@ -679,7 +1083,6 @@ export default function CourseEditPage() {
     try {
       const supabase = getSupabaseBrowserClient();
       
-      // Check if assignment exists
       const { data: existing } = await supabase
         .from("assignments")
         .select("id")
@@ -687,7 +1090,6 @@ export default function CourseEditPage() {
         .maybeSingle();
       
       if (existing) {
-        // Update existing assignment - NO points column
         const { error } = await supabase
           .from("assignments")
           .update({
@@ -700,7 +1102,6 @@ export default function CourseEditPage() {
         if (error) throw error;
         toast.success("Assignment updated");
       } else {
-        // Create new assignment - NO points column
         const { error } = await supabase
           .from("assignments")
           .insert({
@@ -761,7 +1162,7 @@ export default function CourseEditPage() {
           question: "",
           type: "multiple_choice",
           options: ["", "", "", ""],
-          correct_answer: "",  // This can be empty string initially
+          correct_answer: "",
         },
       ],
     });
@@ -799,6 +1200,22 @@ export default function CourseEditPage() {
     return modules.reduce((acc, m) => acc + m.classes.reduce((acc2, c) => acc2 + (c.lessons?.length || 0), 0), 0);
   };
 
+  // UI only publish/unpublish
+  const handlePublishClick = () => {
+    setShowPublishModal(true);
+  };
+
+  const handlePublishConfirm = () => {
+    setCourse({ ...course!, status: "published" });
+    setShowPublishModal(false);
+    toast.success("Course status updated to Published (UI only)");
+  };
+
+  const handleUnpublishClick = () => {
+    setCourse({ ...course!, status: "draft" });
+    toast.success("Course status updated to Draft (UI only)");
+  };
+
   if (loading) {
     return (
       <div className="container mx-auto px-4 py-8 flex justify-center items-center min-h-[400px]">
@@ -809,6 +1226,16 @@ export default function CourseEditPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
+      {/* Saving overlay */}
+      {saving && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
+          <div className="bg-gray-900 rounded-lg p-4 flex items-center gap-3">
+            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-purple-500"></div>
+            <span className="text-white">Saving changes...</span>
+          </div>
+        </div>
+      )}
+
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <div className="absolute -top-40 -right-40 w-80 h-80 bg-purple-600 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob" />
         <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-blue-600 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob animation-delay-2000" />
@@ -830,9 +1257,27 @@ export default function CourseEditPage() {
                 <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-purple-400 bg-clip-text text-transparent">
                   {course?.title}
                 </h1>
-                <Badge className="bg-yellow-600/80">Draft</Badge>
+                {course?.status === "published" ? (
+                  <Badge className="bg-green-600/80">Published</Badge>
+                ) : (
+                  <Badge className="bg-yellow-600/80">Draft</Badge>
+                )}
               </div>
               <p className="text-gray-400 mt-2">{course?.description}</p>
+            </div>
+            
+            <div className="flex gap-3">
+              {course?.status === "published" ? (
+                <GlowButton variant="outline" onClick={handleUnpublishClick}>
+                  <Archive className="w-4 h-4 mr-2" />
+                  Unpublish
+                </GlowButton>
+              ) : (
+                <GlowButton variant="primary" onClick={handlePublishClick}>
+                  <Rocket className="w-4 h-4 mr-2" />
+                  Publish Course
+                </GlowButton>
+              )}
             </div>
           </div>
         </div>
@@ -930,7 +1375,7 @@ export default function CourseEditPage() {
                       <div>
                         <h2 className="text-xl font-semibold text-white">Course Curriculum</h2>
                         <p className="text-sm text-gray-400 mt-1">
-                          Modules contain classes, which contain lessons
+                          Drag and drop modules, classes, and lessons to reorder them
                         </p>
                       </div>
                       <GlowButton onClick={openAddModuleModal}>
@@ -939,152 +1384,138 @@ export default function CourseEditPage() {
                       </GlowButton>
                     </div>
 
-                    {/* Modules List */}
-                    <div className="space-y-4">
-                      {modules.map((module, moduleIdx) => (
-                        <div key={module.id} className="border border-gray-800 rounded-lg overflow-hidden">
-                          <div className="bg-gray-800/50 p-4 flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <button
-                                onClick={() => toggleModule(module.id)}
-                                className="text-gray-400 hover:text-white"
+                    {/* Modules List with Drag and Drop */}
+                    {modules.length === 0 ? (
+                      <div className="text-center py-12 text-gray-500">
+                        <FolderOpen className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                        <p>No modules yet. Click "Add Module" to get started.</p>
+                      </div>
+                    ) : (
+                      <DndContext
+                        sensors={sensors}
+                        collisionDetection={closestCenter}
+                        onDragEnd={handleDragEndModules}
+                      >
+                        <SortableContext
+                          items={modules.map(m => m.id)}
+                          strategy={verticalListSortingStrategy}
+                        >
+                          <div className="space-y-4">
+                            {modules.map((module, moduleIdx) => (
+                              <SortableModuleItem
+                                key={module.id}
+                                module={module}
+                                index={moduleIdx}
+                                expandedModules={expandedModules}
+                                toggleModule={toggleModule}
+                                onEdit={openEditModuleModal}
+                                onDelete={deleteModule}
                               >
-                                {expandedModules.includes(module.id) ? (
-                                  <ChevronDown className="w-5 h-5" />
+                                {/* Classes within Module */}
+                                {module.classes.length === 0 ? (
+                                  <div className="text-center py-6 text-gray-500">
+                                    <p>No classes yet</p>
+                                    <GlowButton
+                                      variant="outline"
+                                      size="sm"
+                                      className="mt-3"
+                                      onClick={() => openAddClassModal(module)}
+                                    >
+                                      <Plus className="w-3 h-3 mr-1" />
+                                      Add First Class
+                                    </GlowButton>
+                                  </div>
                                 ) : (
-                                  <ChevronRight className="w-5 h-5" />
-                                )}
-                              </button>
-                              <h3 className="text-white font-medium">
-                                Module {moduleIdx + 1}: {module.title}
-                              </h3>
-                              <Badge variant="outline" className="text-xs">
-                                {module.classes.length} classes
-                              </Badge>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <button
-                                onClick={() => openEditModuleModal(module)}
-                                className="p-1 text-gray-400 hover:text-blue-400 transition-colors"
-                              >
-                                <Edit className="w-4 h-4" />
-                              </button>
-                              <button
-                                onClick={() => deleteModule(module.id)}
-                                className="p-1 text-gray-400 hover:text-red-400 transition-colors"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </div>
-
-                          {expandedModules.includes(module.id) && (
-                            <div className="p-4 space-y-3">
-                              {module.classes.length === 0 ? (
-                                <div className="text-center py-8 text-gray-500">
-                                  <p>No classes yet</p>
-                                  <GlowButton
-                                    variant="outline"
-                                    size="sm"
-                                    className="mt-3"
-                                    onClick={() => openAddClassModal(module)}
+                                  <DndContext
+                                    sensors={sensors}
+                                    collisionDetection={closestCenter}
+                                    onDragEnd={(event) => handleDragEndClasses(module.id, event)}
                                   >
-                                    <Plus className="w-3 h-3 mr-1" />
-                                    Add First Class
-                                  </GlowButton>
-                                </div>
-                              ) : (
-                                <>
-                                  {module.classes.map((classItem, classIdx) => (
-                                    <div key={classItem.id} className="border-l-2 border-purple-500/30 pl-4 ml-4">
-                                      <div className="bg-gray-800/30 rounded-lg p-3">
-                                        <div className="flex items-center justify-between mb-2">
-                                          <div className="flex items-center gap-2">
-                                            <h4 className="text-white font-medium">
-                                              Class {classIdx + 1}: {classItem.title}
-                                            </h4>
-                                            <Badge className="bg-purple-600/20 text-purple-400 text-xs">
-                                              {classItem.lessons?.length || 0} lessons
-                                            </Badge>
-                                          </div>
-                                          <div className="flex items-center gap-1">
-                                            <button
-                                              onClick={() => openEditClassModal(classItem, module)}
-                                              className="p-1 text-gray-400 hover:text-blue-400"
-                                            >
-                                              <Edit className="w-3 h-3" />
-                                            </button>
-                                            <button
-                                              onClick={() => deleteClass(classItem.id, module.id)}
-                                              className="p-1 text-gray-400 hover:text-red-400"
-                                            >
-                                              <Trash2 className="w-3 h-3" />
-                                            </button>
-                                          </div>
-                                        </div>
-                                        
-                                        {/* Lessons within Class */}
-                                        <div className="space-y-2 mt-3">
-                                          {(classItem.lessons || []).map((lesson) => (
-                                            <div key={lesson.id} className="flex items-center justify-between bg-gray-800/50 rounded p-2 group">
-                                              <div className="flex items-center gap-2">
-                                                {getContentTypeIcon(lesson.content_type)}
-                                                <span className="text-sm text-white">{lesson.title}</span>
-                                                <span className="text-xs text-gray-500 capitalize">
-                                                  {lesson.content_type}
-                                                </span>
-                                              </div>
-                                              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <button
-                                                  onClick={() => openEditLessonModal(lesson, classItem)}
-                                                  className="p-1 text-gray-400 hover:text-blue-400"
-                                                >
-                                                  <Edit className="w-3 h-3" />
-                                                </button>
-                                                <button
-                                                  onClick={() => openAssignmentModal(lesson)}
-                                                  className="p-1 text-gray-400 hover:text-green-400"
-                                                >
-                                                  <ClipboardList className="w-3 h-3" />
-                                                </button>
-                                                <button
-                                                  onClick={() => deleteLesson(lesson.id, classItem.id, module.id)}
-                                                  className="p-1 text-gray-400 hover:text-red-400"
-                                                >
-                                                  <Trash2 className="w-3 h-3" />
-                                                </button>
-                                              </div>
-                                            </div>
-                                          ))}
-                                          <GlowButton
-                                            variant="outline"
-                                            size="sm"
-                                            className="w-full"
-                                            onClick={() => openAddLessonModal(classItem)}
+                                    <SortableContext
+                                      items={module.classes.map(c => `${module.id}-class-${c.id}`)}
+                                      strategy={verticalListSortingStrategy}
+                                    >
+                                      <div className="space-y-3">
+                                        {module.classes.map((classItem, classIdx) => (
+                                          <SortableClassItem
+                                            key={`${module.id}-class-${classItem.id}`}
+                                            classItem={classItem}
+                                            index={classIdx}
+                                            moduleId={module.id}
+                                            onEdit={(c: Class) => openEditClassModal(c, module.id)}
+                                            onDelete={deleteClass}
                                           >
-                                            <Plus className="w-3 h-3 mr-1" />
-                                            Add Lesson
-                                          </GlowButton>
-                                        </div>
+                                            {/* Lessons within Class */}
+                                            <div className="space-y-2 mt-3">
+                                              {(classItem.lessons || []).length === 0 ? (
+                                                <GlowButton
+                                                  variant="outline"
+                                                  size="sm"
+                                                  className="w-full"
+                                                  onClick={() => openAddLessonModal(classItem)}
+                                                >
+                                                  <Plus className="w-3 h-3 mr-1" />
+                                                  Add First Lesson
+                                                </GlowButton>
+                                              ) : (
+                                                <DndContext
+                                                  sensors={sensors}
+                                                  collisionDetection={closestCenter}
+                                                  onDragEnd={(event) => handleDragEndLessons(module.id, classItem.id, event)}
+                                                >
+                                                  <SortableContext
+                                                    items={classItem.lessons.map(l => `${module.id}-${classItem.id}-lesson-${l.id}`)}
+                                                    strategy={verticalListSortingStrategy}
+                                                  >
+                                                    <div className="space-y-2">
+                                                      {classItem.lessons.map((lesson, lessonIdx) => (
+                                                        <SortableLessonItem
+                                                          key={`${module.id}-${classItem.id}-lesson-${lesson.id}`}
+                                                          lesson={lesson}
+                                                          index={lessonIdx}
+                                                          classId={classItem.id}
+                                                          moduleId={module.id}
+                                                          onEdit={openEditLessonModal}
+                                                          onDelete={deleteLesson}
+                                                          onAssignment={openAssignmentModal}
+                                                          getContentTypeIcon={getContentTypeIcon}
+                                                        />
+                                                      ))}
+                                                      <GlowButton
+                                                        variant="outline"
+                                                        size="sm"
+                                                        className="w-full"
+                                                        onClick={() => openAddLessonModal(classItem)}
+                                                      >
+                                                        <Plus className="w-3 h-3 mr-1" />
+                                                        Add Lesson
+                                                      </GlowButton>
+                                                    </div>
+                                                  </SortableContext>
+                                                </DndContext>
+                                              )}
+                                            </div>
+                                          </SortableClassItem>
+                                        ))}
+                                        <GlowButton
+                                          variant="outline"
+                                          size="sm"
+                                          fullWidth
+                                          onClick={() => openAddClassModal(module)}
+                                        >
+                                          <Plus className="w-3 h-3 mr-1" />
+                                          Add Class
+                                        </GlowButton>
                                       </div>
-                                    </div>
-                                  ))}
-                                  <GlowButton
-                                    variant="outline"
-                                    size="sm"
-                                    fullWidth
-                                    onClick={() => openAddClassModal(module)}
-                                  >
-                                    <Plus className="w-3 h-3 mr-1" />
-                                    Add Class
-                                  </GlowButton>
-                                </>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
+                                    </SortableContext>
+                                  </DndContext>
+                                )}
+                              </SortableModuleItem>
+                            ))}
+                          </div>
+                        </SortableContext>
+                      </DndContext>
+                    )}
                   </div>
                 )}
 
@@ -1142,6 +1573,43 @@ export default function CourseEditPage() {
           </div>
         </div>
       </div>
+
+      {/* Publish Confirmation Modal */}
+      <Dialog open={showPublishModal} onOpenChange={setShowPublishModal}>
+        <DialogContent className="bg-gray-900 border-gray-800 max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-white">Publish Course</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <div className="flex items-start gap-3 mb-4">
+              <AlertCircle className="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-gray-300">
+                  Are you sure you want to publish this course?
+                </p>
+                <p className="text-sm text-gray-500 mt-2">
+                  Once published, students will be able to see and enroll in this course.
+                  You can still unpublish it later if needed.
+                </p>
+              </div>
+            </div>
+            <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3">
+              <p className="text-sm text-yellow-400">
+                Note: This is a UI-only preview. Database updates will be implemented later.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <GlowButton variant="outline" onClick={() => setShowPublishModal(false)}>
+              Cancel
+            </GlowButton>
+            <GlowButton variant="primary" onClick={handlePublishConfirm}>
+              <Rocket className="w-4 h-4 mr-2" />
+              Publish Course
+            </GlowButton>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Add/Edit Module Modal */}
       <Dialog open={isModuleModalOpen} onOpenChange={setIsModuleModalOpen}>
@@ -1203,7 +1671,7 @@ export default function CourseEditPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Add/Edit Lesson Modal - With RichTextEditor */}
+      {/* Add/Edit Lesson Modal */}
       <Dialog open={isLessonModalOpen} onOpenChange={setIsLessonModalOpen}>
         <DialogContent className="bg-gray-900 border-gray-800 max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -1212,7 +1680,6 @@ export default function CourseEditPage() {
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-6 py-4">
-            {/* Lesson Title */}
             <div>
               <Label className="text-white mb-2 block">Lesson Title *</Label>
               <Input
@@ -1223,7 +1690,6 @@ export default function CourseEditPage() {
               />
             </div>
 
-            {/* Content Type Selection */}
             <div>
               <Label className="text-white mb-2 block">Content Type</Label>
               <Select
@@ -1246,45 +1712,39 @@ export default function CourseEditPage() {
               </Select>
             </div>
 
-            {/* Video Lesson Fields */}
             {lessonForm.content_type === "video" && (
               <>
                 <div>
                   <Label className="text-white mb-2 block">Video URL</Label>
                   <Input
-                    placeholder="https://www.youtube.com/watch?v=... or https://vimeo.com/..."
+                    placeholder="https://www.youtube.com/watch?v=..."
                     value={lessonForm.video_url}
                     onChange={(e) => setLessonForm({ ...lessonForm, video_url: e.target.value })}
                     className="bg-gray-800/50 border-gray-700 text-white"
                   />
-                  <p className="text-xs text-gray-500 mt-1">
-                    Supports YouTube, Vimeo, or direct MP4 links
-                  </p>
                 </div>
                 <div>
-                  <Label className="text-white mb-2 block">Lesson Notes (Optional)</Label>
+                  <Label className="text-white mb-2 block">Lesson Notes</Label>
                   <RichTextEditor
                     value={lessonForm.video_notes}
                     onChange={(value) => setLessonForm({ ...lessonForm, video_notes: value })}
-                    placeholder="Add supplementary notes, resources, transcript, or download links here..."
+                    placeholder="Add supplementary notes here..."
                   />
                 </div>
               </>
             )}
 
-            {/* Text Lesson Fields */}
             {lessonForm.content_type === "text" && (
               <div>
                 <Label className="text-white mb-2 block">Lesson Content</Label>
                 <RichTextEditor
                   value={lessonForm.text_content}
                   onChange={(value) => setLessonForm({ ...lessonForm, text_content: value })}
-                  placeholder="Write your lesson content here... You can add text, images, code blocks, headings, lists, and more."
+                  placeholder="Write your lesson content here..."
                 />
               </div>
             )}
 
-            {/* Quiz Lesson Fields */}
             {lessonForm.content_type === "quiz" && (
               <div>
                 <div className="flex justify-between items-center mb-4">
@@ -1430,7 +1890,7 @@ export default function CourseEditPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Assignment Modal - NO points field */}
+      {/* Assignment Modal */}
       <Dialog open={isAssignmentModalOpen} onOpenChange={setIsAssignmentModalOpen}>
         <DialogContent className="bg-gray-900 border-gray-800 max-w-2xl">
           <DialogHeader>
@@ -1451,7 +1911,7 @@ export default function CourseEditPage() {
               <RichTextEditor
                 value={assignmentForm.description}
                 onChange={(value) => setAssignmentForm({ ...assignmentForm, description: value })}
-                placeholder="Describe the assignment requirements, what students need to submit, grading criteria, etc."
+                placeholder="Describe the assignment requirements..."
               />
             </div>
             <div>
@@ -1462,9 +1922,6 @@ export default function CourseEditPage() {
                 onChange={(e) => setAssignmentForm({ ...assignmentForm, due_at: e.target.value })}
                 className="bg-gray-800/50 border-gray-700 text-white"
               />
-              <p className="text-xs text-gray-500 mt-1">
-                Leave empty for no due date
-              </p>
             </div>
           </div>
           <DialogFooter>
