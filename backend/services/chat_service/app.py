@@ -39,7 +39,22 @@ def serialize_message(message: Message) -> dict:
 def create_app():
     app = Flask(__name__)
     app.wsgi_app = ProxyFix(app.wsgi_app, x_prefix=1)
-    api = Api(app, title="Chat Service API", version="1.0", doc="/docs")
+    authorizations = {
+        "Bearer": {
+            "type": "apiKey",
+            "in": "header",
+            "name": "Authorization",
+            "description": "Enter your token as: Bearer <access_token>",
+        }
+    }
+    api = Api(
+        app,
+        title="Chat Service API",
+        version="1.0",
+        doc="/docs",
+        authorizations=authorizations,
+        security="Bearer",
+    )
     chat_ns = Namespace("chat", path="/", description="Chat service endpoints")
 
     @api.representation("application/json")

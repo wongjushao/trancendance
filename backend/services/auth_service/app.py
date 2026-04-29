@@ -41,6 +41,14 @@ def create_app():
     app.config["RESTX_MASK_SWAGGER"] = False
     app.config["SWAGGER_UI_DOC_EXPANSION"] = "list"
 
+    authorizations = {
+        "Bearer": {
+            "type": "apiKey",
+            "in": "header",
+            "name": "Authorization",
+            "description": "Enter your token as: Bearer <access_token>",
+        }
+    }
     api = Api(
         app,
         title=AUTH_API_TITLE,
@@ -49,6 +57,8 @@ def create_app():
         doc=AUTH_DOC_PATH,
         prefix="/",
         default_label="API",
+        authorizations=authorizations,
+        security="Bearer",
     )
 
     @api.representation("application/json")

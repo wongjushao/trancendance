@@ -3,7 +3,20 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime, time
 
-from sqlalchemy import Boolean, BigInteger, CheckConstraint, Date, ForeignKey, Integer, PrimaryKeyConstraint, Text, Time, UniqueConstraint, text
+from sqlalchemy import (
+    Boolean,
+    BigInteger,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    PrimaryKeyConstraint,
+    Text,
+    Time,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -63,6 +76,29 @@ class Organization(Base):
     description: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+
+
+class OrganizationVerificationRequest(Base):
+    __tablename__ = "organization_verification_requests"
+    __table_args__ = (
+        CheckConstraint(
+            "status in ('pending','verified','expired','cancelled')",
+            name="ck_org_verification_requests_status",
+        ),
+        UniqueConstraint("token_hash", name="uq_org_verification_requests_token_hash"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    org_name: Mapped[str] = mapped_column(Text, nullable=False)
+    admin_email: Mapped[str] = mapped_column(Text, nullable=False)
+    requested_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
+    token_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'pending'"))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    organization_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("public.organizations.id"))
 
 
 class OrganizationDomain(Base):
