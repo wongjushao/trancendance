@@ -27,12 +27,7 @@ const nextConfig: NextConfig = {
       },
     ]
   },
-  // Increase body parser limit for file uploads
-  api: {
-    bodyParser: {
-      sizeLimit: '10mb',
-    },
-  },
+  // Remove the 'api' block completely - it doesn't belong here
   images: {
     remotePatterns: [
       {

@@ -175,15 +175,15 @@ export default function TeacherDashboard({
   const [activeTab, setActiveTab] = useState("overview");
 
   const handleCreateCourse = () => {
-    router.push("/teacher/courses/create");
+    router.push("/courses/create");
   };
 
   const handleEditCourse = (courseId: number) => {
-    router.push(`/teacher/courses/${courseId}/edit`);
+    router.push(`/courses/${courseId}/edit`);
   };
 
   const handleGradeSubmissions = (assignmentId: number) => {
-    router.push(`/teacher/assignments/${assignmentId}/grade`);
+    router.push(`/assignments/${assignmentId}/grade`);
   };
 
   const filteredCourses = mockCourses.filter((course) =>

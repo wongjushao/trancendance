@@ -540,23 +540,38 @@ export default function SettingsPage() {
 
   const [loadingPrefs, setLoadingPrefs] = useState(true);
 
-  // ✅ CORRECTED: Fetch notification preferences (already correct, but ensure error handling)
+  // Helper to get auth token
+  const getAuthToken = async () => {
+    const supabase = getSupabaseBrowserClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token;
+  };
+
+  // Fetch notification preferences from backend
   const fetchNotificationPrefs = async () => {
-    setLoadingPrefs(true); // Set loading to true when starting
+    setLoadingPrefs(true);
     try {
       const token = await getAuthToken();
+      if (!token) {
+        console.error('No auth token available');
+        setLoadingPrefs(false);
+        return;
+      }
+      
+      console.log('Fetching notification prefs...');
+      
       const response = await fetch('/api/notification-service/notification', {
+        method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
         },
       });
       
-      if (response.ok) {
-        const data = await response.json();
-        // The backend returns the preference object directly, not wrapped in 'preferences'
-        setNotificationPrefs(data);
-      } else if (response.status === 404) {
-        // No preferences found, create defaults
+      console.log('Fetch response status:', response.status);
+      
+      if (response.status === 404) {
+        console.log('No preferences found, creating defaults');
         const defaultPrefs = {
           email_enabled: true,
           push_enabled: true,
@@ -567,21 +582,27 @@ export default function SettingsPage() {
         };
         setNotificationPrefs(defaultPrefs);
         await createDefaultNotificationPrefs(defaultPrefs);
+        return;
+      }
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      console.log('Raw response from server:', data);
+      
+      // FIX: Extract the nested preferences object
+      if (data.preferences) {
+        console.log('Setting notification prefs from preferences object:', data.preferences);
+        setNotificationPrefs(data.preferences);
       } else {
-        // Other error, set defaults
-        console.error('Failed to fetch preferences:', response.status);
-        setNotificationPrefs({
-          email_enabled: true,
-          push_enabled: true,
-          assignment_reminders: true,
-          course_updates: true,
-          message_notifications: true,
-          marketing_emails: false,
-        });
+        // Fallback for backward compatibility
+        console.log('Setting notification prefs from root object:', data);
+        setNotificationPrefs(data);
       }
     } catch (error) {
       console.error('Error fetching notification preferences:', error);
-      // Set default values on error
       setNotificationPrefs({
         email_enabled: true,
         push_enabled: true,
@@ -591,10 +612,11 @@ export default function SettingsPage() {
         marketing_emails: false,
       });
     } finally {
-      setLoadingPrefs(false); // IMPORTANT: Always set loading to false when done
+      setLoadingPrefs(false);
     }
   };
 
+  // Create default notification preferences
   const createDefaultNotificationPrefs = async (defaultPrefs: {
     email_enabled: boolean;
     push_enabled: boolean;
@@ -605,113 +627,145 @@ export default function SettingsPage() {
   }) => {
     try {
       const token = await getAuthToken();
-      // Build query params for each preference
+      if (!token) return;
+      
+      // Send each preference as a separate query parameter
       const params = new URLSearchParams();
-      params.append('email_enabled', defaultPrefs.email_enabled.toString());
-      params.append('push_enabled', defaultPrefs.push_enabled.toString());
-      params.append('assignment_reminders', defaultPrefs.assignment_reminders.toString());
-      params.append('course_updates', defaultPrefs.course_updates.toString());
-      params.append('message_notifications', defaultPrefs.message_notifications.toString());
-      params.append('marketing_emails', defaultPrefs.marketing_emails.toString());
+      params.append('email_enabled', String(defaultPrefs.email_enabled));
+      params.append('push_enabled', String(defaultPrefs.push_enabled));
+      params.append('assignment_reminders', String(defaultPrefs.assignment_reminders));
+      params.append('course_updates', String(defaultPrefs.course_updates));
+      params.append('message_notifications', String(defaultPrefs.message_notifications));
+      params.append('marketing_emails', String(defaultPrefs.marketing_emails));
       
       const response = await fetch(`/api/notification-service/notification?${params.toString()}`, {
         method: 'PATCH',
         headers: {
           'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
         },
       });
       
-      if (!response.ok) {
-        console.error('Failed to create notification preferences');
+      if (response.ok) {
+        const data = await response.json();
+        console.log('Create default response:', data);
+        // FIX: Extract nested preferences
+        if (data.preferences) {
+          setNotificationPrefs(data.preferences);
+        }
       }
     } catch (error) {
-      console.error('Error creating notification preferences:', error);
+      console.error('Error creating default preferences:', error);
     }
-    // No need to set loadingPrefs here since it's called from within fetchNotificationPrefs
   };
 
+  // Save notification preferences to backend
   const saveNotificationPrefs = async (key: keyof Exclude<typeof notificationPrefs, null>, value: boolean) => {
     if (!notificationPrefs) return;
     
-    // Optimistic update
-    const oldPrefs = { ...notificationPrefs };
-    setNotificationPrefs({ ...notificationPrefs, [key]: value });
+    console.log(`saveNotificationPrefs called: key=${key}, value=${value}`);
     
     try {
       const token = await getAuthToken();
-      const params = new URLSearchParams();
-      params.append(key, value.toString());
+      if (!token) {
+        console.error('Not authenticated - no token');
+        toast.error('Not authenticated');
+        return;
+      }
       
-      const response = await fetch(`/api/notification-service/notification?${params.toString()}`, {
+      // Build URL with query parameter
+      const params = new URLSearchParams();
+      params.append(key, String(value));
+      
+      const url = `/api/notification-service/notification?${params.toString()}`;
+      console.log('PATCH URL:', url);
+      
+      const response = await fetch(url, {
         method: 'PATCH',
         headers: {
           'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
         },
       });
       
+      console.log('PATCH response status:', response.status);
+      
       if (!response.ok) {
-        // Revert on error
-        setNotificationPrefs(oldPrefs);
-        console.error('Failed to save notification preference');
+        const errorText = await response.text();
+        console.error('Server error:', response.status, errorText);
+        throw new Error(errorText || 'Failed to update notification preferences');
       }
+      
+      const data = await response.json();
+      console.log('PATCH response data:', data);
+      
+      // FIX: Extract nested preferences from the response
+      if (data.preferences) {
+        console.log('Setting prefs from preferences object:', data.preferences);
+        setNotificationPrefs(data.preferences);
+      } else if (data.updated) {
+        // Handle the backend's response format with 'updated' field
+        console.log('Update successful, refetching to get latest state...');
+        await fetchNotificationPrefs();
+      } else {
+        // Fallback: assume update was successful and update optimistically
+        setNotificationPrefs({
+          ...notificationPrefs,
+          [key]: value,
+        });
+      }
+      
+      toast.success(`${key.replace(/_/g, ' ')} updated`);
     } catch (error) {
-      // Revert on error
-      setNotificationPrefs(oldPrefs);
-      console.error('Error saving notification preference:', error);
+      console.error('Error saving notification preferences:', error);
+      toast.error('Failed to update notification preferences');
+      await fetchNotificationPrefs();
     }
   };
 
-  // Update the toggle handler
+  // Handle toggle changes - SIMPLIFIED
   const handleNotificationChange = (key: keyof Exclude<typeof notificationPrefs, null>) => {
-    if (!notificationPrefs) return; // Don't allow toggling while loading
+    if (!notificationPrefs) return;
     
     const newValue = !notificationPrefs[key];
+    console.log(`🔄 Toggle: ${key} from ${notificationPrefs[key]} to ${newValue}`);
+    
+    // Update UI optimistically
+    setNotificationPrefs({
+      ...notificationPrefs,
+      [key]: newValue,
+    });
+    
+    // Save to backend
     saveNotificationPrefs(key, newValue);
   };
 
   const checkAuthProvider = async () => {
     try {
       const supabase = getSupabaseBrowserClient();
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { user } } = await supabase.auth.getUser();
       
-      if (!session) return;
-      
-      const response = await fetch('/api/auth-service/password-status', {
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setIsGoogleUser(data.is_google_user);
-        setHasSetPassword(data.has_password);
-      } else {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          const isGoogle = user.app_metadata?.provider === 'google' || 
-                           user.identities?.some(identity => identity.provider === 'google');
-          setIsGoogleUser(isGoogle);
-          
-          if (isGoogle) {
-            const hasEmailIdentity = user.identities?.some(identity => identity.provider === 'email');
-            setHasSetPassword(hasEmailIdentity || false);
-          } else {
-            setHasSetPassword(true);
-          }
+      if (user) {
+        // Check if user is from Google
+        const isGoogle = user.app_metadata?.provider === 'google' ||
+                        user.identities?.some(identity => identity.provider === 'google');
+        setIsGoogleUser(!!isGoogle);
+        
+        // Check if user has password set
+        const response = await fetch('/api/auth-service/password-status', {
+          headers: {
+            'Authorization': `Bearer ${await getAuthToken()}`,
+          },
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          setHasSetPassword(data.has_password);
         }
       }
     } catch (error) {
-      console.error("Error checking auth provider:", error);
+      console.error('Error checking auth provider:', error);
     }
-  };
-
-
-  // Helper to get auth token
-  const getAuthToken = async () => {
-    const supabase = getSupabaseBrowserClient();
-    const { data: { session } } = await supabase.auth.getSession();
-    return session?.access_token;
   };
 
 
@@ -1811,7 +1865,6 @@ export default function SettingsPage() {
                     <Switch
                       checked={notificationPrefs.assignment_reminders}
                       onCheckedChange={() => handleNotificationChange('assignment_reminders')}
-                      disabled={!notificationPrefs.email_enabled && !notificationPrefs.push_enabled}
                     />
                   </div>
 
@@ -1829,7 +1882,6 @@ export default function SettingsPage() {
                     <Switch
                       checked={notificationPrefs.course_updates}
                       onCheckedChange={() => handleNotificationChange('course_updates')}
-                      disabled={!notificationPrefs.email_enabled && !notificationPrefs.push_enabled}
                     />
                   </div>
 
@@ -1847,7 +1899,6 @@ export default function SettingsPage() {
                     <Switch
                       checked={notificationPrefs.message_notifications}
                       onCheckedChange={() => handleNotificationChange('message_notifications')}
-                      disabled={!notificationPrefs.email_enabled && !notificationPrefs.push_enabled}
                     />
                   </div>
 
@@ -1865,14 +1916,13 @@ export default function SettingsPage() {
                     <Switch
                       checked={notificationPrefs.marketing_emails}
                       onCheckedChange={() => handleNotificationChange('marketing_emails')}
-                      disabled={!notificationPrefs.email_enabled}
                     />
                   </div>
                 </div>
 
                 <div className="mt-6 pt-4 border-t border-gray-800">
                   <p className="text-xs text-gray-500 text-center">
-                    Notification preferences are saved locally. You can change these settings at any time.
+                    Your preferences are saved automatically when you toggle any option.
                   </p>
                 </div>
               </div>
