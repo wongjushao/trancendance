@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from email.utils import parseaddr
 
 from flask import current_app, jsonify, request
-from flask_restx import Namespace, Resource
+from flask_restx import Namespace, Resource, fields
 from sqlalchemy.exc import SQLAlchemyError
 
 from backend.common.models import Organization, OrganizationMember, OrganizationVerificationRequest
@@ -20,6 +20,29 @@ from backend.services.org_service.org_service.utils.supabase_jwt import extract_
 
 organizations_ns = Namespace("organizations", path="/", description="Organization endpoints")
 VERIFICATION_TOKEN_TTL_HOURS = 24
+
+organization_create_model = organizations_ns.model(
+    "OrganizationCreateRequest",
+    {
+        "name": fields.String(required=True, description="Organization name", example="42 Kuala Lumpur"),
+        "admin_email": fields.String(
+            required=True,
+            description="Email address of the organization admin who must verify the request",
+            example="admin@example.com",
+        ),
+    },
+)
+
+organization_verify_model = organizations_ns.model(
+    "OrganizationVerifyRequest",
+    {
+        "token": fields.String(
+            required=True,
+            description="Verification token from the organization verification email",
+            example="paste-email-token-here",
+        ),
+    },
+)
 
 
 def serialize_organization(organization: Organization) -> dict:
@@ -91,6 +114,11 @@ class OrganizationListResource(Resource):
         finally:
             session.close()
 
+    @organizations_ns.expect(organization_create_model, validate=False)
+    @organizations_ns.response(202, "Verification request created and email sent")
+    @organizations_ns.response(400, "Invalid request body")
+    @organizations_ns.response(401, "Unauthorized")
+    @organizations_ns.response(409, "Pending verification request already exists")
     def post(self):
         db_session = current_app.config.get("DB_SESSION")
         if db_session is None:
@@ -158,6 +186,13 @@ class OrganizationListResource(Resource):
 
 @organizations_ns.route("/orgs/verify")
 class OrganizationVerificationResource(Resource):
+    @organizations_ns.expect(organization_verify_model, validate=False)
+    @organizations_ns.response(200, "Organization verified and created")
+    @organizations_ns.response(400, "Invalid or expired token")
+    @organizations_ns.response(401, "Unauthorized")
+    @organizations_ns.response(403, "Bearer email does not match invited admin")
+    @organizations_ns.response(404, "Verification token not found")
+    @organizations_ns.response(409, "Verification request is not pending")
     def post(self):
         db_session = current_app.config.get("DB_SESSION")
         if db_session is None:

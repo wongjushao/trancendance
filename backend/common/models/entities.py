@@ -170,7 +170,12 @@ class UserRole(Base):
 
 class Course(Base):
     __tablename__ = "courses"
-    __table_args__ = {"schema": "public"}
+    __table_args__ = (
+        CheckConstraint("visibility in ('public','org','private')", name="ck_courses_visibility"),
+        CheckConstraint("status in ('draft','published','archived')", name="ck_courses_status"),
+        CheckConstraint("level in ('beginner','intermediate','advanced')", name="ck_courses_level"),
+        {"schema": "public"},
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     organization_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.organizations.id"), nullable=False)
@@ -181,6 +186,9 @@ class Course(Base):
     thumbnail: Mapped[str | None] = mapped_column(Text)
     level: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'intermediate'"))
     category: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'Development'"))
+    learning_objectives: Mapped[list[str]] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    prerequisites: Mapped[list[str]] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    tags: Mapped[list[str]] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
     created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
 
