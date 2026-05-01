@@ -3,13 +3,41 @@
 import { useState } from "react";
 import Link from "next/link";
 import {
-  CheckCircle2, Building2, GraduationCap, Users, ArrowRight,
-  PlayCircle, Star, Globe, ShieldCheck, Zap, BarChart3,
-  ShieldEllipsis, BookOpen, TrendingUp, Award, ChevronRight,
+  CheckCircle2,
+  Building2,
+  GraduationCap,
+  Users,
+  ArrowRight,
+  PlayCircle,
+  Star,
+  Globe,
+  ShieldCheck,
+  Zap,
+  BarChart3,
+  ShieldEllipsis,
+  BookOpen,
+  TrendingUp,
+  Award,
+  ChevronRight,
 } from "lucide-react";
 
 export default function LandingGuest() {
   const [viewMode, setViewMode] = useState<"consumer" | "organization">("consumer");
+
+  // Add this constant at the top of your file
+  const COURSE_THUMBNAILS = {
+    // Consumer courses
+    "Google Data Analytics": "https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=400&h=225&fit=crop",
+    "AI for Everyone": "https://images.unsplash.com/photo-1677442136019-21780ecad995?w=400&h=225&fit=crop",
+    "Financial Markets": "https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=400&h=225&fit=crop",
+    "Python for Everybody": "https://images.unsplash.com/photo-1526379095098-d400fd0bf935?w=400&h=225&fit=crop",
+    
+    // Organization courses
+    "Strategic Leadership": "https://images.unsplash.com/photo-1552664730-d307ca884978?w=400&h=225&fit=crop",
+    "Change Management": "https://images.unsplash.com/photo-1557804506-669a67965ba0?w=400&h=225&fit=crop",
+    "Cloud Security Architecture": "https://images.unsplash.com/photo-1558494949-ef010cbdcc31?w=400&h=225&fit=crop",
+    "Supply Chain Operations": "https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=400&h=225&fit=crop",
+  };
 
   const consumerCourses = [
     { title: "Google Data Analytics",  partner: "Google",          students: "1.2M", rating: "4.8", color: "from-blue-500" },
@@ -55,7 +83,7 @@ export default function LandingGuest() {
               Log In
             </Link>
             <Link href="/register" className="inline-flex items-center px-4 py-2 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-purple-500 to-violet-600 hover:from-purple-400 hover:to-violet-500 shadow-lg shadow-purple-500/20 transition-all hover:scale-[1.02]">
-              Sign Up Free
+              Sign Up
             </Link>
           </div>
         </div>
@@ -117,7 +145,7 @@ export default function LandingGuest() {
               {/* CTAs */}
               <div className="flex flex-col sm:flex-row gap-4">
                 <Link href="/register" className="inline-flex items-center justify-center gap-2 px-8 py-4 rounded-2xl text-base font-bold text-white bg-gradient-to-r from-purple-500 to-violet-600 hover:from-purple-400 hover:to-violet-500 shadow-xl shadow-purple-500/25 transition-all hover:scale-[1.02] group">
-                  Get Started Free <ArrowRight size={18} className="transition-transform group-hover:translate-x-1" />
+                  Get Started<ArrowRight size={18} className="transition-transform group-hover:translate-x-1" />
                 </Link>
                 <Link href="/login" className="inline-flex items-center justify-center gap-2 px-8 py-4 rounded-2xl text-base font-semibold text-[#A0A0B5] hover:text-white border border-white/10 hover:border-purple-500/40 hover:bg-purple-500/5 transition-all">
                   Log In <ChevronRight size={16} />
@@ -170,14 +198,14 @@ export default function LandingGuest() {
                 </div>
                 <div className="space-y-3">
                   <Link href="/register" className="flex w-full items-center justify-center gap-2 py-3.5 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-purple-500 to-violet-600 hover:from-purple-400 hover:to-violet-500 shadow-lg shadow-purple-500/20 transition-all hover:scale-[1.02] group">
-                    Create Free Account <ArrowRight size={16} className="transition-transform group-hover:translate-x-1" />
+                    Create Account <ArrowRight size={16} className="transition-transform group-hover:translate-x-1" />
                   </Link>
                   <Link href="/login" className="flex w-full items-center justify-center gap-2 py-3.5 rounded-xl text-sm font-semibold text-[#A0A0B5] border border-white/10 hover:border-purple-500/40 hover:bg-purple-500/5 hover:text-white transition-all">
                     Already have an account? Log In
                   </Link>
                 </div>
                 <p className="text-center text-[10px] text-[#6B6B80] mt-5 uppercase tracking-widest font-bold">
-                  🔒 Secure &amp; Free to start
+                  🔒 Secure
                 </p>
               </div>
             </div>
@@ -327,7 +355,7 @@ export default function LandingGuest() {
               <p className="text-[#A0A0B5] mb-8 max-w-xl mx-auto text-lg">Join over 15 million learners. Access thousands of courses and start earning certificates today.</p>
               <div className="flex flex-col sm:flex-row gap-4 justify-center">
                 <Link href="/register" className="inline-flex items-center justify-center gap-2 px-10 py-4 rounded-2xl text-base font-bold text-white bg-gradient-to-r from-purple-500 to-violet-600 hover:from-purple-400 hover:to-violet-500 shadow-xl shadow-purple-500/30 transition-all hover:scale-[1.02] group">
-                  Create Free Account <ArrowRight size={18} className="transition-transform group-hover:translate-x-1" />
+                  Create Account <ArrowRight size={18} className="transition-transform group-hover:translate-x-1" />
                 </Link>
                 <Link href="/login" className="inline-flex items-center justify-center gap-2 px-10 py-4 rounded-2xl text-base font-semibold text-[#A0A0B5] hover:text-white border border-white/10 hover:border-purple-500/40 hover:bg-purple-500/5 transition-all">
                   Log In

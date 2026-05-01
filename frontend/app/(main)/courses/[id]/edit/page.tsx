@@ -23,6 +23,9 @@ import {
   Layers,
   Rocket,
   Archive,
+  Upload,
+  Loader2,
+  X,
 } from "lucide-react";
 import { GlowCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
@@ -314,6 +317,10 @@ export default function CourseEditPage() {
   const [saving, setSaving] = useState(false);
   const [showPublishModal, setShowPublishModal] = useState(false);
   
+  // Video upload states
+  const [uploadingVideo, setUploadingVideo] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  
   // Modal states
   const [isModuleModalOpen, setIsModuleModalOpen] = useState(false);
   const [isClassModalOpen, setIsClassModalOpen] = useState(false);
@@ -361,6 +368,93 @@ export default function CourseEditPage() {
       coordinateGetter: sortableKeyboardCoordinates,
     })
   );
+
+  // Video upload handler
+  const handleVideoUpload = async (file: File) => {
+    if (!file.type.startsWith("video/")) {
+      toast.error("Please upload a video file");
+      return;
+    }
+
+    const maxSize = 500 * 1024 * 1024; // 500MB
+    if (file.size > maxSize) {
+      toast.error("Video size must be less than 500MB");
+      return;
+    }
+
+    setUploadingVideo(true);
+    setUploadProgress(0);
+
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        toast.error("You must be logged in to upload videos");
+        setUploadingVideo(false);
+        return;
+      }
+
+      // Create a simpler file path - just user_id/course_id/timestamp_random.mp4
+      const fileExt = file.name.split(".").pop();
+      const timestamp = Date.now();
+      const randomStr = Math.random().toString(36).substring(2, 8);
+      const fileName = `${user.id}/${courseId}/${timestamp}_${randomStr}.${fileExt}`;
+      
+      console.log("Uploading to path:", fileName);
+
+      // Upload to storage
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from("course-videos")
+        .upload(fileName, file, {
+          cacheControl: "3600",
+          upsert: false,
+        });
+
+      if (uploadError) {
+        console.error("Upload error details:", uploadError);
+        throw uploadError;
+      }
+
+      // Simulate progress (Supabase doesn't provide progress callbacks)
+      let progress = 0;
+      const interval = setInterval(() => {
+        progress = Math.min(progress + 10, 90);
+        setUploadProgress(progress);
+      }, 200);
+
+      // Wait a bit to simulate completion
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      clearInterval(interval);
+      setUploadProgress(100);
+
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from("course-videos")
+        .getPublicUrl(fileName);
+
+      console.log("Video uploaded successfully. URL:", publicUrl);
+      
+      setLessonForm({ ...lessonForm, video_url: publicUrl });
+      toast.success("Video uploaded successfully!");
+      
+    } catch (error: any) {
+      console.error("Error uploading video:", error);
+      
+      // Provide more specific error messages
+      if (error.message?.includes("row-level security")) {
+        toast.error("Permission denied. Please check storage policies in Supabase.");
+      } else if (error.message?.includes("bucket not found")) {
+        toast.error("Storage bucket not found. Please create 'course-videos' bucket.");
+      } else {
+        toast.error(error.message || "Failed to upload video");
+      }
+    } finally {
+      setUploadingVideo(false);
+      setTimeout(() => setUploadProgress(0), 1000);
+    }
+  };
 
   // Load course data
   useEffect(() => {
@@ -463,10 +557,8 @@ export default function CourseEditPage() {
       order_index: idx,
     }));
     
-    // Update local state immediately for UI feedback
     setModules(finalModules);
     
-    // Save to Supabase
     setSaving(true);
     try {
       const supabase = getSupabaseBrowserClient();
@@ -515,14 +607,12 @@ export default function CourseEditPage() {
       order_index: idx,
     }));
     
-    // Update local state
     setModules(prevModules =>
       prevModules.map(m =>
         m.id === moduleId ? { ...m, classes: finalClasses } : m
       )
     );
     
-    // Save to Supabase
     setSaving(true);
     try {
       const supabase = getSupabaseBrowserClient();
@@ -573,7 +663,6 @@ export default function CourseEditPage() {
       order_index: idx,
     }));
     
-    // Update local state
     setModules(prevModules =>
       prevModules.map(m =>
         m.id === moduleId
@@ -587,7 +676,6 @@ export default function CourseEditPage() {
       )
     );
     
-    // Save to Supabase
     setSaving(true);
     try {
       const supabase = getSupabaseBrowserClient();
@@ -690,7 +778,6 @@ export default function CourseEditPage() {
       const reorderedModules = filteredModules.map((m, idx) => ({ ...m, order_index: idx }));
       setModules(reorderedModules);
       
-      // Update order_index for remaining modules in database
       for (const module of reorderedModules) {
         await supabase
           .from("modules")
@@ -808,7 +895,6 @@ export default function CourseEditPage() {
       );
       setModules(updatedModules);
       
-      // Update order_index for remaining classes in database
       const module = updatedModules.find(m => m.id === moduleId);
       if (module) {
         for (const classItem of module.classes) {
@@ -1010,7 +1096,6 @@ export default function CourseEditPage() {
       );
       setModules(updatedModules);
       
-      // Update order_index for remaining lessons in database
       const module = updatedModules.find(m => m.id === moduleId);
       if (module) {
         const classItem = module.classes.find(c => c.id === classId);
@@ -1671,7 +1756,7 @@ export default function CourseEditPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Add/Edit Lesson Modal */}
+      {/* Add/Edit Lesson Modal with Video Upload */}
       <Dialog open={isLessonModalOpen} onOpenChange={setIsLessonModalOpen}>
         <DialogContent className="bg-gray-900 border-gray-800 max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -1680,6 +1765,7 @@ export default function CourseEditPage() {
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-6 py-4">
+            {/* Lesson Title */}
             <div>
               <Label className="text-white mb-2 block">Lesson Title *</Label>
               <Input
@@ -1690,6 +1776,7 @@ export default function CourseEditPage() {
               />
             </div>
 
+            {/* Content Type Selection */}
             <div>
               <Label className="text-white mb-2 block">Content Type</Label>
               <Select
@@ -1712,39 +1799,133 @@ export default function CourseEditPage() {
               </Select>
             </div>
 
+            {/* Video Lesson Fields with Upload */}
             {lessonForm.content_type === "video" && (
               <>
                 <div>
-                  <Label className="text-white mb-2 block">Video URL</Label>
+                  <Label className="text-white mb-2 block">Video Upload or URL</Label>
+                  
+                  {/* Upload Area */}
+                  <div className="mb-3">
+                    <label className="block w-full cursor-pointer">
+                      <div className={`flex items-center justify-center w-full p-6 border-2 border-dashed rounded-lg transition-colors
+                        ${uploadingVideo ? 'border-purple-500 bg-purple-500/10' : 'border-gray-700 hover:border-purple-500 bg-gray-800/30'}`}
+                      >
+                        {uploadingVideo ? (
+                          <div className="text-center">
+                            <Loader2 className="w-10 h-10 text-purple-400 animate-spin mx-auto mb-3" />
+                            <p className="text-sm text-gray-400">Uploading video...</p>
+                            <div className="w-64 h-2 bg-gray-700 rounded-full mt-3">
+                              <div 
+                                className="h-2 bg-purple-500 rounded-full transition-all duration-300"
+                                style={{ width: `${uploadProgress}%` }}
+                              />
+                            </div>
+                            <p className="text-xs text-gray-500 mt-2">{uploadProgress}%</p>
+                          </div>
+                        ) : (
+                          <div className="text-center">
+                            <Upload className="w-10 h-10 text-gray-400 mx-auto mb-2" />
+                            <p className="text-sm text-gray-400">Click to upload video file</p>
+                            <p className="text-xs text-gray-500 mt-1">MP4, MOV, AVI, WebM up to 500MB</p>
+                          </div>
+                        )}
+                        <input
+                          type="file"
+                          className="hidden"
+                          accept="video/*"
+                          onChange={(e) => {
+                            if (e.target.files?.[0]) {
+                              handleVideoUpload(e.target.files[0]);
+                            }
+                          }}
+                          disabled={uploadingVideo}
+                        />
+                      </div>
+                    </label>
+                  </div>
+
+                  {/* OR Divider */}
+                  <div className="relative my-4">
+                    <div className="absolute inset-0 flex items-center">
+                      <div className="w-full border-t border-gray-700"></div>
+                    </div>
+                    <div className="relative flex justify-center text-xs">
+                      <span className="px-3 bg-gray-900 text-gray-500">OR paste video URL</span>
+                    </div>
+                  </div>
+
+                  {/* URL Input */}
                   <Input
-                    placeholder="https://www.youtube.com/watch?v=..."
+                    placeholder="https://www.youtube.com/watch?v=... or https://vimeo.com/..."
                     value={lessonForm.video_url}
                     onChange={(e) => setLessonForm({ ...lessonForm, video_url: e.target.value })}
                     className="bg-gray-800/50 border-gray-700 text-white"
                   />
+                  {lessonForm.video_url && (
+                    <div className="mt-2 flex items-center gap-2">
+                      <div className="text-xs text-green-400 flex items-center gap-1">
+                        <div className="w-2 h-2 bg-green-400 rounded-full" />
+                        Video URL set
+                      </div>
+                      {lessonForm.video_url.includes("youtube.com") && (
+                        <span className="text-xs text-gray-500">YouTube video</span>
+                      )}
+                      {lessonForm.video_url.includes("vimeo.com") && (
+                        <span className="text-xs text-gray-500">Vimeo video</span>
+                      )}
+                      {!lessonForm.video_url.includes("youtube.com") && 
+                       !lessonForm.video_url.includes("vimeo.com") && 
+                       lessonForm.video_url && (
+                        <span className="text-xs text-gray-500">Direct video link</span>
+                      )}
+                    </div>
+                  )}
                 </div>
+                
+                {/* Video Preview (if URL provided) */}
+                {lessonForm.video_url && !uploadingVideo && (
+                  <div className="mt-2 p-3 bg-gray-800/30 rounded-lg">
+                    <p className="text-xs text-gray-400 mb-2">Preview:</p>
+                    <div className="aspect-video bg-black rounded-lg flex items-center justify-center">
+                      {lessonForm.video_url.includes("youtube.com") ? (
+                        <img 
+                          src={`https://img.youtube.com/vi/${lessonForm.video_url.split("v=")[1]?.split("&")[0]}/hqdefault.jpg`}
+                          alt="Video thumbnail"
+                          className="w-full h-full object-cover rounded-lg"
+                        />
+                      ) : (
+                        <Video className="w-8 h-8 text-gray-500" />
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Lesson Notes */}
                 <div>
-                  <Label className="text-white mb-2 block">Lesson Notes</Label>
+                  <Label className="text-white mb-2 block">Lesson Notes (Optional)</Label>
                   <RichTextEditor
                     value={lessonForm.video_notes}
                     onChange={(value) => setLessonForm({ ...lessonForm, video_notes: value })}
-                    placeholder="Add supplementary notes here..."
+                    placeholder="Add supplementary notes, resources, transcript, or download links here..."
                   />
                 </div>
               </>
             )}
 
+            {/* Text Lesson Fields */}
             {lessonForm.content_type === "text" && (
               <div>
                 <Label className="text-white mb-2 block">Lesson Content</Label>
                 <RichTextEditor
                   value={lessonForm.text_content}
                   onChange={(value) => setLessonForm({ ...lessonForm, text_content: value })}
-                  placeholder="Write your lesson content here..."
+                  placeholder="Write your lesson content here... You can add text, images, code blocks, headings, lists, and more."
                 />
               </div>
             )}
 
+            {/* Quiz Lesson Fields */}
             {lessonForm.content_type === "quiz" && (
               <div>
                 <div className="flex justify-between items-center mb-4">
@@ -1911,7 +2092,7 @@ export default function CourseEditPage() {
               <RichTextEditor
                 value={assignmentForm.description}
                 onChange={(value) => setAssignmentForm({ ...assignmentForm, description: value })}
-                placeholder="Describe the assignment requirements..."
+                placeholder="Describe the assignment requirements, what students need to submit, grading criteria, etc."
               />
             </div>
             <div>
@@ -1922,6 +2103,9 @@ export default function CourseEditPage() {
                 onChange={(e) => setAssignmentForm({ ...assignmentForm, due_at: e.target.value })}
                 className="bg-gray-800/50 border-gray-700 text-white"
               />
+              <p className="text-xs text-gray-500 mt-1">
+                Leave empty for no due date
+              </p>
             </div>
           </div>
           <DialogFooter>
