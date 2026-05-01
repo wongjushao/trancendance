@@ -22,7 +22,7 @@ function resolveSocketUrl(): string {
   return 'http://localhost:5002';
 }
 
-const SOCKET_PATH = '/socket.io';
+const SOCKET_PATH = '/api/chat-service/socket.io';
 
 export const useSocket = (token?: string) => {
   const socketRef = useRef<Socket | null>(null);

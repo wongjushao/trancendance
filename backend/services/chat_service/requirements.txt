@@ -1,5 +1,7 @@
 flask-restx
 Flask-Cors
+Flask-SocketIO
+eventlet
 psycopg2-binary
 SQLAlchemy
 pydantic

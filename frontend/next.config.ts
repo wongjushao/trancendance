@@ -12,6 +12,10 @@ const nextConfig: NextConfig = {
         destination: 'https://chat-service:5002/:path*',
       },
       {
+        source: '/api/chat-service/:path*',
+        destination: 'https://chat-service:5002/:path*',
+      },
+      {
         source: '/api/org/:path*',
         destination: 'https://org-service:5003/:path*',
       },
