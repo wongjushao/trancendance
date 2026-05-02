@@ -279,6 +279,7 @@ export default function EditCoursePage() {
   const [expandedClasses, setExpandedClasses] = useState<Set<number>>(new Set());
   const [organizations, setOrganizations] = useState<any[]>([]);
   const [selectedOrgId, setSelectedOrgId] = useState<number | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   
   // Modal states
   const [moduleModalOpen, setModuleModalOpen] = useState(false);
@@ -326,7 +327,7 @@ export default function EditCoursePage() {
   const [offeringForm, setOfferingForm] = useState({
     name: "",
     description: "",
-    instructor_id: "",
+    instructor_id: null,
     start_date: "",
     end_date: "",
     max_students: 30,
@@ -436,6 +437,21 @@ export default function EditCoursePage() {
     };
     
     fetchOrganizations();
+  }, []);
+
+  // Get current user ID
+  useEffect(() => {
+    const getCurrentUser = async () => {
+      const supabase = getSupabaseBrowserClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        console.log("Current user ID:", user.id);
+        setCurrentUserId(user.id);
+      } else {
+        console.error("No user found!");
+      }
+    };
+    getCurrentUser();
   }, []);
   
   // Load course data
@@ -1191,7 +1207,7 @@ export default function EditCoursePage() {
     setOfferingForm({
       name: "",
       description: "",
-      instructor_id: "",
+      instructor_id: null,
       start_date: "",
       end_date: "",
       max_students: 30,
@@ -1205,7 +1221,7 @@ export default function EditCoursePage() {
     setOfferingForm({
       name: offering.name,
       description: offering.description || "",
-      instructor_id: offering.instructor_id || "",
+      instructor_id: offering.instructor_id || null,
       start_date: offering.start_date || "",
       end_date: offering.end_date || "",
       max_students: offering.max_students || 30,
@@ -1215,22 +1231,56 @@ export default function EditCoursePage() {
   };
   
   const saveOffering = async () => {
+    // Validate name
     if (!offeringForm.name.trim()) {
       toast.error("Please enter an offering name");
       return;
     }
     
+    // Validate current user
+    if (!currentUserId) {
+      toast.error("Unable to identify current user. Please refresh and try again.");
+      return;
+    }
+    
     try {
+      const offeringData = {
+        name: offeringForm.name.trim(),
+        description: offeringForm.description?.trim() || null,
+        instructor_id: currentUserId,  // Auto-set from logged-in user
+        start_date: offeringForm.start_date || null,
+        end_date: offeringForm.end_date || null,
+        max_students: offeringForm.max_students || null,
+        status: offeringForm.status,
+      };
+      
+      console.log("offeringData being sent:", offeringData);
+      
       if (editingOffering) {
-        await updateCourseClass(editingOffering.id, offeringForm);
+        await updateCourseClass(editingOffering.id, offeringData);
+        toast.success("Offering updated successfully");
       } else {
-        await addCourseClass(courseId, offeringForm);
+        await addCourseClass(courseId, offeringData);
+        toast.success("Offering added successfully");
       }
+      
       await loadCourse();
-      toast.success(editingOffering ? "Offering updated" : "Offering added");
       setOfferingModalOpen(false);
-    } catch (error) {
-      toast.error("Failed to save offering");
+      
+      // Reset form
+      setOfferingForm({
+        name: "",
+        description: "",
+        instructor_id: null,
+        start_date: "",
+        end_date: "",
+        max_students: 30,
+        status: "upcoming",
+      });
+      
+    } catch (error: any) {
+      console.error("Error saving offering:", error);
+      toast.error(`Failed to save offering: ${error.message || "Please try again"}`);
     }
   };
   

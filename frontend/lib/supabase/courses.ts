@@ -224,9 +224,13 @@ export async function getCourseWithDetails(courseId: number): Promise<CourseWith
         .select("*")
         .eq("related_course_id", courseId)
         .eq("type", "course")
-        .single();
-      
-      if (chatRoomError && chatRoomError.code !== "PGRST116") throw chatRoomError;
+        .maybeSingle();  // Changed from .single() to .maybeSingle()
+
+      // Don't throw error - .maybeSingle() returns null if not found
+      if (chatRoomError) {
+        console.error("Error fetching chat room:", chatRoomError);
+        // Don't throw - just continue without chat room
+      }
       
       return {
         ...courseClass,
@@ -498,32 +502,70 @@ export async function deleteAssignment(assignmentId: number): Promise<void> {
 // Course Class (offering) operations
 export async function addCourseClass(courseId: number, classData: {
   name: string;
-  description?: string;
-  instructor_id?: string;
-  start_date?: string;
-  end_date?: string;
-  max_students?: number;
+  description?: string | null;
+  instructor_id?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  max_students?: number | null;
   status?: "upcoming" | "ongoing" | "completed" | "cancelled";
 }): Promise<CourseClass> {
   const supabase = getSupabaseBrowserClient();
   
+  // CRITICAL: Ensure instructor_id is either a valid UUID string or null
+  let instructorId = classData.instructor_id;
+  
+  // If it's an empty string or invalid, convert to null
+  if (!instructorId || instructorId === "" || instructorId === "null" || instructorId === "undefined") {
+    instructorId = null;
+  }
+  
+  // Validate UUID format (must be 36 characters with hyphens)
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (instructorId && !uuidRegex.test(instructorId)) {
+    console.error("Invalid UUID format for instructor_id:", instructorId);
+    instructorId = null;
+  }
+  
+  // If we have an instructor_id, verify it exists in profiles
+  if (instructorId) {
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("id", instructorId)
+      .maybeSingle();
+    
+    if (profileError || !profile) {
+      console.error("Instructor profile not found for ID:", instructorId);
+      instructorId = null;
+    }
+  }
+  
+  const insertData = {
+    course_id: courseId,
+    name: classData.name,
+    description: classData.description || null,
+    instructor_id: instructorId,
+    start_date: classData.start_date || null,
+    end_date: classData.end_date || null,
+    max_students: classData.max_students || null,
+    status: classData.status || "upcoming",
+    is_published: false,
+  };
+  
+  console.log("Final insert data for course_classes:", insertData);
+  
   const { data, error } = await supabase
     .from("course_classes")
-    .insert({
-      course_id: courseId,
-      name: classData.name,
-      description: classData.description,
-      instructor_id: classData.instructor_id,
-      start_date: classData.start_date,
-      end_date: classData.end_date,
-      max_students: classData.max_students,
-      status: classData.status || "upcoming",
-      is_published: true
-    })
+    .insert(insertData)
     .select()
     .single();
   
-  if (error) throw error;
+  if (error) {
+    console.error("Supabase error in addCourseClass:", error);
+    console.error("Failed insert data:", insertData);
+    throw error;
+  }
+  
   return data;
 }
 
@@ -652,14 +694,33 @@ export async function unpublishCourse(courseId: number): Promise<void> {
 export async function updateCourseClass(courseClassId: number, updates: Partial<CourseClass>): Promise<CourseClass> {
   const supabase = getSupabaseBrowserClient();
   
+  // Clean the updates - ensure instructor_id is proper UUID or null
+  const cleanedUpdates: any = { ...updates };
+  
+  if (cleanedUpdates.instructor_id === "" || 
+      cleanedUpdates.instructor_id === "null" || 
+      cleanedUpdates.instructor_id === "undefined") {
+    cleanedUpdates.instructor_id = null;
+  }
+  
+  // Validate UUID format if present
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (cleanedUpdates.instructor_id && !uuidRegex.test(cleanedUpdates.instructor_id)) {
+    console.error("Invalid UUID format for instructor_id in update:", cleanedUpdates.instructor_id);
+    cleanedUpdates.instructor_id = null;
+  }
+  
   const { data, error } = await supabase
     .from("course_classes")
-    .update(updates)
+    .update(cleanedUpdates)
     .eq("id", courseClassId)
     .select()
     .single();
   
-  if (error) throw error;
+  if (error) {
+    console.error("Update error details:", error);
+    throw error;
+  }
   return data;
 }
 
