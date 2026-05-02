@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useRole } from "@/components/providers/RoleProvider";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
+import { toast } from "sonner";
 
 // Types based on existing schema
 interface Course {
@@ -226,8 +227,37 @@ export default function CoursesPage() {
   const filteredEnrolledCourses = filterCourses(enrolledCourses);
   const filteredCreatedCourses = filterCourses(createdCourses);
 
-  const handleCreateCourse = () => {
-    router.push("/courses/create");
+  const handleCreateCourse = async () => {
+    // Pre-check if user has organization before navigating
+    const supabase = getSupabaseBrowserClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    
+    if (!user) {
+      router.push('/login');
+      return;
+    }
+    
+    // Remove the toast.loading - just do the check silently
+    try {
+      // Quick check for organization membership
+      const { data: memberships, error } = await supabase
+        .from('organization_members')
+        .select('organization_id')
+        .eq('user_id', user.id)
+        .in('member_role', ['admin', 'sub_admin', 'teacher'])
+        .limit(1);
+      
+      if (memberships && memberships.length > 0) {
+        // Has organization, navigate to create page
+        router.push('/courses/create');
+      } else {
+        // No organization, redirect to organization request page
+        router.push('/organizations/propose');
+      }
+    } catch (error) {
+      console.error("Error checking organization:", error);
+      router.push('/organizations/propose');
+    }
   };
 
   const handleContinueLearning = (courseId: number) => {

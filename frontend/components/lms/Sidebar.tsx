@@ -10,7 +10,8 @@ import {
   FileText,
   BarChart3,
   Menu,
-  Shield
+  Shield,
+  MessageSquare
 } from "lucide-react";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 import { useAvatar } from "@/lib/useAvatar";
@@ -139,6 +140,7 @@ export function Sidebar({ user }: SidebarProps) {
       { href: "/organizations", label: "Organizations", icon: Building2 },  // Moved up
       { href: "/courses", label: "Courses", icon: BookOpen },               // Moved down
       //{ href: "/assignments", label: "Assignments", icon: FileText },
+      {href: "/chat/rooms", label: "Chat", icon: MessageSquare },
       { href: "/analytics", label: "Analytics", icon: BarChart3 },
     ];
 

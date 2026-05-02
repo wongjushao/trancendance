@@ -25,6 +25,8 @@ import {
 import { GlowCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useRole } from "@/components/providers/RoleProvider";
@@ -64,12 +66,13 @@ interface TeacherAssignment extends Assignment {
 
 interface Submission {
   id: number;
+  assignment_id: number;
   student_id: string;
   student_name: string;
   student_email: string;
   submitted_at: string;
-  content?: string;
-  attachments?: { name: string; url: string }[];
+  content_url?: string;
+  text_content?: string;
   grade?: number;
   feedback?: string;
   status: "submitted" | "graded";
@@ -78,6 +81,8 @@ interface Submission {
 export default function AssignmentsPage() {
   const router = useRouter();
   const { roleData } = useRole();
+  const supabase = getSupabaseBrowserClient();
+  
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [teacherAssignments, setTeacherAssignments] = useState<TeacherAssignment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -91,9 +96,9 @@ export default function AssignmentsPage() {
   const [selectedSubmission, setSelectedSubmission] = useState<Submission | null>(null);
   const [grade, setGrade] = useState<number>(0);
   const [feedback, setFeedback] = useState("");
+  const [submittingGrade, setSubmittingGrade] = useState(false);
 
   const isTeacher = roleData.role === "teacher" || roleData.role === "org_admin";
-  const isAdmin = roleData.role === "org_admin";
 
   useEffect(() => {
     if (isTeacher) {
@@ -104,190 +109,295 @@ export default function AssignmentsPage() {
   }, []);
 
   const fetchStudentAssignments = async () => {
-    // Mock data for students
-    await new Promise(resolve => setTimeout(resolve, 800));
+    setLoading(true);
     
-    const mockAssignments: Assignment[] = [
-      {
-        id: 1,
-        title: "Introduction to React Hooks",
-        description: "Complete the exercises to demonstrate understanding of React Hooks",
-        course_id: 1,
-        course_title: "Advanced React Development",
-        lesson_id: 1,
-        lesson_title: "Understanding React Hooks",
-        due_date: "2026-05-15T23:59:59",
-        points: 100,
-        status: "pending",
-      },
-      {
-        id: 2,
-        title: "State Management with useState",
-        description: "Implement a counter app using useState hook",
-        course_id: 1,
-        course_title: "Advanced React Development",
-        lesson_id: 2,
-        lesson_title: "useState in Depth",
-        due_date: "2026-05-10T23:59:59",
-        points: 50,
-        status: "submitted",
-        submitted_at: "2026-05-09T15:30:00",
-      },
-      {
-        id: 3,
-        title: "Database Design Project",
-        description: "Design a database schema for an e-commerce platform",
-        course_id: 2,
-        course_title: "Database Fundamentals",
-        lesson_id: 5,
-        lesson_title: "Database Design Principles",
-        due_date: "2026-05-05T23:59:59",
-        points: 150,
-        status: "graded",
-        grade: 85,
-        feedback: "Good work! Could improve on indexing strategy.",
-        submitted_at: "2026-05-03T10:15:00",
-      },
-      {
-        id: 4,
-        title: "API Testing with Jest",
-        description: "Write unit tests for REST API endpoints",
-        course_id: 3,
-        course_title: "Backend Development",
-        lesson_id: 8,
-        lesson_title: "Testing Strategies",
-        due_date: "2026-04-30T23:59:59",
-        points: 75,
-        status: "overdue",
-      },
-    ];
-    
-    setAssignments(mockAssignments);
-    
-    const uniqueCourses = Array.from(
-      new Map(mockAssignments.map(a => [a.course_id, { id: a.course_id, title: a.course_title }])).values()
-    );
-    setCourses(uniqueCourses);
-    setLoading(false);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+
+    try {
+      // Get all class members for the user (enrolled courses via offerings)
+      const { data: classMembers } = await supabase
+        .from("class_members")
+        .select(`
+          id,
+          course_class_id,
+          course_classes:course_classes (
+            id,
+            course_id,
+            courses:course_id (
+              id,
+              title
+            )
+          )
+        `)
+        .eq("user_id", user.id);
+
+      if (!classMembers || classMembers.length === 0) {
+        setAssignments([]);
+        setLoading(false);
+        return;
+      }
+
+      // Get all assignments for the courses user is enrolled in
+      const courseIds = [...new Set(
+        classMembers
+          .map(cm => cm.course_classes?.courses?.id)
+          .filter(id => id != null)
+      )];
+
+      if (courseIds.length === 0) {
+        setAssignments([]);
+        setLoading(false);
+        return;
+      }
+
+      const { data: assignmentsData, error: assignmentsError } = await supabase
+        .from("assignments")
+        .select(`
+          *,
+          lesson:lesson_id (
+            id,
+            title,
+            class:class_id (
+              id,
+              title,
+              module:module_id (
+                id,
+                title,
+                course:course_id (
+                  id,
+                  title
+                )
+              )
+            )
+          )
+        `)
+        .in("course_id", courseIds);
+
+      if (assignmentsError) throw assignmentsError;
+
+      // Get submissions for these assignments
+      const assignmentIds = assignmentsData?.map(a => a.id) || [];
+      const { data: submissionsData } = await supabase
+        .from("submissions")
+        .select("*")
+        .in("assignment_id", assignmentIds)
+        .eq("user_id", user.id);
+
+      const submissionMap = new Map();
+      submissionsData?.forEach(sub => {
+        submissionMap.set(sub.assignment_id, sub);
+      });
+
+      // Format assignments with status
+      const formattedAssignments: Assignment[] = (assignmentsData || []).map(assignment => {
+        const submission = submissionMap.get(assignment.id);
+        const dueDate = new Date(assignment.due_at);
+        const now = new Date();
+        let status: Assignment["status"] = "pending";
+
+        if (submission) {
+          if (submission.grade !== null) {
+            status = "graded";
+          } else {
+            status = "submitted";
+          }
+        } else if (dueDate < now) {
+          status = "overdue";
+        }
+
+        return {
+          id: assignment.id,
+          title: assignment.title,
+          description: assignment.description || "",
+          course_id: assignment.lesson?.class?.module?.course?.id || assignment.course_id,
+          course_title: assignment.lesson?.class?.module?.course?.title || "Unknown Course",
+          lesson_id: assignment.lesson_id || 0,
+          lesson_title: assignment.lesson?.title || "Unknown Lesson",
+          due_date: assignment.due_at,
+          points: assignment.points,
+          status,
+          submitted_at: submission?.submitted_at,
+          grade: submission?.grade,
+          feedback: submission?.feedback,
+        };
+      });
+
+      setAssignments(formattedAssignments);
+
+      // Get unique courses for filter
+      const uniqueCourses = Array.from(
+        new Map(formattedAssignments.map(a => [a.course_id, { id: a.course_id, title: a.course_title }])).values()
+      );
+      setCourses(uniqueCourses);
+
+    } catch (error) {
+      console.error("Error fetching assignments:", error);
+      toast.error("Failed to load assignments");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const fetchTeacherAssignments = async () => {
-    // Mock data for teachers
-    await new Promise(resolve => setTimeout(resolve, 800));
+    setLoading(true);
     
-    const mockAssignments: TeacherAssignment[] = [
-      {
-        id: 1,
-        title: "Introduction to React Hooks",
-        description: "Complete the exercises to demonstrate understanding of React Hooks",
-        course_id: 1,
-        course_title: "Advanced React Development",
-        lesson_id: 1,
-        lesson_title: "Understanding React Hooks",
-        due_date: "2026-05-15T23:59:59",
-        points: 100,
-        status: "pending",
-        total_submissions: 15,
-        graded_count: 8,
-        pending_count: 7,
-        average_grade: 78.5,
-      },
-      {
-        id: 2,
-        title: "State Management with useState",
-        description: "Implement a counter app using useState hook",
-        course_id: 1,
-        course_title: "Advanced React Development",
-        lesson_id: 2,
-        lesson_title: "useState in Depth",
-        due_date: "2026-05-10T23:59:59",
-        points: 50,
-        status: "pending",
-        total_submissions: 12,
-        graded_count: 12,
-        pending_count: 0,
-        average_grade: 82.3,
-      },
-      {
-        id: 3,
-        title: "Database Design Project",
-        description: "Design a database schema for an e-commerce platform",
-        course_id: 2,
-        course_title: "Database Fundamentals",
-        lesson_id: 5,
-        lesson_title: "Database Design Principles",
-        due_date: "2026-05-05T23:59:59",
-        points: 150,
-        status: "graded",
-        total_submissions: 8,
-        graded_count: 8,
-        pending_count: 0,
-        average_grade: 88.2,
-      },
-      {
-        id: 4,
-        title: "API Testing with Jest",
-        description: "Write unit tests for REST API endpoints",
-        course_id: 3,
-        course_title: "Backend Development",
-        lesson_id: 8,
-        lesson_title: "Testing Strategies",
-        due_date: "2026-04-30T23:59:59",
-        points: 75,
-        status: "overdue",
-        total_submissions: 10,
-        graded_count: 5,
-        pending_count: 5,
-        average_grade: 65.0,
-      },
-    ];
-    
-    setTeacherAssignments(mockAssignments);
-    
-    const uniqueCourses = Array.from(
-      new Map(mockAssignments.map(a => [a.course_id, { id: a.course_id, title: a.course_title }])).values()
-    );
-    setCourses(uniqueCourses);
-    setLoading(false);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+
+    try {
+      // Get courses where user is teacher/instructor
+      const { data: teacherCourses } = await supabase
+        .from("course_members")
+        .select(`
+          course_id,
+          courses:course_id (
+            id,
+            title,
+            created_by
+          )
+        `)
+        .eq("user_id", user.id)
+        .in("role", ["instructor", "teacher"]);
+
+      if (!teacherCourses || teacherCourses.length === 0) {
+        setTeacherAssignments([]);
+        setLoading(false);
+        return;
+      }
+
+      const courseIds = teacherCourses.map(tc => tc.course_id);
+
+      // Get all assignments for these courses
+      const { data: assignmentsData, error: assignmentsError } = await supabase
+        .from("assignments")
+        .select(`
+          *,
+          lesson:lesson_id (
+            id,
+            title,
+            class:class_id (
+              id,
+              title
+            )
+          )
+        `)
+        .in("course_id", courseIds);
+
+      if (assignmentsError) throw assignmentsError;
+
+      // For each assignment, get submission stats
+      const teacherAssignmentsWithStats: TeacherAssignment[] = await Promise.all(
+        (assignmentsData || []).map(async (assignment) => {
+          // Get all submissions for this assignment
+          const { data: submissionsData } = await supabase
+            .from("submissions")
+            .select(`
+              id,
+              grade,
+              user:user_id (
+                id,
+                first_name,
+                last_name,
+                email
+              )
+            `)
+            .eq("assignment_id", assignment.id);
+
+          const totalSubmissions = submissionsData?.length || 0;
+          const gradedCount = submissionsData?.filter(s => s.grade !== null).length || 0;
+          const pendingCount = totalSubmissions - gradedCount;
+          const avgGrade = submissionsData
+            ?.filter(s => s.grade !== null)
+            .reduce((sum, s) => sum + (s.grade || 0), 0) / (gradedCount || 1);
+
+          const dueDate = new Date(assignment.due_at);
+          const now = new Date();
+          let status: Assignment["status"] = "pending";
+          if (dueDate < now) status = "overdue";
+
+          return {
+            id: assignment.id,
+            title: assignment.title,
+            description: assignment.description || "",
+            course_id: assignment.course_id,
+            course_title: teacherCourses.find(tc => tc.course_id === assignment.course_id)?.courses?.title || "Unknown Course",
+            lesson_id: assignment.lesson_id || 0,
+            lesson_title: assignment.lesson?.title || "Unknown Lesson",
+            due_date: assignment.due_at,
+            points: assignment.points,
+            status,
+            total_submissions: totalSubmissions,
+            graded_count: gradedCount,
+            pending_count: pendingCount,
+            average_grade: avgGrade,
+          };
+        })
+      );
+
+      setTeacherAssignments(teacherAssignmentsWithStats);
+
+      // Get unique courses for filter
+      const uniqueCourses = Array.from(
+        new Map(teacherAssignmentsWithStats.map(a => [a.course_id, { id: a.course_id, title: a.course_title }])).values()
+      );
+      setCourses(uniqueCourses);
+
+    } catch (error) {
+      console.error("Error fetching teacher assignments:", error);
+      toast.error("Failed to load assignments");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const fetchSubmissions = async (assignmentId: number) => {
-    // Mock submissions data
-    await new Promise(resolve => setTimeout(resolve, 500));
-    
-    const mockSubmissions: Submission[] = [
-      {
-        id: 1,
-        student_id: "user1",
-        student_name: "Alice Johnson",
-        student_email: "alice@example.com",
-        submitted_at: "2026-05-14T10:30:00",
-        content: "Here's my implementation of React hooks...",
-        status: "submitted",
-      },
-      {
-        id: 2,
-        student_id: "user2",
-        student_name: "Bob Smith",
-        student_email: "bob@example.com",
-        submitted_at: "2026-05-13T15:45:00",
-        content: "I've completed all the exercises...",
-        status: "submitted",
-      },
-      {
-        id: 3,
-        student_id: "user3",
-        student_name: "Carol Davis",
-        student_email: "carol@example.com",
-        submitted_at: "2026-05-12T09:20:00",
-        content: "My solution includes custom hooks...",
-        grade: 92,
-        feedback: "Excellent work! Great understanding of hooks.",
-        status: "graded",
-      },
-    ];
-    
-    setSubmissions(mockSubmissions);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    try {
+      const { data: submissionsData, error } = await supabase
+        .from("submissions")
+        .select(`
+          *,
+          user:user_id (
+            id,
+            first_name,
+            last_name,
+            email
+          )
+        `)
+        .eq("assignment_id", assignmentId);
+
+      if (error) throw error;
+
+      const formattedSubmissions: Submission[] = (submissionsData || []).map(sub => ({
+        id: sub.id,
+        assignment_id: sub.assignment_id,
+        student_id: sub.user_id,
+        student_name: sub.user?.first_name 
+          ? `${sub.user.first_name} ${sub.user.last_name || ""}`.trim()
+          : sub.user?.email || "Unknown",
+        student_email: sub.user?.email || "",
+        submitted_at: sub.submitted_at,
+        content_url: sub.content_url,
+        text_content: sub.text_content,
+        grade: sub.grade,
+        feedback: sub.feedback,
+        status: sub.grade !== null ? "graded" : "submitted",
+      }));
+
+      setSubmissions(formattedSubmissions);
+    } catch (error) {
+      console.error("Error fetching submissions:", error);
+      toast.error("Failed to load submissions");
+    }
   };
 
   const handleViewSubmissions = async (assignment: TeacherAssignment) => {
@@ -305,24 +415,46 @@ export default function AssignmentsPage() {
   const handleSubmitGrade = async () => {
     if (!selectedSubmission || !selectedAssignment) return;
     
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 800));
-    
-    toast.success(`Grade submitted for ${selectedSubmission.student_name}`);
-    
-    // Update local state
-    setSubmissions(prev => prev.map(s => 
-      s.id === selectedSubmission.id 
-        ? { ...s, grade, feedback, status: "graded" as const }
-        : s
-    ));
-    
-    setSelectedSubmission(null);
-    setGrade(0);
-    setFeedback("");
-    
-    // Refresh assignment stats
-    await fetchTeacherAssignments();
+    setSubmittingGrade(true);
+
+    try {
+      const { error } = await supabase
+        .from("submissions")
+        .update({
+          grade: grade,
+          feedback: feedback,
+        })
+        .eq("id", selectedSubmission.id);
+
+      if (error) throw error;
+
+      toast.success(`Grade submitted for ${selectedSubmission.student_name}`);
+      
+      // Update local state
+      setSubmissions(prev => prev.map(s => 
+        s.id === selectedSubmission.id 
+          ? { ...s, grade, feedback, status: "graded" as const }
+          : s
+      ));
+      
+      setSelectedSubmission(null);
+      setGrade(0);
+      setFeedback("");
+      
+      // Refresh assignment stats
+      await fetchTeacherAssignments();
+      
+      // Refresh current assignment's submissions if it's the same
+      if (selectedAssignment) {
+        await fetchSubmissions(selectedAssignment.id);
+      }
+
+    } catch (error) {
+      console.error("Error submitting grade:", error);
+      toast.error("Failed to submit grade");
+    } finally {
+      setSubmittingGrade(false);
+    }
   };
 
   const navigateToAssignment = (assignment: Assignment) => {
@@ -358,8 +490,8 @@ export default function AssignmentsPage() {
   const getStats = () => {
     if (isTeacher) {
       const total = teacherAssignments.length;
-      const totalSubmissions = teacherAssignments.reduce((sum, a) => sum + a.total_submissions, 0);
-      const totalGraded = teacherAssignments.reduce((sum, a) => sum + a.graded_count, 0);
+      const totalSubmissions = teacherAssignments.reduce((sum, a) => sum + (a.total_submissions || 0), 0);
+      const totalGraded = teacherAssignments.reduce((sum, a) => sum + (a.graded_count || 0), 0);
       const pendingGrading = totalSubmissions - totalGraded;
       const avgGrade = teacherAssignments.reduce((sum, a) => sum + (a.average_grade || 0), 0) / total || 0;
       
@@ -471,7 +603,7 @@ export default function AssignmentsPage() {
               >
                 <option value="all">All Courses</option>
                 {courses.map(course => (
-                  <option key={course.id} value={course.id}>
+                  <option key={course.id} value={course.id.toString()}>
                     {course.title}
                   </option>
                 ))}
@@ -510,7 +642,7 @@ export default function AssignmentsPage() {
                 <GlowCard
                   key={assignment.id}
                   className="cursor-pointer hover:shadow-lg transition-all duration-200"
-                  onClick={() => navigateToAssignment(assignment as Assignment)}
+                  onClick={() => navigateToAssignment(assignment)}
                 >
                   <div className="p-6">
                     <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
@@ -682,7 +814,7 @@ export default function AssignmentsPage() {
             >
               <option value="all">All Courses</option>
               {courses.map(course => (
-                <option key={course.id} value={course.id}>
+                <option key={course.id} value={course.id.toString()}>
                   {course.title}
                 </option>
               ))}
@@ -709,7 +841,9 @@ export default function AssignmentsPage() {
           getFilteredAssignments().map((assignment) => {
             const teacherAssignment = assignment as TeacherAssignment;
             const dueDate = new Date(teacherAssignment.due_date);
-            const completionRate = (teacherAssignment.graded_count / teacherAssignment.total_submissions) * 100;
+            const completionRate = teacherAssignment.total_submissions > 0 
+              ? (teacherAssignment.graded_count / teacherAssignment.total_submissions) * 100 
+              : 0;
             
             return (
               <GlowCard key={teacherAssignment.id}>
@@ -756,7 +890,7 @@ export default function AssignmentsPage() {
                         <div className="bg-gray-800/50 rounded-lg p-3">
                           <p className="text-xs text-gray-400 mb-1">Submissions</p>
                           <p className="text-lg font-semibold text-white">
-                            {teacherAssignment.total_submissions} / {teacherAssignment.total_submissions}
+                            {teacherAssignment.total_submissions}
                           </p>
                         </div>
                         <div className="bg-gray-800/50 rounded-lg p-3">
@@ -779,7 +913,7 @@ export default function AssignmentsPage() {
                       {/* Progress Bar */}
                       <div>
                         <div className="flex justify-between text-xs text-gray-400 mb-1">
-                          <span>Completion Rate</span>
+                          <span>Grading Completion</span>
                           <span>{completionRate.toFixed(0)}%</span>
                         </div>
                         <Progress value={completionRate} className="h-2" />
@@ -858,27 +992,29 @@ export default function AssignmentsPage() {
                     </GlowButton>
                   </div>
                   
-                  <div className="bg-gray-800 rounded-lg p-4">
-                    <h4 className="font-semibold text-white mb-2">Submission Content</h4>
-                    <p className="text-gray-300 whitespace-pre-wrap">
-                      {selectedSubmission.content || "No text content provided."}
-                    </p>
-                    {selectedSubmission.attachments && selectedSubmission.attachments.length > 0 && (
-                      <div className="mt-3">
-                        <p className="text-sm text-gray-400 mb-2">Attachments:</p>
-                        {selectedSubmission.attachments.map((file, idx) => (
-                          <a
-                            key={idx}
-                            href={file.url}
-                            className="flex items-center gap-2 text-purple-400 hover:text-purple-300 text-sm"
-                          >
-                            <Download className="w-4 h-4" />
-                            {file.name}
-                          </a>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                  {selectedSubmission.text_content && (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                      <h4 className="font-semibold text-white mb-2">Submission Content</h4>
+                      <p className="text-gray-300 whitespace-pre-wrap">
+                        {selectedSubmission.text_content}
+                      </p>
+                    </div>
+                  )}
+                  
+                  {selectedSubmission.content_url && (
+                    <div className="bg-gray-800 rounded-lg p-4">
+                      <h4 className="font-semibold text-white mb-2">Attachments</h4>
+                      <a
+                        href={selectedSubmission.content_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 text-purple-400 hover:text-purple-300 text-sm"
+                      >
+                        <Download className="w-4 h-4" />
+                        Download Submission
+                      </a>
+                    </div>
+                  )}
                   
                   <div className="bg-gray-800 rounded-lg p-4">
                     <h4 className="font-semibold text-white mb-4">Grade & Feedback</h4>
@@ -911,7 +1047,7 @@ export default function AssignmentsPage() {
                         >
                           Cancel
                         </GlowButton>
-                        <GlowButton onClick={handleSubmitGrade}>
+                        <GlowButton onClick={handleSubmitGrade} isLoading={submittingGrade}>
                           Submit Grade
                         </GlowButton>
                       </div>

@@ -61,6 +61,15 @@ import {
 import { useRole } from "@/components/providers/RoleProvider";
 import { toast } from "sonner";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
+import { Database } from "@/types/supabase";
+
+type ClassMember = Database['public']['Tables']['class_members']['Row'];
+type Profile = Database['public']['Tables']['profiles']['Row'];
+type LessonProgress = Database['public']['Tables']['lesson_progress']['Row'];
+type Assignment = Database['public']['Tables']['assignments']['Row'];
+type Submission = Database['public']['Tables']['submissions']['Row'];
+type CourseClass = Database['public']['Tables']['course_classes']['Row'];
+type Course = Database['public']['Tables']['courses']['Row'];
 
 interface Student {
   id: string;
@@ -141,114 +150,323 @@ export default function CourseStudentsPage() {
   }, [courseId]);
 
   const fetchCourseData = async () => {
-    // Mock data - replace with actual API call
-    await new Promise(resolve => setTimeout(resolve, 500));
-    setCourse({
-      id: parseInt(courseId),
-      title: "Advanced React Development",
-      description: "Master React with advanced concepts and best practices",
-      instructor: "Dr. Sarah Johnson",
-      total_students: 45,
-      total_lessons: 24,
-      average_progress: 68,
-      completion_rate: 72,
-    });
+    const supabase = getSupabaseBrowserClient();
+    
+    try {
+      // Get course details
+      const { data: courseData, error: courseError } = await supabase
+        .from('courses')
+        .select(`
+          id,
+          title,
+          description,
+          created_by,
+          profiles:created_by (
+            first_name,
+            last_name
+          )
+        `)
+        .eq('id', parseInt(courseId))
+        .single();
+
+      if (courseError) throw courseError;
+
+      // Get instructor name
+      const instructorName = courseData.profiles 
+        ? `${courseData.profiles.first_name || ''} ${courseData.profiles.last_name || ''}`.trim() || 'Unknown Instructor'
+        : 'Unknown Instructor';
+
+      // Get course classes for this course
+      const { data: courseClasses, error: classesError } = await supabase
+        .from('course_classes')
+        .select('id')
+        .eq('course_id', parseInt(courseId));
+
+      if (classesError) throw classesError;
+
+      const courseClassIds = courseClasses?.map(cc => cc.id) || [];
+
+      // Get total lessons count
+      let totalLessons = 0;
+      if (courseClassIds.length > 0) {
+        const { data: modules, error: modulesError } = await supabase
+          .from('modules')
+          .select(`
+            id,
+            classes (
+              id,
+              lessons (id)
+            )
+          `)
+          .eq('course_id', parseInt(courseId));
+
+        if (!modulesError && modules) {
+          for (const module of modules) {
+            if (module.classes) {
+              for (const classItem of module.classes) {
+                if (classItem.lessons) {
+                  totalLessons += classItem.lessons.length;
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Get total students count
+      let totalStudents = 0;
+      if (courseClassIds.length > 0) {
+        const { count, error: countError } = await supabase
+          .from('class_members')
+          .select('*', { count: 'exact', head: true })
+          .in('course_class_id', courseClassIds);
+
+        if (!countError) {
+          totalStudents = count || 0;
+        }
+      }
+
+      setCourse({
+        id: parseInt(courseId),
+        title: courseData.title,
+        description: courseData.description || '',
+        instructor: instructorName,
+        total_students: totalStudents,
+        total_lessons: totalLessons,
+        average_progress: 0,
+        completion_rate: 0,
+      });
+    } catch (error) {
+      console.error('Error fetching course data:', error);
+      toast.error('Failed to load course data');
+    }
   };
 
   const fetchStudents = async () => {
-    // Mock data - replace with actual API call
-    await new Promise(resolve => setTimeout(resolve, 800));
-    
-    const mockStudents: Student[] = [
-      {
-        id: "user1",
-        name: "Alice Johnson",
-        email: "alice@example.com",
-        enrolled_at: "2026-04-01T10:00:00",
-        progress: 85,
-        completed_lessons: 20,
-        total_lessons: 24,
-        average_grade: 92,
-        last_active: "2026-05-14T15:30:00",
-        status: "active",
-        assignments_completed: 8,
-        assignments_total: 10,
-      },
-      {
-        id: "user2",
-        name: "Bob Smith",
-        email: "bob@example.com",
-        enrolled_at: "2026-04-03T14:20:00",
-        progress: 62,
-        completed_lessons: 15,
-        total_lessons: 24,
-        average_grade: 78,
-        last_active: "2026-05-13T09:15:00",
-        status: "active",
-        assignments_completed: 5,
-        assignments_total: 10,
-      },
-      {
-        id: "user3",
-        name: "Carol Davis",
-        email: "carol@example.com",
-        enrolled_at: "2026-04-05T11:45:00",
-        progress: 95,
-        completed_lessons: 23,
-        total_lessons: 24,
-        average_grade: 96,
-        last_active: "2026-05-14T18:20:00",
-        status: "active",
-        assignments_completed: 9,
-        assignments_total: 10,
-      },
-      {
-        id: "user4",
-        name: "David Wilson",
-        email: "david@example.com",
-        enrolled_at: "2026-04-10T09:30:00",
-        progress: 25,
-        completed_lessons: 6,
-        total_lessons: 24,
-        average_grade: 65,
-        last_active: "2026-05-10T14:00:00",
-        status: "inactive",
-        assignments_completed: 2,
-        assignments_total: 10,
-      },
-      {
-        id: "user5",
-        name: "Emma Brown",
-        email: "emma@example.com",
-        enrolled_at: "2026-04-12T13:15:00",
-        progress: 45,
-        completed_lessons: 11,
-        total_lessons: 24,
-        average_grade: 82,
-        last_active: "2026-05-12T11:30:00",
-        status: "active",
-        assignments_completed: 4,
-        assignments_total: 10,
-      },
-    ];
-    
-    setStudents(mockStudents);
-    
-    // Calculate stats
-    const activeStudents = mockStudents.filter(s => s.status === "active").length;
-    const avgProgress = mockStudents.reduce((sum, s) => sum + s.progress, 0) / mockStudents.length;
-    const avgGrade = mockStudents.reduce((sum, s) => sum + s.average_grade, 0) / mockStudents.length;
-    const completionRate = (mockStudents.filter(s => s.progress >= 80).length / mockStudents.length) * 100;
-    
-    setStats({
-      total_students: mockStudents.length,
-      active_students: activeStudents,
-      average_progress: Math.round(avgProgress),
-      average_grade: Math.round(avgGrade),
-      completion_rate: Math.round(completionRate),
-    });
-    
-    setLoading(false);
+    const supabase = getSupabaseBrowserClient();
+    setLoading(true);
+
+    try {
+      // Get user ID for session check
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      // Get course classes for this course
+      const { data: courseClasses, error: classesError } = await supabase
+        .from('course_classes')
+        .select('id')
+        .eq('course_id', parseInt(courseId));
+
+      if (classesError) throw classesError;
+
+      const courseClassIds = courseClasses?.map(cc => cc.id) || [];
+
+      if (courseClassIds.length === 0) {
+        setStudents([]);
+        setStats({
+          total_students: 0,
+          active_students: 0,
+          average_progress: 0,
+          average_grade: 0,
+          completion_rate: 0,
+        });
+        setLoading(false);
+        return;
+      }
+
+      // Get all class members (students) for these course offerings
+      const { data: classMembers, error: membersError } = await supabase
+        .from('class_members')
+        .select(`
+          id,
+          user_id,
+          enrolled_at,
+          role,
+          profiles:user_id (
+            id,
+            first_name,
+            last_name,
+            email,
+            avatar_url,
+            last_active_at
+          )
+        `)
+        .in('course_class_id', courseClassIds)
+        .eq('role', 'student');
+
+      if (membersError) throw membersError;
+
+      if (!classMembers || classMembers.length === 0) {
+        setStudents([]);
+        setStats({
+          total_students: 0,
+          active_students: 0,
+          average_progress: 0,
+          average_grade: 0,
+          completion_rate: 0,
+        });
+        setLoading(false);
+        return;
+      }
+
+      // Get all lessons for this course to calculate total lessons
+      const { data: modules, error: modulesError } = await supabase
+        .from('modules')
+        .select(`
+          id,
+          classes (
+            id,
+            lessons (id)
+          )
+        `)
+        .eq('course_id', parseInt(courseId));
+
+      let totalLessons = 0;
+      const lessonIds: number[] = [];
+      
+      if (!modulesError && modules) {
+        for (const module of modules) {
+          if (module.classes) {
+            for (const classItem of module.classes) {
+              if (classItem.lessons) {
+                for (const lesson of classItem.lessons) {
+                  totalLessons++;
+                  lessonIds.push(lesson.id);
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Get all assignments for this course
+      const { data: assignments, error: assignmentsError } = await supabase
+        .from('assignments')
+        .select('id, points')
+        .eq('course_id', parseInt(courseId));
+
+      const assignmentIds = assignments?.map(a => a.id) || [];
+
+      // Get all submissions for these assignments
+      const { data: submissions, error: submissionsError } = await supabase
+        .from('submissions')
+        .select('assignment_id, user_id, grade')
+        .in('assignment_id', assignmentIds);
+
+      // Group submissions by user
+      const submissionsByUser: Record<string, { grade: number; assignment_id: number }[]> = {};
+      if (submissions && !submissionsError) {
+        for (const sub of submissions) {
+          if (!submissionsByUser[sub.user_id]) {
+            submissionsByUser[sub.user_id] = [];
+          }
+          submissionsByUser[sub.user_id].push({
+            grade: sub.grade || 0,
+            assignment_id: sub.assignment_id,
+          });
+        }
+      }
+
+      // Get lesson progress for all students
+      const userIds = classMembers.map(cm => cm.user_id);
+      const { data: lessonProgress, error: progressError } = await supabase
+        .from('lesson_progress')
+        .select('user_id, lesson_id, status')
+        .in('user_id', userIds)
+        .in('lesson_id', lessonIds);
+
+      // Group progress by user
+      const progressByUser: Record<string, { completed: number; total: number }> = {};
+      for (const userId of userIds) {
+        progressByUser[userId] = { completed: 0, total: totalLessons };
+      }
+
+      if (lessonProgress && !progressError) {
+        for (const prog of lessonProgress) {
+          if (prog.status === 'completed') {
+            progressByUser[prog.user_id].completed++;
+          }
+        }
+      }
+
+      // Build student list
+      const now = new Date();
+      const thirtyDaysAgo = new Date(now.setDate(now.getDate() - 30));
+
+      const studentList: Student[] = classMembers.map(cm => {
+        const profile = cm.profiles as unknown as Profile;
+        const progress = progressByUser[cm.user_id] || { completed: 0, total: totalLessons };
+        const progressPercent = progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0;
+        
+        // Calculate average grade from submissions
+        const userSubmissions = submissionsByUser[cm.user_id] || [];
+        const avgGrade = userSubmissions.length > 0
+          ? Math.round(userSubmissions.reduce((sum, s) => sum + s.grade, 0) / userSubmissions.length)
+          : 0;
+
+        // Determine status based on last activity
+        const lastActiveDate = profile?.last_active_at ? new Date(profile.last_active_at) : new Date(cm.enrolled_at);
+        const status: "active" | "inactive" | "blocked" = lastActiveDate > thirtyDaysAgo ? "active" : "inactive";
+
+        // Calculate assignments completed
+        const assignmentsCompleted = userSubmissions.length;
+
+        return {
+          id: cm.user_id,
+          name: `${profile?.first_name || ''} ${profile?.last_name || ''}`.trim() || profile?.email?.split('@')[0] || 'Unknown',
+          email: profile?.email || '',
+          avatar: profile?.avatar_url || undefined,
+          enrolled_at: cm.enrolled_at,
+          progress: progressPercent,
+          completed_lessons: progress.completed,
+          total_lessons: progress.total,
+          average_grade: avgGrade,
+          last_active: profile?.last_active_at || cm.enrolled_at,
+          status,
+          assignments_completed: assignmentsCompleted,
+          assignments_total: assignmentIds.length,
+        };
+      });
+
+      // Sort by enrollment date (newest first)
+      studentList.sort((a, b) => new Date(b.enrolled_at).getTime() - new Date(a.enrolled_at).getTime());
+
+      setStudents(studentList);
+
+      // Calculate stats
+      const activeStudents = studentList.filter(s => s.status === "active").length;
+      const avgProgress = studentList.length > 0 
+        ? Math.round(studentList.reduce((sum, s) => sum + s.progress, 0) / studentList.length)
+        : 0;
+      const avgGrade = studentList.length > 0
+        ? Math.round(studentList.reduce((sum, s) => sum + s.average_grade, 0) / studentList.length)
+        : 0;
+      const completionRate = studentList.length > 0
+        ? Math.round((studentList.filter(s => s.progress >= 80).length / studentList.length) * 100)
+        : 0;
+
+      setStats({
+        total_students: studentList.length,
+        active_students: activeStudents,
+        average_progress: avgProgress,
+        average_grade: avgGrade,
+        completion_rate: completionRate,
+      });
+
+      // Update course stats
+      setCourse(prev => prev ? {
+        ...prev,
+        total_students: studentList.length,
+        average_progress: avgProgress,
+        completion_rate: completionRate,
+      } : null);
+
+    } catch (error) {
+      console.error('Error fetching students:', error);
+      toast.error('Failed to load students');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleInviteStudent = async () => {
@@ -258,34 +476,137 @@ export default function CourseStudentsPage() {
     }
 
     setInviting(true);
-    
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    toast.success(`Invitation sent to ${inviteData.email}`);
-    setShowInviteModal(false);
-    setInviteData({ email: "", message: "", send_email: true });
-    setInviting(false);
-    
-    // Refresh student list
-    await fetchStudents();
+    const supabase = getSupabaseBrowserClient();
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      // Get course classes for this course
+      const { data: courseClasses, error: classesError } = await supabase
+        .from('course_classes')
+        .select('id')
+        .eq('course_id', parseInt(courseId))
+        .eq('status', 'upcoming')
+        .limit(1);
+
+      if (classesError) throw classesError;
+
+      if (!courseClasses || courseClasses.length === 0) {
+        toast.error('No active course offering available for enrollment');
+        setInviting(false);
+        return;
+      }
+
+      const courseClassId = courseClasses[0].id;
+
+      // First, check if user exists by email
+      const { data: existingProfiles, error: profileError } = await supabase
+        .from('profiles')
+        .select('id, email')
+        .eq('email', inviteData.email);
+
+      if (profileError) throw profileError;
+
+      let userId: string | null = null;
+
+      if (existingProfiles && existingProfiles.length > 0) {
+        // User exists, check if already enrolled
+        userId = existingProfiles[0].id;
+        
+        const { data: existingEnrollment, error: enrollmentCheckError } = await supabase
+          .from('class_members')
+          .select('id')
+          .eq('course_class_id', courseClassId)
+          .eq('user_id', userId)
+          .maybeSingle();
+
+        if (enrollmentCheckError) throw enrollmentCheckError;
+
+        if (existingEnrollment) {
+          toast.error('This student is already enrolled in the course');
+          setInviting(false);
+          return;
+        }
+
+        // Enroll existing user
+        const { error: enrollError } = await supabase
+          .from('class_members')
+          .insert({
+            course_class_id: courseClassId,
+            user_id: userId,
+            role: 'student',
+            enrolled_at: new Date().toISOString(),
+          });
+
+        if (enrollError) throw enrollError;
+
+        toast.success(`${inviteData.email} has been enrolled in the course`);
+      } else {
+        // User doesn't exist - create an invitation record
+        // Note: In a real implementation, you'd have an invitations table
+        // For now, we'll show a message and suggest they register first
+        
+        toast.info(`${inviteData.email} needs to register first. Please ask them to create an account using this email.`);
+        setInviting(false);
+        setShowInviteModal(false);
+        setInviteData({ email: "", message: "", send_email: true });
+        return;
+      }
+
+      // Refresh student list
+      await fetchStudents();
+      setShowInviteModal(false);
+      setInviteData({ email: "", message: "", send_email: true });
+      toast.success('Student enrolled successfully');
+
+    } catch (error) {
+      console.error('Error inviting student:', error);
+      toast.error('Failed to invite student');
+    } finally {
+      setInviting(false);
+    }
   };
 
   const handleRemoveStudent = async () => {
     if (!selectedStudent) return;
     
     setRemoving(true);
-    
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    toast.success(`${selectedStudent.name} has been removed from the course`);
-    setShowRemoveConfirm(false);
-    setSelectedStudent(null);
-    setRemoving(false);
-    
-    // Refresh student list
-    await fetchStudents();
+    const supabase = getSupabaseBrowserClient();
+
+    try {
+      // Get course classes for this course
+      const { data: courseClasses, error: classesError } = await supabase
+        .from('course_classes')
+        .select('id')
+        .eq('course_id', parseInt(courseId));
+
+      if (classesError) throw classesError;
+
+      const courseClassIds = courseClasses?.map(cc => cc.id) || [];
+
+      // Delete class members records
+      const { error: deleteError } = await supabase
+        .from('class_members')
+        .delete()
+        .in('course_class_id', courseClassIds)
+        .eq('user_id', selectedStudent.id);
+
+      if (deleteError) throw deleteError;
+
+      toast.success(`${selectedStudent.name} has been removed from the course`);
+      setShowRemoveConfirm(false);
+      setSelectedStudent(null);
+      
+      // Refresh student list
+      await fetchStudents();
+      
+    } catch (error) {
+      console.error('Error removing student:', error);
+      toast.error('Failed to remove student');
+    } finally {
+      setRemoving(false);
+    }
   };
 
   const handleBulkRemove = async () => {
@@ -295,19 +616,44 @@ export default function CourseStudentsPage() {
       return;
     }
     
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    toast.success(`${selectedStudents.length} students have been removed`);
-    setSelectedStudents([]);
-    setShowBulkActions(false);
-    
-    // Refresh student list
-    await fetchStudents();
+    const supabase = getSupabaseBrowserClient();
+
+    try {
+      // Get course classes for this course
+      const { data: courseClasses, error: classesError } = await supabase
+        .from('course_classes')
+        .select('id')
+        .eq('course_id', parseInt(courseId));
+
+      if (classesError) throw classesError;
+
+      const courseClassIds = courseClasses?.map(cc => cc.id) || [];
+
+      // Delete class members records for all selected students
+      const { error: deleteError } = await supabase
+        .from('class_members')
+        .delete()
+        .in('course_class_id', courseClassIds)
+        .in('user_id', selectedStudents);
+
+      if (deleteError) throw deleteError;
+
+      toast.success(`${selectedStudents.length} students have been removed`);
+      setSelectedStudents([]);
+      setShowBulkActions(false);
+      
+      // Refresh student list
+      await fetchStudents();
+      
+    } catch (error) {
+      console.error('Error bulk removing students:', error);
+      toast.error('Failed to remove students');
+    }
   };
 
   const handleSendReminder = async (student: Student) => {
     toast.success(`Reminder sent to ${student.name}`);
+    // In production, this would call an email API
   };
 
   const handleMessageStudent = async (student: Student) => {
@@ -370,6 +716,29 @@ export default function CourseStudentsPage() {
     return null;
   }
 
+  const downloadCSV = () => {
+    const headers = ['Name', 'Email', 'Progress', 'Average Grade', 'Status', 'Enrolled Date', 'Last Active'];
+    const rows = filteredStudents.map(s => [
+      s.name,
+      s.email,
+      `${s.progress}%`,
+      `${s.average_grade}%`,
+      s.status,
+      new Date(s.enrolled_at).toLocaleDateString(),
+      new Date(s.last_active).toLocaleDateString(),
+    ]);
+    
+    const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `course_${courseId}_students.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success('Student list exported');
+  };
+
   return (
     <div className="container mx-auto px-4 py-8">
       {/* Header */}
@@ -394,7 +763,7 @@ export default function CourseStudentsPage() {
               <UserPlus className="w-4 h-4 mr-2" />
               Invite Students
             </GlowButton>
-            <GlowButton variant="outline">
+            <GlowButton variant="outline" onClick={downloadCSV}>
               <Download className="w-4 h-4 mr-2" />
               Export List
             </GlowButton>
@@ -699,7 +1068,7 @@ export default function CourseStudentsPage() {
                 className="mt-1"
               />
               <p className="text-xs text-gray-400 mt-1">
-                Separate multiple emails with commas
+                Enter a single email address to enroll a student
               </p>
             </div>
             
@@ -715,22 +1084,9 @@ export default function CourseStudentsPage() {
               />
             </div>
             
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="send_email"
-                checked={inviteData.send_email}
-                onChange={(e) => setInviteData({ ...inviteData, send_email: e.target.checked })}
-                className="rounded border-gray-700 bg-gray-800 text-purple-600 focus:ring-purple-500"
-              />
-              <Label htmlFor="send_email" className="text-sm">
-                Send email notification
-              </Label>
-            </div>
-            
             <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
               <p className="text-sm text-blue-400">
-                Students will receive an invitation to join this course. They'll need to accept the invitation to get started.
+                Students with existing accounts will be enrolled immediately. New students will need to register first before accessing the course.
               </p>
             </div>
           </div>

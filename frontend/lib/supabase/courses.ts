@@ -1,5 +1,4 @@
 // frontend/lib/supabase/courses.ts
-
 import { getSupabaseBrowserClient } from "./browser-client";
 import { Database } from "@/types/supabase";
 
@@ -7,27 +6,44 @@ type Course = Database['public']['Tables']['courses']['Row'];
 type CourseInsert = Database['public']['Tables']['courses']['Insert'];
 type Module = Database['public']['Tables']['modules']['Row'];
 type ModuleInsert = Database['public']['Tables']['modules']['Insert'];
+type Class = Database['public']['Tables']['classes']['Row'];
+type ClassInsert = Database['public']['Tables']['classes']['Insert'];
 type Lesson = Database['public']['Tables']['lessons']['Row'];
 type LessonInsert = Database['public']['Tables']['lessons']['Insert'];
 type Assignment = Database['public']['Tables']['assignments']['Row'];
 type AssignmentInsert = Database['public']['Tables']['assignments']['Insert'];
-type CourseMember = Database['public']['Tables']['course_members']['Row'];
-type CourseMemberInsert = Database['public']['Tables']['course_members']['Insert'];
+type CourseClass = Database['public']['Tables']['course_classes']['Row'];
+type CourseClassInsert = Database['public']['Tables']['course_classes']['Insert'];
+type ClassSchedule = Database['public']['Tables']['class_schedules']['Row'];
+type ClassScheduleInsert = Database['public']['Tables']['class_schedules']['Insert'];
+type ClassMember = Database['public']['Tables']['class_members']['Row'];
+type ClassMemberInsert = Database['public']['Tables']['class_members']['Insert'];
+type ChatRoom = Database['public']['Tables']['chat_rooms']['Row'];
+type ChatRoomInsert = Database['public']['Tables']['chat_rooms']['Insert'];
+type ChatRoomMember = Database['public']['Tables']['chat_room_members']['Row'];
+type ChatRoomMemberInsert = Database['public']['Tables']['chat_room_members']['Insert'];
 
-export interface CourseWithDetails extends Course {
-  modules?: ModuleWithLessons[];
-  instructor_name?: string;
-  instructor_avatar?: string;
-  enrolled?: boolean;
-  progress?: number;
+export interface ModuleWithClasses extends Module {
+  classes: ClassWithLessons[];
 }
 
-export interface ModuleWithLessons extends Module {
-  lessons?: LessonWithAssignments[];
+export interface ClassWithLessons extends Class {
+  lessons: LessonWithAssignments[];
 }
 
 export interface LessonWithAssignments extends Lesson {
   assignments?: Assignment[];
+}
+
+export interface CourseWithDetails extends Course {
+  modules?: ModuleWithClasses[];
+  course_classes?: CourseClassWithDetails[];
+}
+
+export interface CourseClassWithDetails extends CourseClass {
+  schedules?: ClassSchedule[];
+  members?: ClassMember[];
+  chat_room?: ChatRoom;
 }
 
 // Create a new course
@@ -37,6 +53,12 @@ export async function createCourse(courseData: {
   organization_id: number;
   visibility: "public" | "org" | "private";
   created_by: string;
+  level?: string;
+  category?: string;
+  learning_objectives?: string[];
+  prerequisites?: string[];
+  tags?: string[];
+  thumbnail?: string;
 }): Promise<Course> {
   const supabase = getSupabaseBrowserClient();
   
@@ -48,6 +70,13 @@ export async function createCourse(courseData: {
       organization_id: courseData.organization_id,
       visibility: courseData.visibility,
       created_by: courseData.created_by,
+      level: courseData.level || "intermediate",
+      category: courseData.category || "Development",
+      learning_objectives: courseData.learning_objectives || [],
+      prerequisites: courseData.prerequisites || [],
+      tags: courseData.tags || [],
+      thumbnail: courseData.thumbnail || null,
+      status: "draft"
     })
     .select()
     .single();
@@ -56,7 +85,7 @@ export async function createCourse(courseData: {
   return data;
 }
 
-// Update a course
+// Update course
 export async function updateCourse(
   courseId: number,
   updates: Partial<Course>
@@ -74,7 +103,31 @@ export async function updateCourse(
   return data;
 }
 
-// Get course with all details (modules, lessons, assignments)
+// Get course class ID for a user (helper function)
+export async function getCourseClassIdForUser(courseId: number, userId: string): Promise<number | null> {
+  const supabase = getSupabaseBrowserClient();
+  
+  const { data, error } = await supabase
+    .from('class_members')
+    .select('course_class_id')
+    .eq('user_id', userId)
+    .in('course_class_id', 
+      supabase
+        .from('course_classes')
+        .select('id')
+        .eq('course_id', courseId)
+    )
+    .limit(1);
+  
+  if (error) {
+    console.error('Error getting course class ID:', error);
+    return null;
+  }
+  
+  return data && data.length > 0 ? data[0].course_class_id : null;
+}
+
+// Get course with all details (modules, classes, lessons, assignments)
 export async function getCourseWithDetails(courseId: number): Promise<CourseWithDetails | null> {
   const supabase = getSupabaseBrowserClient();
   
@@ -84,191 +137,118 @@ export async function getCourseWithDetails(courseId: number): Promise<CourseWith
     .select("*")
     .eq("id", courseId)
     .single();
-
-  if (courseError || !course) return null;
-
+  
+  if (courseError) throw courseError;
+  if (!course) return null;
+  
   // Get modules
   const { data: modules, error: modulesError } = await supabase
     .from("modules")
     .select("*")
     .eq("course_id", courseId)
     .order("order_index", { ascending: true });
-
+  
   if (modulesError) throw modulesError;
-
-  // Get lessons and assignments for each module
-  const modulesWithLessons: ModuleWithLessons[] = await Promise.all(
+  
+  // For each module, get classes
+  const modulesWithClasses = await Promise.all(
     (modules || []).map(async (module) => {
-      const { data: lessons, error: lessonsError } = await supabase
-        .from("lessons")
+      const { data: classes, error: classesError } = await supabase
+        .from("classes")
         .select("*")
         .eq("module_id", module.id)
         .order("order_index", { ascending: true });
-
-      if (lessonsError) throw lessonsError;
-
-      // Get assignments for each lesson
-      const lessonsWithAssignments: LessonWithAssignments[] = await Promise.all(
-        (lessons || []).map(async (lesson) => {
-          const { data: assignments, error: assignmentsError } = await supabase
-            .from("assignments")
+      
+      if (classesError) throw classesError;
+      
+      // For each class, get lessons
+      const classesWithLessons = await Promise.all(
+        (classes || []).map(async (classItem) => {
+          const { data: lessons, error: lessonsError } = await supabase
+            .from("lessons")
             .select("*")
-            .eq("lesson_id", lesson.id);
-
-          if (assignmentsError) throw assignmentsError;
-
-          return { ...lesson, assignments: assignments || [] };
+            .eq("class_id", classItem.id)
+            .order("order_index", { ascending: true });
+          
+          if (lessonsError) throw lessonsError;
+          
+          // For each lesson, get assignments
+          const lessonsWithAssignments = await Promise.all(
+            (lessons || []).map(async (lesson) => {
+              const { data: assignments, error: assignmentsError } = await supabase
+                .from("assignments")
+                .select("*")
+                .eq("lesson_id", lesson.id);
+              
+              if (assignmentsError) throw assignmentsError;
+              
+              return { ...lesson, assignments: assignments || [] };
+            })
+          );
+          
+          return { ...classItem, lessons: lessonsWithAssignments };
         })
       );
-
-      return { ...module, lessons: lessonsWithAssignments };
+      
+      return { ...module, classes: classesWithLessons };
     })
   );
-
-  return { ...course, modules: modulesWithLessons };
-}
-
-// Get all courses for a user (with enrollment status)
-export async function getUserCourses(userId: string): Promise<CourseWithDetails[]> {
-  const supabase = getSupabaseBrowserClient();
   
-  // Get courses the user is enrolled in
-  const { data: memberships, error: membershipError } = await supabase
-    .from("course_members")
-    .select("course_id, role, joined_at, status")
-    .eq("user_id", userId);
-
-  if (membershipError) throw membershipError;
-
-  if (!memberships || memberships.length === 0) return [];
-
-  const courseIds = memberships.map(m => m.course_id);
+  // Get course classes (offerings)
+  const { data: courseClasses, error: courseClassesError } = await supabase
+    .from("course_classes")
+    .select("*")
+    .eq("course_id", courseId);
   
-  // Get course details
-  const { data: courses, error: coursesError } = await supabase
-    .from("courses")
-    .select(`
-      *,
-      organization:organization_id(name)
-    `)
-    .in("id", courseIds);
-
-  if (coursesError) throw coursesError;
-
-  // Get instructor names
-  const instructorIds = [...new Set(courses?.map(c => c.created_by) || [])];
-  const { data: profiles, error: profilesError } = await supabase
-    .from("profiles")
-    .select("id, first_name, last_name, avatar_url")
-    .in("id", instructorIds);
-
-  if (profilesError) throw profilesError;
-
-  const profileMap = new Map(profiles?.map(p => [p.id, p]));
-
-  // Calculate progress for each course
-  const coursesWithDetails = await Promise.all(
-    (courses || []).map(async (course) => {
-      // Get total lessons count
-      const { count: totalLessons, error: lessonsError } = await supabase
-        .from("lessons")
-        .select("*", { count: "exact", head: true })
-        .in("module_id", (
-          await supabase
-            .from("modules")
-            .select("id")
-            .eq("course_id", course.id)
-        ).data?.map(m => m.id) || []);
-
-      if (lessonsError) throw lessonsError;
-
-      // Get completed lessons count
-      const { count: completedLessons, error: progressError } = await supabase
-        .from("lesson_progress")
-        .select("*", { count: "exact", head: true })
-        .eq("user_id", userId)
-        .eq("status", "completed");
-
-      if (progressError) throw progressError;
-
-      const profile = profileMap.get(course.created_by);
-      const progress = totalLessons > 0 ? (completedLessons || 0) / totalLessons * 100 : 0;
-
+  if (courseClassesError) throw courseClassesError;
+  
+  // For each course class, get schedules and members
+  const courseClassesWithDetails = await Promise.all(
+    (courseClasses || []).map(async (courseClass) => {
+      const { data: schedules, error: schedulesError } = await supabase
+        .from("class_schedules")
+        .select("*")
+        .eq("course_class_id", courseClass.id);
+      
+      if (schedulesError) throw schedulesError;
+      
+      const { data: members, error: membersError } = await supabase
+        .from("class_members")
+        .select("*")
+        .eq("course_class_id", courseClass.id);
+      
+      if (membersError) throw membersError;
+      
+      const { data: chatRoom, error: chatRoomError } = await supabase
+        .from("chat_rooms")
+        .select("*")
+        .eq("related_course_id", courseId)
+        .eq("type", "course")
+        .single();
+      
+      if (chatRoomError && chatRoomError.code !== "PGRST116") throw chatRoomError;
+      
       return {
-        ...course,
-        instructor_name: profile ? `${profile.first_name || ""} ${profile.last_name || ""}`.trim() || "Instructor" : "Instructor",
-        instructor_avatar: profile?.avatar_url || undefined,
-        enrolled: true,
-        progress: Math.round(progress),
+        ...courseClass,
+        schedules: schedules || [],
+        members: members || [],
+        chat_room: chatRoom || null
       };
     })
   );
-
-  return coursesWithDetails;
-}
-
-// Get discoverable courses (not enrolled)
-export async function getDiscoverableCourses(userId: string): Promise<CourseWithDetails[]> {
-  const supabase = getSupabaseBrowserClient();
   
-  // Get enrolled course IDs
-  const { data: memberships } = await supabase
-    .from("course_members")
-    .select("course_id")
-    .eq("user_id", userId);
-
-  const enrolledIds = memberships?.map(m => m.course_id) || [];
-
-  // Get public courses user is not enrolled in
-  const { data: courses, error: coursesError } = await supabase
-    .from("courses")
-    .select(`
-      *,
-      organization:organization_id(name)
-    `)
-    .eq("visibility", "public")
-    .not("id", "in", `(${enrolledIds.join(",")})`);
-
-  if (coursesError) throw coursesError;
-
-  // Get instructor names
-  const instructorIds = [...new Set(courses?.map(c => c.created_by) || [])];
-  const { data: profiles } = await supabase
-    .from("profiles")
-    .select("id, first_name, last_name, avatar_url")
-    .in("id", instructorIds);
-
-  const profileMap = new Map(profiles?.map(p => [p.id, p]));
-
-  return (courses || []).map(course => ({
+  return {
     ...course,
-    instructor_name: profileMap.get(course.created_by)?.first_name || "Instructor",
-    instructor_avatar: profileMap.get(course.created_by)?.avatar_url,
-    enrolled: false,
-  }));
-}
-
-// Enroll in a course
-export async function enrollInCourse(courseId: number, userId: string, role: string = "student"): Promise<CourseMember> {
-  const supabase = getSupabaseBrowserClient();
-  
-  const { data, error } = await supabase
-    .from("course_members")
-    .insert({
-      course_id: courseId,
-      user_id: userId,
-      role: role,
-      status: "active",
-    })
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data;
+    modules: modulesWithClasses,
+    course_classes: courseClassesWithDetails
+  };
 }
 
 // Module CRUD operations
-export async function addModule(courseId: number, moduleData: { title: string; order_index: number }): Promise<Module> {
+export async function addModule(courseId: number, moduleData: {
+  title: string;
+  order_index: number;
+}): Promise<Module> {
   const supabase = getSupabaseBrowserClient();
   
   const { data, error } = await supabase
@@ -277,10 +257,11 @@ export async function addModule(courseId: number, moduleData: { title: string; o
       course_id: courseId,
       title: moduleData.title,
       order_index: moduleData.order_index,
+      is_published: true
     })
     .select()
     .single();
-
+  
   if (error) throw error;
   return data;
 }
@@ -294,45 +275,78 @@ export async function updateModule(moduleId: number, updates: Partial<Module>): 
     .eq("id", moduleId)
     .select()
     .single();
-
+  
   if (error) throw error;
   return data;
 }
 
-export async function deleteModule(moduleId: number): Promise<void> {
+
+
+// Class CRUD operations
+export async function addClass(moduleId: number, classData: {
+  title: string;
+  order_index: number;
+}): Promise<Class> {
   const supabase = getSupabaseBrowserClient();
   
-  const { error } = await supabase
-    .from("modules")
-    .delete()
-    .eq("id", moduleId);
-
+  const { data, error } = await supabase
+    .from("classes")
+    .insert({
+      module_id: moduleId,
+      title: classData.title,
+      order_index: classData.order_index,
+      is_published: true
+    })
+    .select()
+    .single();
+  
   if (error) throw error;
+  return data;
+}
+
+// Update this function in courses.ts to allow updating module_id
+export async function updateClass(classId: number, updates: Partial<Class>): Promise<Class> {
+  const supabase = getSupabaseBrowserClient();
+  
+  const { data, error } = await supabase
+    .from("classes")
+    .update(updates)  // This already supports module_id since it's in Partial<Class>
+    .eq("id", classId)
+    .select()
+    .single();
+  
+  if (error) throw error;
+  return data;
 }
 
 // Lesson CRUD operations
-export async function addLesson(moduleId: number, lessonData: {
+export async function addLesson(classId: number, lessonData: {
   title: string;
   content_type: string;
   content_url?: string;
   content_json?: any;
   order_index: number;
+  duration_seconds?: number;
+  is_free_preview?: boolean;
 }): Promise<Lesson> {
   const supabase = getSupabaseBrowserClient();
   
   const { data, error } = await supabase
     .from("lessons")
     .insert({
-      module_id: moduleId,
+      class_id: classId,
       title: lessonData.title,
       content_type: lessonData.content_type,
       content_url: lessonData.content_url,
       content_json: lessonData.content_json,
       order_index: lessonData.order_index,
+      is_published: false,
+      duration_seconds: lessonData.duration_seconds,
+      is_free_preview: lessonData.is_free_preview || false
     })
     .select()
     .single();
-
+  
   if (error) throw error;
   return data;
 }
@@ -346,19 +360,86 @@ export async function updateLesson(lessonId: number, updates: Partial<Lesson>): 
     .eq("id", lessonId)
     .select()
     .single();
-
+  
   if (error) throw error;
   return data;
 }
 
+// Delete lesson - delete assignments first
 export async function deleteLesson(lessonId: number): Promise<void> {
   const supabase = getSupabaseBrowserClient();
   
+  // First, delete any assignments attached to this lesson
+  const { error: assignmentsError } = await supabase
+    .from("assignments")
+    .delete()
+    .eq("lesson_id", lessonId);
+  
+  if (assignmentsError && assignmentsError.code !== 'PGRST116') {
+    console.error('Error deleting assignments:', assignmentsError);
+  }
+  
+  // Then delete the lesson
   const { error } = await supabase
     .from("lessons")
     .delete()
     .eq("id", lessonId);
+  
+  if (error) throw error;
+}
 
+// Delete module - delete all classes and lessons inside first
+export async function deleteModule(moduleId: number): Promise<void> {
+  const supabase = getSupabaseBrowserClient();
+  
+  // First, get all classes in this module
+  const { data: classes, error: classesFetchError } = await supabase
+    .from("classes")
+    .select("id")
+    .eq("module_id", moduleId);
+  
+  if (classesFetchError) throw classesFetchError;
+  
+  // Delete each class (which will delete its lessons and assignments)
+  if (classes && classes.length > 0) {
+    for (const classItem of classes) {
+      await deleteClass(classItem.id);
+    }
+  }
+  
+  // Now delete the module
+  const { error } = await supabase
+    .from("modules")
+    .delete()
+    .eq("id", moduleId);
+  
+  if (error) throw error;
+}
+
+export async function deleteClass(classId: number): Promise<void> {
+  const supabase = getSupabaseBrowserClient();
+  
+  // First, get all lessons in this class
+  const { data: lessons, error: lessonsFetchError } = await supabase
+    .from("lessons")
+    .select("id")
+    .eq("class_id", classId);
+  
+  if (lessonsFetchError) throw lessonsFetchError;
+  
+  // Delete each lesson (which will delete its assignments)
+  if (lessons && lessons.length > 0) {
+    for (const lesson of lessons) {
+      await deleteLesson(lesson.id);
+    }
+  }
+  
+  // Now delete the class
+  const { error } = await supabase
+    .from("classes")
+    .delete()
+    .eq("id", classId);
+  
   if (error) throw error;
 }
 
@@ -368,6 +449,7 @@ export async function addAssignment(lessonId: number, assignmentData: {
   title: string;
   description: string;
   due_at?: string;
+  points?: number;
 }): Promise<Assignment> {
   const supabase = getSupabaseBrowserClient();
   
@@ -379,10 +461,11 @@ export async function addAssignment(lessonId: number, assignmentData: {
       title: assignmentData.title,
       description: assignmentData.description,
       due_at: assignmentData.due_at,
+      points: assignmentData.points || 100
     })
     .select()
     .single();
-
+  
   if (error) throw error;
   return data;
 }
@@ -396,7 +479,7 @@ export async function updateAssignment(assignmentId: number, updates: Partial<As
     .eq("id", assignmentId)
     .select()
     .single();
-
+  
   if (error) throw error;
   return data;
 }
@@ -408,31 +491,234 @@ export async function deleteAssignment(assignmentId: number): Promise<void> {
     .from("assignments")
     .delete()
     .eq("id", assignmentId);
-
+  
   if (error) throw error;
 }
 
-// Lesson progress tracking
-export async function updateLessonProgress(
-  lessonId: number,
-  userId: string,
-  status: "not_started" | "in_progress" | "completed",
-  progressPercent?: number
-): Promise<void> {
+// Course Class (offering) operations
+export async function addCourseClass(courseId: number, classData: {
+  name: string;
+  description?: string;
+  instructor_id?: string;
+  start_date?: string;
+  end_date?: string;
+  max_students?: number;
+  status?: "upcoming" | "ongoing" | "completed" | "cancelled";
+}): Promise<CourseClass> {
+  const supabase = getSupabaseBrowserClient();
+  
+  const { data, error } = await supabase
+    .from("course_classes")
+    .insert({
+      course_id: courseId,
+      name: classData.name,
+      description: classData.description,
+      instructor_id: classData.instructor_id,
+      start_date: classData.start_date,
+      end_date: classData.end_date,
+      max_students: classData.max_students,
+      status: classData.status || "upcoming",
+      is_published: true
+    })
+    .select()
+    .single();
+  
+  if (error) throw error;
+  return data;
+}
+
+// Class Schedule operations
+export async function addClassSchedule(courseClassId: number, scheduleData: {
+  day_of_week: number;
+  start_time: string;
+  end_time: string;
+}): Promise<ClassSchedule> {
+  const supabase = getSupabaseBrowserClient();
+  
+  const { data, error } = await supabase
+    .from("class_schedules")
+    .insert({
+      course_class_id: courseClassId,
+      day_of_week: scheduleData.day_of_week,
+      start_time: scheduleData.start_time,
+      end_time: scheduleData.end_time
+    })
+    .select()
+    .single();
+  
+  if (error) throw error;
+  return data;
+}
+
+// Chat Room operations
+export async function createCourseChatRoom(courseId: number): Promise<ChatRoom> {
+  const supabase = getSupabaseBrowserClient();
+  
+  const { data, error } = await supabase
+    .from("chat_rooms")
+    .insert({
+      type: "course",
+      related_course_id: courseId
+    })
+    .select()
+    .single();
+  
+  if (error) throw error;
+  return data;
+}
+
+// Update the publish function in courses.ts
+export async function publishCourse(courseId: number): Promise<void> {
+  const supabase = getSupabaseBrowserClient();
+  
+  // Update course status
+  const { error: courseError } = await supabase
+    .from('courses')
+    .update({ 
+      status: 'published',
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', courseId);
+  
+  if (courseError) {
+    console.error('Error publishing course:', courseError);
+    throw new Error(`Failed to publish course: ${courseError.message}`);
+  }
+  
+  // Auto-create chat room
+  try {
+    await autoCreateCourseChatRoom(courseId);
+  } catch (chatError) {
+    console.error('Error creating chat room for course:', chatError);
+    // Don't throw - chat room creation shouldn't block course publishing
+  }
+}
+
+// Archive a course (set status to 'archived')
+export async function archiveCourse(courseId: number): Promise<void> {
   const supabase = getSupabaseBrowserClient();
   
   const { error } = await supabase
-    .from("lesson_progress")
-    .upsert({
-      lesson_id: lessonId,
-      user_id: userId,
-      status,
-      progress_percent: progressPercent,
-      last_accessed_at: new Date().toISOString(),
-      completed_at: status === "completed" ? new Date().toISOString() : null,
-    }, {
-      onConflict: "lesson_id,user_id",
-    });
+    .from('courses')
+    .update({ 
+      status: 'archived',
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', courseId);
+  
+  if (error) {
+    console.error('Error archiving course:', error);
+    throw new Error(`Failed to archive course: ${error.message}`);
+  }
+}
 
+// Enroll student in course class
+export async function enrollStudent(courseClassId: number, userId: string, role: string = "student"): Promise<ClassMember> {
+  const supabase = getSupabaseBrowserClient();
+  
+  const { data, error } = await supabase
+    .from("class_members")
+    .insert({
+      course_class_id: courseClassId,
+      user_id: userId,
+      role: role
+    })
+    .select()
+    .single();
+  
+  if (error) throw error;
+  return data;
+}
+
+// Unpublish a course (set status back to 'draft')
+export async function unpublishCourse(courseId: number): Promise<void> {
+  const supabase = getSupabaseBrowserClient();
+  
+  const { error } = await supabase
+    .from('courses')
+    .update({ 
+      status: 'draft',
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', courseId);
+  
+  if (error) {
+    console.error('Error unpublishing course:', error);
+    throw new Error(`Failed to unpublish course: ${error.message}`);
+  }
+}
+
+// Update course class (offering)
+export async function updateCourseClass(courseClassId: number, updates: Partial<CourseClass>): Promise<CourseClass> {
+  const supabase = getSupabaseBrowserClient();
+  
+  const { data, error } = await supabase
+    .from("course_classes")
+    .update(updates)
+    .eq("id", courseClassId)
+    .select()
+    .single();
+  
+  if (error) throw error;
+  return data;
+}
+
+// Delete course class (offering)
+export async function deleteCourseClass(courseClassId: number): Promise<void> {
+  const supabase = getSupabaseBrowserClient();
+  
+  // First delete associated class members
+  const { error: membersError } = await supabase
+    .from("class_members")
+    .delete()
+    .eq("course_class_id", courseClassId);
+  
+  if (membersError && membersError.code !== 'PGRST116') {
+    console.error('Error deleting class members:', membersError);
+  }
+  
+  // Delete associated schedules
+  const { error: schedulesError } = await supabase
+    .from("class_schedules")
+    .delete()
+    .eq("course_class_id", courseClassId);
+  
+  if (schedulesError && schedulesError.code !== 'PGRST116') {
+    console.error('Error deleting class schedules:', schedulesError);
+  }
+  
+  // Delete the course class
+  const { error } = await supabase
+    .from("course_classes")
+    .delete()
+    .eq("id", courseClassId);
+  
+  if (error) throw error;
+}
+
+// Update class schedule
+export async function updateClassSchedule(scheduleId: number, updates: Partial<ClassSchedule>): Promise<ClassSchedule> {
+  const supabase = getSupabaseBrowserClient();
+  
+  const { data, error } = await supabase
+    .from("class_schedules")
+    .update(updates)
+    .eq("id", scheduleId)
+    .select()
+    .single();
+  
+  if (error) throw error;
+  return data;
+}
+
+// Delete class schedule
+export async function deleteClassSchedule(scheduleId: number): Promise<void> {
+  const supabase = getSupabaseBrowserClient();
+  
+  const { error } = await supabase
+    .from("class_schedules")
+    .delete()
+    .eq("id", scheduleId);
+  
   if (error) throw error;
 }
