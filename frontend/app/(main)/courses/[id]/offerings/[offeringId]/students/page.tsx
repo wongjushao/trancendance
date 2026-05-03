@@ -749,28 +749,6 @@ export default function CourseStudentsPage() {
     return null;
   }
 
-  const downloadCSV = () => {
-    const headers = ['Name', 'Email', 'Progress', 'Average Grade', 'Status', 'Enrolled Date'];
-    const rows = filteredStudents.map(s => [
-      s.name,
-      s.email,
-      `${s.progress}%`,
-      `${s.average_grade}%`,
-      s.status,
-      new Date(s.enrolled_at).toLocaleDateString(),
-    ]);
-    
-    const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `course_${courseId}_students.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success('Student list exported');
-  };
-
   return (
     <div className="container mx-auto px-4 py-8">
       {/* Header */}
@@ -794,10 +772,6 @@ export default function CourseStudentsPage() {
             <GlowButton onClick={() => setShowEnrollModal(true)}>
               <UserPlus className="w-4 h-4 mr-2" />
               Enroll Student
-            </GlowButton>
-            <GlowButton variant="outline" onClick={downloadCSV}>
-              <Download className="w-4 h-4 mr-2" />
-              Export List
             </GlowButton>
           </div>
         </div>
