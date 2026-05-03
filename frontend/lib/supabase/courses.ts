@@ -618,7 +618,6 @@ export async function publishCourse(courseId: number): Promise<void> {
     .from('courses')
     .update({ 
       status: 'published',
-      updated_at: new Date().toISOString()
     })
     .eq('id', courseId);
   
@@ -644,7 +643,6 @@ export async function archiveCourse(courseId: number): Promise<void> {
     .from('courses')
     .update({ 
       status: 'archived',
-      updated_at: new Date().toISOString()
     })
     .eq('id', courseId);
   
@@ -680,7 +678,6 @@ export async function unpublishCourse(courseId: number): Promise<void> {
     .from('courses')
     .update({ 
       status: 'draft',
-      updated_at: new Date().toISOString()
     })
     .eq('id', courseId);
   

@@ -147,7 +147,6 @@ export default function CoursesPage() {
                 };
               })
             );
-            
             setEnrolledCourses(coursesWithProgress);
           }
         }
