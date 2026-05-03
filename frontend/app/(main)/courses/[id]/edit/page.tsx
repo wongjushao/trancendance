@@ -203,7 +203,7 @@ function SortableClassItem({ classItem, index, moduleId, onEdit, onDelete, onTog
   );
 }
 
-function SortableLessonItem({ lesson, index, classId, moduleId, onEdit, onDelete }: any) {
+function SortableLessonItem({ lesson, index, classId, moduleId, onEdit, onDelete, onAddAssignment }: any) {
   const {
     attributes,
     listeners,
@@ -228,6 +228,8 @@ function SortableLessonItem({ lesson, index, classId, moduleId, onEdit, onDelete
     }
   };
 
+  const hasAssignment = lesson.assignments && lesson.assignments.length > 0;
+
   return (
     <div ref={setNodeRef} style={style} className="bg-slate-900/50 rounded-lg p-3">
       <div className="flex items-start gap-3">
@@ -235,13 +237,13 @@ function SortableLessonItem({ lesson, index, classId, moduleId, onEdit, onDelete
           <GripVertical className="w-4 h-4 text-gray-400" />
         </div>
         <div className="flex-1">
-          <div className="flex items-center gap-2 mb-2">
+          <div className="flex items-center gap-2 mb-2 flex-wrap">
             {getContentIcon()}
             <span className="text-white font-medium">{lesson.title}</span>
             {lesson.is_free_preview && (
               <Badge variant="secondary" className="text-xs">Free Preview</Badge>
             )}
-            {lesson.assignments && lesson.assignments.length > 0 && (
+            {hasAssignment && (
               <Badge className="bg-purple-500/20 text-purple-300 text-xs">
                 <ClipboardList className="w-3 h-3 mr-1" />
                 {lesson.assignments.length} Assignment
@@ -253,8 +255,27 @@ function SortableLessonItem({ lesson, index, classId, moduleId, onEdit, onDelete
               Duration: {Math.floor(lesson.duration_seconds / 60)} minutes
             </div>
           )}
+          {!hasAssignment && (
+            <div className="mt-2">
+              <button
+                onClick={() => onAddAssignment(lesson, classId, moduleId)}
+                className="text-xs text-purple-400 hover:text-purple-300 transition-colors flex items-center gap-1"
+              >
+                <Plus className="w-3 h-3" />
+                Add Assignment
+              </button>
+            </div>
+          )}
         </div>
         <div className="flex gap-2">
+          <GlowButton 
+            size="sm" 
+            variant="secondary" 
+            onClick={() => onAddAssignment(lesson, classId, moduleId)}
+            title={hasAssignment ? "Edit Assignment" : "Add Assignment"}
+          >
+            <ClipboardList className="w-3 h-3" />
+          </GlowButton>
           <GlowButton size="sm" variant="secondary" onClick={() => onEdit(lesson, classId, moduleId)}>
             <Edit className="w-3 h-3" />
           </GlowButton>
@@ -266,7 +287,6 @@ function SortableLessonItem({ lesson, index, classId, moduleId, onEdit, onDelete
     </div>
   );
 }
-
 export default function EditCoursePage() {
   const params = useParams();
   const router = useRouter();
@@ -1154,21 +1174,34 @@ const getDayName = (day: number): string => {
     }
   };
   
-  // Assignment CRUD
+  // Assignment CRUD - FULLY FIXED with null checks
   const openAssignmentModal = async (lesson: LessonWithAssignments, classId: number, moduleId: number) => {
+    console.log("=== OPEN ASSIGNMENT MODAL ===");
+    console.log("Lesson ID:", lesson.id);
+    
     const existingAssignment = lesson.assignments?.[0];
+    
     if (existingAssignment) {
-      setEditingAssignment({ assignment: existingAssignment, lessonId: lesson.id });
+      console.log("Editing existing assignment:", existingAssignment);
+      setEditingAssignment({ 
+        assignment: existingAssignment, 
+        lessonId: lesson.id
+      });
       setAssignmentForm({
-        title: existingAssignment.title,
+        title: existingAssignment.title || "",
         description: existingAssignment.description || "",
         due_at: existingAssignment.due_at || "",
-        points: existingAssignment.points,
+        points: existingAssignment.points || 100,
       });
     } else {
-      setEditingAssignment(null);
+      console.log("Creating new assignment for lesson:", lesson.id);
+      // Set editingAssignment with lessonId, assignment as null
+      setEditingAssignment({ 
+        assignment: null, 
+        lessonId: lesson.id
+      });
       setAssignmentForm({
-        title: "Assignment",
+        title: "",
         description: "",
         due_at: "",
         points: 100,
@@ -1176,47 +1209,138 @@ const getDayName = (day: number): string => {
     }
     setAssignmentModalOpen(true);
   };
-  
+
   const saveAssignment = async () => {
+    console.log("=== SAVE ASSIGNMENT START ===");
+    console.log("Editing Assignment:", editingAssignment);
+    console.log("Assignment Form:", assignmentForm);
+    
     if (!assignmentForm.title.trim()) {
       toast.error("Please enter an assignment title");
       return;
     }
     
+    if (assignmentForm.points < 0) {
+      toast.error("Points cannot be negative");
+      return;
+    }
+    
     try {
-      if (editingAssignment?.assignment.id) {
-        await updateAssignment(editingAssignment.assignment.id, assignmentForm);
+      // Check if we're editing an existing assignment
+      if (editingAssignment?.assignment && editingAssignment.assignment.id) {
+        // UPDATE existing assignment
+        console.log("Updating assignment ID:", editingAssignment.assignment.id);
+        
+        await updateAssignment(editingAssignment.assignment.id, {
+          title: assignmentForm.title,
+          description: assignmentForm.description,
+          due_at: assignmentForm.due_at || null,
+          points: assignmentForm.points,
+        });
+        
         toast.success("Assignment updated");
-      } else if (editingAssignment?.lessonId) {
-        await addAssignment(editingAssignment.lessonId, {
+        
+      } 
+      // Check if we're creating a new assignment
+      else if (editingAssignment?.lessonId) {
+        // CREATE new assignment
+        console.log("Creating new assignment for lesson ID:", editingAssignment.lessonId);
+        
+        // Format due date if provided
+        let dueAt = null;
+        if (assignmentForm.due_at) {
+          dueAt = new Date(assignmentForm.due_at).toISOString();
+        }
+        
+        const assignmentData = {
           course_id: courseId,
           title: assignmentForm.title,
           description: assignmentForm.description,
-          due_at: assignmentForm.due_at || undefined,
+          due_at: dueAt,
           points: assignmentForm.points,
-        });
+        };
+        
+        console.log("Sending assignment data:", assignmentData);
+        
+        await addAssignment(editingAssignment.lessonId, assignmentData);
+        
         toast.success("Assignment added");
+      } 
+      else {
+        console.error("Invalid state - no assignment ID or lesson ID", editingAssignment);
+        toast.error("Cannot save assignment: Invalid state");
+        return;
       }
       
+      // Reload course data and close modal
       await loadCourse();
       setAssignmentModalOpen(false);
+      
+      // Reset form
+      setEditingAssignment(null);
+      setAssignmentForm({
+        title: "",
+        description: "",
+        due_at: "",
+        points: 100,
+      });
+      
     } catch (error) {
-      toast.error("Failed to save assignment");
+      console.error("ERROR in saveAssignment:", error);
+      toast.error(`Failed to save assignment: ${error.message || "Please try again"}`);
     }
   };
-  
-  const deleteAssignment = async (assignmentId: number) => {
-    if (confirm("Are you sure you want to delete this assignment?")) {
-      try {
-        await deleteAssignment(assignmentId);
-        await loadCourse();
-        toast.success("Assignment deleted");
-      } catch (error) {
-        toast.error("Failed to delete assignment");
-      }
+
+  const handleDeleteAssignment = async (assignmentId: number) => {
+    console.log("=== HANDLE DELETE ASSIGNMENT ===");
+    console.log("Assignment ID to delete:", assignmentId);
+    
+    if (!assignmentId) {
+      console.error("No assignment ID provided");
+      toast.error("Cannot delete assignment: No ID provided");
+      return;
+    }
+    
+    // Use a confirm dialog that returns a Promise
+    const confirmed = window.confirm("Are you sure you want to delete this assignment? This action cannot be undone.");
+    
+    if (!confirmed) {
+      console.log("Deletion cancelled by user");
+      return;
+    }
+    
+    try {
+      console.log("Calling deleteAssignment API for ID:", assignmentId);
+      
+      // Call the imported deleteAssignment function from supabase
+      await deleteAssignment(assignmentId);
+      
+      console.log("Delete API successful");
+      toast.success("Assignment deleted successfully");
+      
+      // Close the modal first
+      setAssignmentModalOpen(false);
+      
+      // Clear the editing state
+      setEditingAssignment(null);
+      setAssignmentForm({
+        title: "",
+        description: "",
+        due_at: "",
+        points: 100,
+      });
+      
+      // Then reload the course data to refresh the UI
+      await loadCourse();
+      
+      console.log("Course reloaded after deletion");
+      
+    } catch (error) {
+      console.error("Error deleting assignment:", error);
+      toast.error(`Failed to delete assignment: ${error.message || "Please try again"}`);
     }
   };
-  
+
   // Course Offering (Course Class) CRUD
   const openAddOfferingModal = () => {
     setEditingOffering(null);
@@ -1721,6 +1845,7 @@ const getDayName = (day: number): string => {
                                                   moduleId={module.id}
                                                   onEdit={openEditLessonModal}
                                                   onDelete={() => promptDeleteLesson(lesson.id, classItem.id, module.id, lesson.title)}
+                                                  onAddAssignment={openAssignmentModal}
                                                 />
                                               ))}
                                             </div>
@@ -2068,12 +2193,30 @@ const getDayName = (day: number): string => {
       </Dialog>
       
       {/* Assignment Modal */}
-      <Dialog open={assignmentModalOpen} onOpenChange={setAssignmentModalOpen}>
+      {/* Assignment Modal - FULLY SAFE */}
+      <Dialog open={assignmentModalOpen} onOpenChange={(open) => {
+        if (!open) {
+          setEditingAssignment(null);
+          setAssignmentForm({
+            title: "",
+            description: "",
+            due_at: "",
+            points: 100,
+          });
+        }
+        setAssignmentModalOpen(open);
+      }}>
         <DialogContent className="bg-slate-800 border-slate-700 max-w-2xl">
           <DialogHeader>
             <DialogTitle className="text-white">
-              {editingAssignment?.assignment.id ? "Edit Assignment" : "Add Assignment"}
+              {/* SAFE: Check if editingAssignment exists AND has assignment with id */}
+              {(editingAssignment && editingAssignment.assignment && editingAssignment.assignment.id) ? "Edit Assignment" : "Add Assignment"}
             </DialogTitle>
+            <DialogDescription>
+              {editingAssignment?.assignment?.id 
+                ? "Edit the assignment details below" 
+                : "Create a new assignment for this lesson"}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div>
@@ -2120,16 +2263,34 @@ const getDayName = (day: number): string => {
             </div>
           </div>
           <DialogFooter>
-            {editingAssignment?.assignment.id && (
+            {/* SAFE: Check if editingAssignment exists AND has assignment with id */}
+            {(editingAssignment && editingAssignment.assignment && editingAssignment.assignment.id) && (
               <GlowButton
                 variant="ghost"
                 className="text-red-400"
-                onClick={() => deleteAssignment(editingAssignment.assignment.id)}
+                onClick={async () => {
+                  if (editingAssignment && editingAssignment.assignment && editingAssignment.assignment.id) {
+                    // Disable the button while deleting
+                    const btn = document.activeElement as HTMLButtonElement;
+                    if (btn) btn.disabled = true;
+                    await handleDeleteAssignment(editingAssignment.assignment.id);
+                    if (btn) btn.disabled = false;
+                  }
+                }}
               >
                 Delete
               </GlowButton>
             )}
-            <GlowButton variant="ghost" onClick={() => setAssignmentModalOpen(false)}>Cancel</GlowButton>
+            <GlowButton variant="ghost" onClick={() => {
+              setAssignmentModalOpen(false);
+              setEditingAssignment(null);
+              setAssignmentForm({
+                title: "",
+                description: "",
+                due_at: "",
+                points: 100,
+              });
+            }}>Cancel</GlowButton>
             <GlowButton onClick={saveAssignment}>Save</GlowButton>
           </DialogFooter>
         </DialogContent>

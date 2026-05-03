@@ -492,14 +492,34 @@ export async function updateAssignment(assignmentId: number, updates: Partial<As
 }
 
 export async function deleteAssignment(assignmentId: number): Promise<void> {
+  console.log("=== DELETE ASSIGNMENT FROM COURSES.TS ===");
+  console.log("Deleting assignment ID:", assignmentId);
+  
   const supabase = getSupabaseBrowserClient();
   
+  // First delete any submissions associated with this assignment
+  const { error: submissionsError } = await supabase
+    .from("submissions")
+    .delete()
+    .eq("assignment_id", assignmentId);
+  
+  if (submissionsError && submissionsError.code !== 'PGRST116') {
+    console.error("Error deleting submissions:", submissionsError);
+    // Don't throw - continue with assignment deletion
+  }
+  
+  // Then delete the assignment
   const { error } = await supabase
     .from("assignments")
     .delete()
     .eq("id", assignmentId);
   
-  if (error) throw error;
+  if (error) {
+    console.error("Error deleting assignment:", error);
+    throw error;
+  }
+  
+  console.log("Assignment deleted successfully");
 }
 
 // Course Class (offering) operations
