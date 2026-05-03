@@ -873,7 +873,7 @@ export default function OnboardingPage() {
                             {fieldErrors.birthday}
                           </p>
                         )}
-                        <p className="text-xs text-[#6B6B80]">You must be at least 13 years old to register</p>
+                        {/* <p className="text-xs text-[#6B6B80]">You must be at least 13 years old to register</p> */}
                       </div>
 
                       {/* Language */}

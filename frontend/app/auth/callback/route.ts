@@ -1,7 +1,6 @@
 // frontend/app/auth/callback/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
+import { createSupabaseServerClient } from "@/lib/supabase/server-client";
 
 function getSiteOrigin(): string {
   const envUrl = process.env.NEXT_PUBLIC_SITE_URL;
@@ -13,28 +12,6 @@ function getSiteOrigin(): string {
 
 function getAuthServiceOrigin(): string {
   return (process.env.NEXT_PUBLIC_BACKEND_URL || "https://auth-service:5001").replace(/\/$/, "");
-}
-
-async function createSupabaseServerClient() {
-  const cookieStore = await cookies();
-  
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        get(name: string) {
-          return cookieStore.get(name)?.value;
-        },
-        set(name: string, value: string, options: any) {
-          cookieStore.set({ name, value, ...options });
-        },
-        remove(name: string, options: any) {
-          cookieStore.set({ name, value: "", ...options });
-        },
-      },
-    }
-  );
 }
 
 async function checkMFAStatus(token: string): Promise<{
@@ -82,9 +59,9 @@ export async function GET(request: NextRequest) {
   }
 
   if (!code) {
-    console.error("[Auth Callback] No code provided");
+    console.warn("[Auth Callback] No code provided; redirecting to login after email confirmation");
     return NextResponse.redirect(
-      new URL("/auth/error?message=No authorization code provided", getSiteOrigin())
+      new URL("/login?confirmed=true", getSiteOrigin())
     );
   }
 

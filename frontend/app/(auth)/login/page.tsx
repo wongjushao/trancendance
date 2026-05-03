@@ -1,7 +1,7 @@
 // frontend/app/(auth)/login/page.tsx
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Mail, Lock, Eye, EyeOff, AlertCircle } from "lucide-react";
@@ -15,7 +15,7 @@ import { toast } from "sonner";
 
 function getFriendlyLoginError(
   errorMessage: string
-): { message: string; action?: { label: string; href: string } } {
+): { message: string; action?: { label: string; href: string }; canResendConfirmation?: boolean } {
   const lower = errorMessage.toLowerCase();
 
   if (lower.includes("invalid login credentials") || lower.includes("invalid credentials")) {
@@ -27,6 +27,7 @@ function getFriendlyLoginError(
   if (lower.includes("email not confirmed")) {
     return {
       message: "Your email address hasn't been confirmed yet. Check your inbox for the confirmation link.",
+      canResendConfirmation: true,
     };
   }
   if (lower.includes("no password set") || lower.includes("oauth")) {
@@ -58,11 +59,23 @@ export default function LoginPage() {
   const [touched, setTouched] = useState<{ email?: boolean; password?: boolean }>({});
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const [isResendingConfirmation, setIsResendingConfirmation] = useState(false);
   const [status, setStatus] = useState<{
     type: "success" | "error";
     message: string;
     action?: { label: string; href: string };
+    canResendConfirmation?: boolean;
   } | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("confirmed") === "true") {
+      setStatus({
+        type: "success",
+        message: "Email confirmed successfully. Sign in to continue.",
+      });
+    }
+  }, []);
 
   const validateField = (field: string, value: string): string | undefined => {
     switch (field) {
@@ -183,6 +196,40 @@ export default function LoginPage() {
 
     router.refresh();
     router.push("/dashboard");
+  };
+
+  const handleResendConfirmation = async () => {
+    const emailError = validateEmail(email).error;
+    if (emailError) {
+      setTouched((prev) => ({ ...prev, email: true }));
+      setErrors((prev) => ({ ...prev, email: emailError }));
+      return;
+    }
+
+    setIsResendingConfirmation(true);
+    const supabase = getSupabaseBrowserClient();
+    const { error } = await supabase.auth.resend({
+      type: "signup",
+      email,
+      options: {
+        emailRedirectTo: `${getSiteUrl()}/auth/callback`,
+      },
+    });
+    setIsResendingConfirmation(false);
+
+    if (error) {
+      setStatus({
+        type: "error",
+        message: error.message,
+        canResendConfirmation: true,
+      });
+      return;
+    }
+
+    setStatus({
+      type: "success",
+      message: "Confirmation email sent. Check your inbox for the new link.",
+    });
   };
 
   // In the login page, update the handleGoogle function
@@ -318,6 +365,16 @@ export default function LoginPage() {
                 <Link href={status.action.href} className="inline-block mt-2 underline hover:opacity-80 font-semibold">
                   {status.action.label} →
                 </Link>
+              )}
+              {status.canResendConfirmation && (
+                <button
+                  type="button"
+                  onClick={handleResendConfirmation}
+                  disabled={isResendingConfirmation}
+                  className="inline-block mt-2 underline hover:opacity-80 font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isResendingConfirmation ? "Sending..." : "Resend confirmation email →"}
+                </button>
               )}
             </div>
           )}
