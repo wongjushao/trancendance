@@ -53,6 +53,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -338,6 +339,7 @@ export default function EditCoursePage() {
     start_time: "09:00",
     end_time: "11:00",
   });
+  const [selectedOfferingId, setSelectedOfferingId] = useState<number | null>(null);
   
   // Drag and drop sensors
   const sensors = useSensors(
@@ -703,6 +705,11 @@ export default function EditCoursePage() {
       await loadCourse();
     }
   };
+
+const getDayName = (day: number): string => {
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  return days[day] || 'Unknown';
+};
 
   // Replace the existing handleDragEndLessons with this:
   const handleDragEndLessons = async (event: DragEndEvent) => {
@@ -1297,26 +1304,65 @@ export default function EditCoursePage() {
   };
   
   // Schedule CRUD
+  // Open Add Schedule Modal
   const openAddScheduleModal = (offeringId: number) => {
+    if (!offeringId) {
+      toast.error("Invalid offering selected");
+      return;
+    }
+    setSelectedOfferingId(offeringId);
     setScheduleForm({
-      day_of_week: 1,
-      start_time: "09:00",
-      end_time: "11:00",
+      day_of_week: 0,
+      start_time: "",
+      end_time: "",
     });
     setScheduleModalOpen(true);
   };
-  
-  const addSchedule = async (offeringId: number) => {
+
+  // Add Schedule Function
+  const addSchedule = async () => {
+    if (!selectedOfferingId) {
+      toast.error("No offering selected");
+      return;
+    }
+
+    if (!scheduleForm.day_of_week && scheduleForm.day_of_week !== 0) {
+      toast.error("Please select a day of week");
+      return;
+    }
+    if (!scheduleForm.start_time) {
+      toast.error("Please enter start time");
+      return;
+    }
+    if (!scheduleForm.end_time) {
+      toast.error("Please enter end time");
+      return;
+    }
+
     try {
-      await addClassSchedule(offeringId, scheduleForm);
-      await loadCourse();
-      toast.success("Schedule added");
+      await addClassSchedule(selectedOfferingId, {
+        day_of_week: scheduleForm.day_of_week,
+        start_time: scheduleForm.start_time,
+        end_time: scheduleForm.end_time,
+      });
+      
+      toast.success("Schedule added successfully");
       setScheduleModalOpen(false);
+      setSelectedOfferingId(null);
+      setScheduleForm({
+        day_of_week: 0,
+        start_time: "",
+        end_time: "",
+      });
+      
+      // Reload course data to show the new schedule
+      await loadCourse();
     } catch (error) {
+      console.error("Error adding schedule:", error);
       toast.error("Failed to add schedule");
     }
   };
-  
+    
   // Publish/Archive actions
   const handlePublish = async () => {
     try {
@@ -1632,85 +1678,85 @@ export default function EditCoursePage() {
           </TabsContent>
           
           {/* Offerings Tab */}
-          <TabsContent value="offerings">
-            <GlowCard>
-              <div className="p-6">
-                <div className="flex justify-between items-center mb-6">
-                  <div>
-                    <h3 className="text-lg font-semibold text-white">Course Offerings</h3>
-                    <p className="text-sm text-gray-400">Manage different sessions/cohorts of this course</p>
-                  </div>
-                  <GlowButton onClick={openAddOfferingModal}>
-                    <Plus className="w-4 h-4 mr-2" />
-                    Add Offering
-                  </GlowButton>
-                </div>
-                
-                <div className="space-y-4">
-                  {course.course_classes?.map((offering) => (
-                    <div key={offering.id} className="border border-slate-700 rounded-lg p-4">
-                      <div className="flex justify-between items-start mb-3">
-                        <div>
-                          <h4 className="font-semibold text-white">{offering.name}</h4>
-                          <p className="text-sm text-gray-400 mt-1">{offering.description}</p>
+          <TabsContent value="offerings" className="space-y-6">
+            <div className="flex justify-between items-center">
+              <div>
+                <h3 className="text-lg font-semibold text-white">Course Offerings</h3>
+                <p className="text-sm text-gray-400 mt-1">
+                  Manage different sessions/classes for this course
+                </p>
+              </div>
+              <GlowButton onClick={openAddOfferingModal}>
+                <Plus className="w-4 h-4 mr-2" />
+                Add Offering
+              </GlowButton>
+            </div>
+
+            {course?.course_classes && course.course_classes.length > 0 ? (
+              <div className="grid grid-cols-1 gap-4">
+                {course.course_classes.map((offering) => (
+                  <GlowCard key={offering.id} className="p-5">
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-2">
+                          <h4 className="font-semibold text-white text-lg">{offering.name}</h4>
+                          <Badge className={`
+                            ${offering.status === 'upcoming' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' :
+                              offering.status === 'ongoing' ? 'bg-green-500/20 text-green-400 border-green-500/30' :
+                              offering.status === 'completed' ? 'bg-gray-500/20 text-gray-400 border-gray-500/30' :
+                              'bg-red-500/20 text-red-400 border-red-500/30'}
+                          `}>
+                            {offering.status}
+                          </Badge>
                         </div>
-                        <div className="flex gap-2">
-                          <GlowButton size="sm" variant="secondary" onClick={() => openEditOfferingModal(offering)}>
-                            <Edit className="w-4 h-4" />
-                          </GlowButton>
-                          <GlowButton size="sm" variant="ghost" onClick={() => deleteOffering(offering.id)}>
-                            <Trash2 className="w-4 h-4" />
-                          </GlowButton>
+                        {offering.description && (
+                          <p className="text-sm text-gray-400 mb-3">{offering.description}</p>
+                        )}
+                        <div className="flex flex-wrap gap-4 text-sm text-gray-400">
+                          {offering.start_date && (
+                            <div className="flex items-center gap-1">
+                              <Calendar className="w-4 h-4" />
+                              <span>Starts: {new Date(offering.start_date).toLocaleDateString()}</span>
+                            </div>
+                          )}
+                          {offering.end_date && (
+                            <div className="flex items-center gap-1">
+                              <Calendar className="w-4 h-4" />
+                              <span>Ends: {new Date(offering.end_date).toLocaleDateString()}</span>
+                            </div>
+                          )}
+                          {offering.max_students && (
+                            <div className="flex items-center gap-1">
+                              <Users className="w-4 h-4" />
+                              <span>Max: {offering.max_students} students</span>
+                            </div>
+                          )}
                         </div>
-                      </div>
-                      
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3">
-                        <div>
-                          <span className="text-gray-400">Status:</span>
-                          <Badge className="ml-2 capitalize">{offering.status}</Badge>
-                        </div>
-                        <div>
-                          <span className="text-gray-400">Dates:</span>
-                          <span className="ml-2">
-                            {offering.start_date ? new Date(offering.start_date).toLocaleDateString() : 'TBD'} - 
-                            {offering.end_date ? new Date(offering.end_date).toLocaleDateString() : 'TBD'}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-gray-400">Students:</span>
-                          <span className="ml-2">{offering.members?.length || 0} / {offering.max_students || '∞'}</span>
-                        </div>
-                        <div>
-                          <span className="text-gray-400">Schedules:</span>
-                          <span className="ml-2">{offering.schedules?.length || 0}</span>
-                        </div>
-                      </div>
-                      
-                      {offering.schedules && offering.schedules.length > 0 && (
-                        <div className="mt-3">
-                          <h5 className="text-sm font-medium text-gray-300 mb-2">Class Schedule</h5>
-                          <div className="space-y-1">
-                            {offering.schedules.map((schedule, idx) => (
-                              <div key={idx} className="text-sm text-gray-400 flex items-center gap-2">
-                                <Calendar className="w-3 h-3" />
-                                <span>
-                                  {["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][schedule.day_of_week]}
-                                </span>
-                                <Clock className="w-3 h-3 ml-2" />
-                                <span>{schedule.start_time} - {schedule.end_time}</span>
-                              </div>
-                            ))}
+                        
+                        {/* Display Schedules */}
+                        {offering.schedules && offering.schedules.length > 0 && (
+                          <div className="mt-3">
+                            <div className="flex items-center gap-2 mb-2">
+                              <Clock className="w-4 h-4 text-purple-400" />
+                              <span className="text-sm font-medium text-gray-300">Schedule:</span>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {offering.schedules.map((schedule) => (
+                                <Badge key={schedule.id} variant="outline" className="text-xs">
+                                  {getDayName(schedule.day_of_week)}: {schedule.start_time} - {schedule.end_time}
+                                </Badge>
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                      )}
-                      
-                      <div className="flex gap-2 mt-4">
+                        )}
+                      </div>
+                      <div className="flex gap-2">
                         <GlowButton
                           size="sm"
                           variant="outline"
                           onClick={() => openAddScheduleModal(offering.id)}
                         >
-                          <Plus className="w-3 h-3 mr-1" />
+                          <Clock className="w-4 h-4 mr-2" />
                           Add Schedule
                         </GlowButton>
                         <GlowButton
@@ -1718,7 +1764,7 @@ export default function EditCoursePage() {
                           variant="outline"
                           onClick={() => router.push(`/courses/${courseId}/offerings/${offering.id}/students`)}
                         >
-                          <Users className="w-3 h-3 mr-1" />
+                          <Users className="w-4 h-4 mr-2" />
                           Manage Students
                         </GlowButton>
                         <GlowButton
@@ -1726,23 +1772,48 @@ export default function EditCoursePage() {
                           variant="outline"
                           onClick={() => router.push(`/courses/${courseId}/offerings/${offering.id}/chat`)}
                         >
-                          <MessageSquare className="w-3 h-3 mr-1" />
+                          <MessageSquare className="w-4 h-4 mr-2" />
                           Chat Room
+                        </GlowButton>
+                        <GlowButton
+                          size="sm"
+                          variant="outline"
+                          onClick={() => openEditOfferingModal(offering)}
+                        >
+                          <Edit className="w-4 h-4 mr-2" />
+                          Edit
+                        </GlowButton>
+                        <GlowButton
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            if (confirm(`Are you sure you want to delete "${offering.name}"?`)) {
+                              deleteOffering(offering.id);
+                            }
+                          }}
+                        >
+                          <Trash2 className="w-4 h-4" />
                         </GlowButton>
                       </div>
                     </div>
-                  ))}
-                </div>
-                
-                {(!course.course_classes || course.course_classes.length === 0) && (
-                  <div className="text-center py-12 text-gray-500">
-                    <Calendar className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                    <p>No offerings yet. Click "Add Offering" to create a course session.</p>
-                  </div>
-                )}
+                  </GlowCard>
+                ))}
               </div>
-            </GlowCard>
+            ) : (
+              <GlowCard className="p-8 text-center">
+                <Calendar className="w-12 h-12 text-gray-600 mx-auto mb-3" />
+                <h4 className="text-lg font-semibold text-white mb-2">No Offerings Yet</h4>
+                <p className="text-gray-400 mb-4">
+                  Create your first course offering to start enrolling students.
+                </p>
+                <GlowButton onClick={openAddOfferingModal}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Create Offering
+                </GlowButton>
+              </GlowCard>
+            )}
           </TabsContent>
+
           
           {/* Settings Tab */}
           <TabsContent value="settings">
@@ -2162,19 +2233,22 @@ export default function EditCoursePage() {
 
       {/* Schedule Modal */}
       <Dialog open={scheduleModalOpen} onOpenChange={setScheduleModalOpen}>
-        <DialogContent className="bg-slate-800 border-slate-700">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="text-white">Add Schedule</DialogTitle>
+            <DialogTitle>Add Schedule</DialogTitle>
+            <DialogDescription>
+              Add a new schedule time for this offering.
+            </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
-            <div>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
               <Label>Day of Week</Label>
               <Select
                 value={scheduleForm.day_of_week.toString()}
-                onValueChange={(v) => setScheduleForm({ ...scheduleForm, day_of_week: parseInt(v) })}
+                onValueChange={(value) => setScheduleForm(prev => ({ ...prev, day_of_week: parseInt(value) }))}
               >
-                <SelectTrigger className="mt-2">
-                  <SelectValue />
+                <SelectTrigger>
+                  <SelectValue placeholder="Select day" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="0">Sunday</SelectItem>
@@ -2187,32 +2261,38 @@ export default function EditCoursePage() {
                 </SelectContent>
               </Select>
             </div>
-            <div>
+            <div className="space-y-2">
               <Label>Start Time</Label>
               <Input
                 type="time"
                 value={scheduleForm.start_time}
-                onChange={(e) => setScheduleForm({ ...scheduleForm, start_time: e.target.value })}
-                className="mt-2"
+                onChange={(e) => setScheduleForm(prev => ({ ...prev, start_time: e.target.value }))}
               />
             </div>
-            <div>
+            <div className="space-y-2">
               <Label>End Time</Label>
               <Input
                 type="time"
                 value={scheduleForm.end_time}
-                onChange={(e) => setScheduleForm({ ...scheduleForm, end_time: e.target.value })}
-                className="mt-2"
+                onChange={(e) => setScheduleForm(prev => ({ ...prev, end_time: e.target.value }))}
               />
             </div>
           </div>
           <DialogFooter>
-            <GlowButton variant="ghost" onClick={() => setScheduleModalOpen(false)}>Cancel</GlowButton>
-            <GlowButton onClick={() => {
-              if (scheduleModalOpen && editingOffering) {
-                addSchedule(editingOffering.id);
-              }
-            }}>Add</GlowButton>
+            <GlowButton variant="outline" onClick={() => {
+              setScheduleModalOpen(false);
+              setSelectedOfferingId(null);
+              setScheduleForm({
+                day_of_week: 0,
+                start_time: "",
+                end_time: "",
+              });
+            }}>
+              Cancel
+            </GlowButton>
+            <GlowButton onClick={addSchedule}>
+              Add Schedule
+            </GlowButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
