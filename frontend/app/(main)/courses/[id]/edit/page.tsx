@@ -341,6 +341,15 @@ export default function EditCoursePage() {
   });
   const [selectedOfferingId, setSelectedOfferingId] = useState<number | null>(null);
   
+  // Add these with your other modal states
+  const [editScheduleModalOpen, setEditScheduleModalOpen] = useState(false);
+  const [editingSchedule, setEditingSchedule] = useState<{ id: number; offeringId: number; day_of_week: number; start_time: string; end_time: string } | null>(null);
+  const [editScheduleForm, setEditScheduleForm] = useState({
+    day_of_week: 0,
+    start_time: "",
+    end_time: "",
+  });
+
   // Drag and drop sensors
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -1362,7 +1371,84 @@ const getDayName = (day: number): string => {
       toast.error("Failed to add schedule");
     }
   };
-    
+
+  // Open Edit Schedule Modal
+  const openEditScheduleModal = (schedule: any, offeringId: number) => {
+    setEditingSchedule({
+      id: schedule.id,
+      offeringId: offeringId,
+      day_of_week: schedule.day_of_week,
+      start_time: schedule.start_time,
+      end_time: schedule.end_time,
+    });
+    setEditScheduleForm({
+      day_of_week: schedule.day_of_week,
+      start_time: schedule.start_time,
+      end_time: schedule.end_time,
+    });
+    setEditScheduleModalOpen(true);
+  };
+
+  // Update Schedule Function
+  const updateSchedule = async () => {
+    if (!editingSchedule) {
+      toast.error("No schedule selected");
+      return;
+    }
+
+    if (!editScheduleForm.day_of_week && editScheduleForm.day_of_week !== 0) {
+      toast.error("Please select a day of week");
+      return;
+    }
+    if (!editScheduleForm.start_time) {
+      toast.error("Please enter start time");
+      return;
+    }
+    if (!editScheduleForm.end_time) {
+      toast.error("Please enter end time");
+      return;
+    }
+
+    try {
+      await updateClassSchedule(editingSchedule.id, {
+        day_of_week: editScheduleForm.day_of_week,
+        start_time: editScheduleForm.start_time,
+        end_time: editScheduleForm.end_time,
+      });
+      
+      toast.success("Schedule updated successfully");
+      setEditScheduleModalOpen(false);
+      setEditingSchedule(null);
+      setEditScheduleForm({
+        day_of_week: 0,
+        start_time: "",
+        end_time: "",
+      });
+      
+      // Reload course data to show the updated schedule
+      await loadCourse();
+    } catch (error) {
+      console.error("Error updating schedule:", error);
+      toast.error("Failed to update schedule");
+    }
+  };
+
+  // Delete Schedule Function
+  const deleteSchedule = async (scheduleId: number, scheduleDay: string) => {
+    if (confirm(`Are you sure you want to delete the schedule for ${scheduleDay}? This action cannot be undone.`)) {
+      try {
+        await deleteClassSchedule(scheduleId);
+        toast.success("Schedule deleted successfully");
+        
+        // Reload course data to remove the schedule
+        await loadCourse();
+      } catch (error) {
+        console.error("Error deleting schedule:", error);
+        toast.error("Failed to delete schedule");
+      }
+    }
+  };
+
   // Publish/Archive actions
   const handlePublish = async () => {
     try {
@@ -1733,18 +1819,56 @@ const getDayName = (day: number): string => {
                           )}
                         </div>
                         
+
                         {/* Display Schedules */}
                         {offering.schedules && offering.schedules.length > 0 && (
                           <div className="mt-3">
-                            <div className="flex items-center gap-2 mb-2">
+                            <div className="flex items-center gap-2 mb-3">
                               <Clock className="w-4 h-4 text-purple-400" />
                               <span className="text-sm font-medium text-gray-300">Schedule:</span>
                             </div>
-                            <div className="flex flex-wrap gap-2">
+                            <div className="flex flex-col gap-2">
                               {offering.schedules.map((schedule) => (
-                                <Badge key={schedule.id} variant="outline" className="text-xs">
-                                  {getDayName(schedule.day_of_week)}: {schedule.start_time} - {schedule.end_time}
-                                </Badge>
+                                <div 
+                                  key={schedule.id} 
+                                  className="group flex items-center gap-2 transition-all duration-200"
+                                >
+                                  {/* Schedule Card */}
+                                  <div className="flex-1 flex items-center justify-between bg-slate-800/30 rounded-lg px-3 py-2 border border-slate-700/50 group-hover:border-purple-500/30 group-hover:bg-slate-800/50 transition-all duration-200">
+                                    <div className="flex items-center gap-3">
+                                      {/* Day indicator dot */}
+                                      <div className="w-2 h-2 rounded-full bg-purple-400/60 group-hover:bg-purple-400 transition-colors duration-200" />
+                                      
+                                      {/* Day and Time */}
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-sm font-medium text-gray-200 min-w-[90px]">
+                                          {getDayName(schedule.day_of_week)}
+                                        </span>
+                                        <span className="text-sm text-gray-300">
+                                          {schedule.start_time} - {schedule.end_time}
+                                        </span>
+                                      </div>
+                                    </div>
+                                    
+                                    {/* Action Buttons - Hidden by default, show on hover */}
+                                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all duration-200 translate-x-1 group-hover:translate-x-0">
+                                      <button
+                                        onClick={() => openEditScheduleModal(schedule, offering.id)}
+                                        className="p-1.5 rounded-md hover:bg-purple-500/20 transition-all duration-200"
+                                        title="Edit schedule"
+                                      >
+                                        <Edit className="w-3.5 h-3.5 text-gray-400 hover:text-purple-400 transition-colors" />
+                                      </button>
+                                      <button
+                                        onClick={() => deleteSchedule(schedule.id, getDayName(schedule.day_of_week))}
+                                        className="p-1.5 rounded-md hover:bg-red-500/20 transition-all duration-200"
+                                        title="Delete schedule"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5 text-gray-400 hover:text-red-400 transition-colors" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
                               ))}
                             </div>
                           </div>
@@ -2292,6 +2416,72 @@ const getDayName = (day: number): string => {
             </GlowButton>
             <GlowButton onClick={addSchedule}>
               Add Schedule
+            </GlowButton>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Schedule Modal */}
+      <Dialog open={editScheduleModalOpen} onOpenChange={setEditScheduleModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Schedule</DialogTitle>
+            <DialogDescription>
+              Update the schedule time for this offering.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Day of Week</Label>
+              <Select
+                value={editScheduleForm.day_of_week.toString()}
+                onValueChange={(value) => setEditScheduleForm(prev => ({ ...prev, day_of_week: parseInt(value) }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select day" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="0">Sunday</SelectItem>
+                  <SelectItem value="1">Monday</SelectItem>
+                  <SelectItem value="2">Tuesday</SelectItem>
+                  <SelectItem value="3">Wednesday</SelectItem>
+                  <SelectItem value="4">Thursday</SelectItem>
+                  <SelectItem value="5">Friday</SelectItem>
+                  <SelectItem value="6">Saturday</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Start Time</Label>
+              <Input
+                type="time"
+                value={editScheduleForm.start_time}
+                onChange={(e) => setEditScheduleForm(prev => ({ ...prev, start_time: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>End Time</Label>
+              <Input
+                type="time"
+                value={editScheduleForm.end_time}
+                onChange={(e) => setEditScheduleForm(prev => ({ ...prev, end_time: e.target.value }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <GlowButton variant="outline" onClick={() => {
+              setEditScheduleModalOpen(false);
+              setEditingSchedule(null);
+              setEditScheduleForm({
+                day_of_week: 0,
+                start_time: "",
+                end_time: "",
+              });
+            }}>
+              Cancel
+            </GlowButton>
+            <GlowButton onClick={updateSchedule}>
+              Update Schedule
             </GlowButton>
           </DialogFooter>
         </DialogContent>
