@@ -1,6 +1,9 @@
 // frontend/lib/supabase/courses.ts
 import { getSupabaseBrowserClient } from "./browser-client";
 import { Database } from "@/types/supabase";
+import {
+  autoCreateCourseChatRoom,
+} from "@/lib/supabase/chat";
 
 type Course = Database['public']['Tables']['courses']['Row'];
 type CourseInsert = Database['public']['Tables']['courses']['Insert'];

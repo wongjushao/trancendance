@@ -347,8 +347,53 @@ export default function CoursesPage() {
     router.push(`/courses/${courseId}/edit`);
   };
 
-  const handleManageStudents = (courseId: number) => {
-    router.push(`/courses/${courseId}/students`);
+  const handleManageStudents = async (courseId: number) => {
+    const supabase = getSupabaseBrowserClient();
+    
+    try {
+      // Get the first available offering (prefer ongoing, then upcoming)
+      const { data: offerings, error } = await supabase
+        .from('course_classes')
+        .select('id, name, status')
+        .eq('course_id', courseId)
+        .in('status', ['ongoing', 'upcoming'])  // Prioritize ongoing, then upcoming
+        .order('status', { ascending: false })  // 'ongoing' comes before 'upcoming' alphabetically? Actually 'ongoing' < 'upcoming' in string compare
+        .order('start_date', { ascending: true })
+        .limit(1);
+      
+      if (error) throw error;
+      
+      if (offerings && offerings.length > 0) {
+        const offering = offerings[0];
+        console.log(`Redirecting to offering ${offering.id} (${offering.status}) for course ${courseId}`);
+        router.push(`/courses/${courseId}/offerings/${offering.id}/students`);
+      } else {
+        // Also check for completed offerings as fallback
+        const { data: completedOfferings, error: completedError } = await supabase
+          .from('course_classes')
+          .select('id, name, status')
+          .eq('course_id', courseId)
+          .eq('status', 'completed')
+          .limit(1);
+        
+        if (completedError) throw completedError;
+        
+        if (completedOfferings && completedOfferings.length > 0) {
+          toast.info('This course only has completed offerings. Students cannot be enrolled in completed offerings.');
+        } else {
+          toast.error('No course offerings found. Please create an offering first.');
+        }
+        
+        // Offer to create an offering
+        const shouldCreate = confirm('Would you like to create an offering for this course?');
+        if (shouldCreate) {
+          router.push(`/courses/${courseId}/edit?tab=offerings`);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching course offerings:', error);
+      toast.error('Failed to load course offerings');
+    }
   };
 
   // Replace the handleArchiveCourse function

@@ -1,4 +1,3 @@
-// frontend/app/(main)/courses/[id]/offerings/[offeringId]/students/page.tsx
 "use client";
 
 import { useState, useEffect } from "react";
@@ -9,24 +8,35 @@ import {
   Users,
   UserPlus,
   Search,
+  Filter,
+  MoreVertical,
   Mail,
-  Trash2,
-  Loader2,
-  CheckCircle,
-  XCircle,
   Calendar,
   BookOpen,
   Award,
+  CheckCircle,
+  XCircle,
+  Clock,
+  Star,
   TrendingUp,
   Download,
   Send,
-  MoreVertical,
+  Trash2,
+  Edit2,
+  Shield,
+  UserCheck,
+  UserX,
+  BarChart3,
+  MessageSquare,
+  GraduationCap,
+  Loader2,
 } from "lucide-react";
 import { GlowCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -40,453 +50,1143 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Progress } from "@/components/ui/progress";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useRole } from "@/components/providers/RoleProvider";
 import { toast } from "sonner";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
-import { removeStudentFromCourse } from "@/lib/supabase/enrollment";
-import { getOfferingStudentsProgress } from "@/lib/supabase/progress";
+import { Database } from "@/types/supabase";
 
-interface StudentWithProgress {
-  id: number;
-  user_id: string;
+type ClassMember = Database['public']['Tables']['class_members']['Row'];
+type Profile = Database['public']['Tables']['profiles']['Row'];
+type LessonProgress = Database['public']['Tables']['lesson_progress']['Row'];
+type Assignment = Database['public']['Tables']['assignments']['Row'];
+type Submission = Database['public']['Tables']['submissions']['Row'];
+type CourseClass = Database['public']['Tables']['course_classes']['Row'];
+type Course = Database['public']['Tables']['courses']['Row'];
+
+interface Student {
+  id: string;
+  name: string;
+  email: string;
+  avatar?: string;
   enrolled_at: string;
-  role: string;
-  user: {
-    id: string;
-    first_name: string;
-    last_name: string;
-    username: string;
-    email: string;
-    avatar_url: string;
-  };
   progress: number;
   completed_lessons: number;
   total_lessons: number;
+  average_grade: number;
+  last_active: string;
+  status: "active" | "inactive" | "blocked";
+  assignments_completed: number;
+  assignments_total: number;
 }
 
-export default function ManageStudentsPage() {
+interface CourseData {
+  id: number;
+  title: string;
+  description: string;
+  instructor: string;
+  total_students: number;
+  total_lessons: number;
+  average_progress: number;
+  completion_rate: number;
+}
+
+interface StudentStats {
+  total_students: number;
+  active_students: number;
+  average_progress: number;
+  average_grade: number;
+  completion_rate: number;
+}
+
+interface EnrollStudentData {
+  email: string;
+  offeringId: number;
+}
+
+export default function CourseStudentsPage() {
   const params = useParams();
   const router = useRouter();
-  const courseId = parseInt(params.id as string);
-  const offeringId = parseInt(params.offeringId as string);
-  
+  const courseId = params.id as string;
+  const { roleData } = useRole();
+  const isTeacher = roleData.role === "teacher" || roleData.role === "org_admin";
+  const isAdmin = roleData.role === "org_admin";
+
+  const [students, setStudents] = useState<Student[]>([]);
+  const [course, setCourse] = useState<CourseData | null>(null);
+  const [stats, setStats] = useState<StudentStats | null>(null);
   const [loading, setLoading] = useState(true);
-  const [offering, setOffering] = useState<any>(null);
-  const [students, setStudents] = useState<StudentWithProgress[]>([]);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [removeModalOpen, setRemoveModalOpen] = useState(false);
-  const [selectedStudent, setSelectedStudent] = useState<StudentWithProgress | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterStatus, setFilterStatus] = useState<string>("all");
+  const [showEnrollModal, setShowEnrollModal] = useState(false);
+  const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
+  const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
+  const [enrollData, setEnrollData] = useState<EnrollStudentData>({
+    email: "",
+    offeringId: 0,
+  });
+  const [enrolling, setEnrolling] = useState(false);
   const [removing, setRemoving] = useState(false);
-  const [inviteModalOpen, setInviteModalOpen] = useState(false);
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteMessage, setInviteMessage] = useState("");
-  const [inviting, setInviting] = useState(false);
-  
+  const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
+  const [showBulkActions, setShowBulkActions] = useState(false);
+  const [courseOfferings, setCourseOfferings] = useState<CourseClass[]>([]);
+  const [loadingOfferings, setLoadingOfferings] = useState(false);
+
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        setLoading(true);
-        const supabase = getSupabaseBrowserClient();
-        
-        // Get offering details
-        const { data: offeringData, error: offeringError } = await supabase
-          .from("course_classes")
-          .select("*, course:courses(id, title)")
-          .eq("id", offeringId)
-          .single();
-        
-        if (offeringError) throw offeringError;
-        setOffering(offeringData);
-        
-        // Get students with progress
-        const studentsData = await getOfferingStudentsProgress(offeringId);
-        setStudents(studentsData as StudentWithProgress[]);
-        
-      } catch (error) {
-        console.error("Error loading students:", error);
-        toast.error("Failed to load student data");
-      } finally {
-        setLoading(false);
-      }
-    };
+    if (!isTeacher && !isAdmin) {
+      toast.error("You don't have permission to view this page");
+      router.push(`/courses/${courseId}`);
+      return;
+    }
+    fetchCourseData();
+    fetchStudents();
+    fetchCourseOfferings();
+  }, [courseId]);
+
+  const fetchCourseOfferings = async () => {
+    const supabase = getSupabaseBrowserClient();
+    setLoadingOfferings(true);
     
-    loadData();
-  }, [offeringId]);
-  
+    try {
+      const { data, error } = await supabase
+        .from('course_classes')
+        .select('id, name, status, max_students, start_date, end_date')
+        .eq('course_id', parseInt(courseId))
+        .in('status', ['upcoming', 'ongoing'])
+        .order('start_date', { ascending: true });
+      
+      if (error) throw error;
+      setCourseOfferings(data || []);
+      
+      // Auto-select first offering if available
+      if (data && data.length > 0 && enrollData.offeringId === 0) {
+        setEnrollData(prev => ({ ...prev, offeringId: data[0].id }));
+      }
+    } catch (error) {
+      console.error('Error fetching course offerings:', error);
+    } finally {
+      setLoadingOfferings(false);
+    }
+  };
+
+  const fetchCourseData = async () => {
+    const supabase = getSupabaseBrowserClient();
+    
+    try {
+      // Get course details
+      const { data: courseData, error: courseError } = await supabase
+        .from('courses')
+        .select(`
+          id,
+          title,
+          description,
+          created_by,
+          profiles:created_by (
+            first_name,
+            last_name
+          )
+        `)
+        .eq('id', parseInt(courseId))
+        .single();
+
+      if (courseError) throw courseError;
+
+      // Get instructor name
+      const instructorName = courseData.profiles 
+        ? `${courseData.profiles.first_name || ''} ${courseData.profiles.last_name || ''}`.trim() || 'Unknown Instructor'
+        : 'Unknown Instructor';
+
+      // Get course classes for this course
+      const { data: courseClasses, error: classesError } = await supabase
+        .from('course_classes')
+        .select('id')
+        .eq('course_id', parseInt(courseId));
+
+      if (classesError) throw classesError;
+
+      const courseClassIds = courseClasses?.map(cc => cc.id) || [];
+
+      // Get total lessons count
+      let totalLessons = 0;
+      const { data: modules, error: modulesError } = await supabase
+        .from('modules')
+        .select(`
+          id,
+          classes (
+            id,
+            lessons (id)
+          )
+        `)
+        .eq('course_id', parseInt(courseId));
+
+      if (!modulesError && modules) {
+        for (const module of modules) {
+          if (module.classes) {
+            for (const classItem of module.classes) {
+              if (classItem.lessons) {
+                totalLessons += classItem.lessons.length;
+              }
+            }
+          }
+        }
+      }
+
+      // Get total students count
+      let totalStudents = 0;
+      if (courseClassIds.length > 0) {
+        const { count, error: countError } = await supabase
+          .from('class_members')
+          .select('*', { count: 'exact', head: true })
+          .in('course_class_id', courseClassIds);
+
+        if (!countError) {
+          totalStudents = count || 0;
+        }
+      }
+
+      setCourse({
+        id: parseInt(courseId),
+        title: courseData.title,
+        description: courseData.description || '',
+        instructor: instructorName,
+        total_students: totalStudents,
+        total_lessons: totalLessons,
+        average_progress: 0,
+        completion_rate: 0,
+      });
+    } catch (error) {
+      console.error('Error fetching course data:', error);
+      toast.error('Failed to load course data');
+    }
+  };
+
+  const fetchStudents = async () => {
+    const supabase = getSupabaseBrowserClient();
+    setLoading(true);
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      const { data: courseClasses, error: classesError } = await supabase
+        .from('course_classes')
+        .select('id')
+        .eq('course_id', parseInt(courseId));
+
+      if (classesError) throw classesError;
+
+      const courseClassIds = courseClasses?.map(cc => cc.id) || [];
+
+      if (courseClassIds.length === 0) {
+        setStudents([]);
+        setStats({
+          total_students: 0,
+          active_students: 0,
+          average_progress: 0,
+          average_grade: 0,
+          completion_rate: 0,
+        });
+        setLoading(false);
+        return;
+      }
+
+      // FIX: Remove 'email' from the select - it doesn't exist in profiles
+      const { data: classMembers, error: membersError } = await supabase
+        .from('class_members')
+        .select(`
+          id,
+          user_id,
+          enrolled_at,
+          role,
+          profiles:user_id (
+            id,
+            first_name,
+            last_name,
+            username,
+            avatar_url
+          )
+        `)
+        .in('course_class_id', courseClassIds)
+        .eq('role', 'student');
+
+      if (membersError) throw membersError;
+
+      if (!classMembers || classMembers.length === 0) {
+        setStudents([]);
+        setStats({
+          total_students: 0,
+          active_students: 0,
+          average_progress: 0,
+          average_grade: 0,
+          completion_rate: 0,
+        });
+        setLoading(false);
+        return;
+      }
+
+      // Get all lessons for this course
+      const { data: modules, error: modulesError } = await supabase
+        .from('modules')
+        .select(`
+          id,
+          classes (
+            id,
+            lessons (id)
+          )
+        `)
+        .eq('course_id', parseInt(courseId));
+
+      let totalLessons = 0;
+      const lessonIds: number[] = [];
+      
+      if (!modulesError && modules) {
+        for (const module of modules) {
+          if (module.classes) {
+            for (const classItem of module.classes) {
+              if (classItem.lessons) {
+                for (const lesson of classItem.lessons) {
+                  totalLessons++;
+                  lessonIds.push(lesson.id);
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Get all assignments for this course
+      const { data: assignments, error: assignmentsError } = await supabase
+        .from('assignments')
+        .select('id, points')
+        .eq('course_id', parseInt(courseId));
+
+      const assignmentIds = assignments?.map(a => a.id) || [];
+
+      // Get all submissions for these assignments
+      const { data: submissions, error: submissionsError } = await supabase
+        .from('submissions')
+        .select('assignment_id, user_id, grade')
+        .in('assignment_id', assignmentIds);
+
+      const submissionsByUser: Record<string, { grade: number; assignment_id: number }[]> = {};
+      if (submissions && !submissionsError) {
+        for (const sub of submissions) {
+          if (!submissionsByUser[sub.user_id]) {
+            submissionsByUser[sub.user_id] = [];
+          }
+          submissionsByUser[sub.user_id].push({
+            grade: sub.grade || 0,
+            assignment_id: sub.assignment_id,
+          });
+        }
+      }
+
+      // Get lesson progress for all students
+      const userIds = classMembers.map(cm => cm.user_id);
+      const { data: lessonProgress, error: progressError } = await supabase
+        .from('lesson_progress')
+        .select('user_id, lesson_id, status')
+        .in('user_id', userIds)
+        .in('lesson_id', lessonIds);
+
+      const progressByUser: Record<string, { completed: number; total: number }> = {};
+      for (const userId of userIds) {
+        progressByUser[userId] = { completed: 0, total: totalLessons };
+      }
+
+      if (lessonProgress && !progressError) {
+        for (const prog of lessonProgress) {
+          if (prog.status === 'completed') {
+            progressByUser[prog.user_id].completed++;
+          }
+        }
+      }
+
+      // Build student list - FIX: Use username instead of email
+      const studentList: Student[] = classMembers.map(cm => {
+        const profile = cm.profiles as unknown as Profile;
+        const progress = progressByUser[cm.user_id] || { completed: 0, total: totalLessons };
+        const progressPercent = progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0;
+        
+        const userSubmissions = submissionsByUser[cm.user_id] || [];
+        const avgGrade = userSubmissions.length > 0
+          ? Math.round(userSubmissions.reduce((sum, s) => sum + s.grade, 0) / userSubmissions.length)
+          : 0;
+
+        // Use username or build name from first_name/last_name
+        const displayName = profile?.first_name 
+          ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() 
+          : profile?.username || 'Unknown';
+
+        return {
+          id: cm.user_id,
+          name: displayName,
+          email: profile?.username || '', // Use username as email fallback
+          avatar: profile?.avatar_url || undefined,
+          enrolled_at: cm.enrolled_at,
+          progress: progressPercent,
+          completed_lessons: progress.completed,
+          total_lessons: progress.total,
+          average_grade: avgGrade,
+          last_active: cm.enrolled_at,
+          status: "active",
+          assignments_completed: userSubmissions.length,
+          assignments_total: assignmentIds.length,
+        };
+      });
+
+      studentList.sort((a, b) => new Date(b.enrolled_at).getTime() - new Date(a.enrolled_at).getTime());
+
+      setStudents(studentList);
+
+      const activeStudents = studentList.filter(s => s.status === "active").length;
+      const avgProgress = studentList.length > 0 
+        ? Math.round(studentList.reduce((sum, s) => sum + s.progress, 0) / studentList.length)
+        : 0;
+      const avgGrade = studentList.length > 0
+        ? Math.round(studentList.reduce((sum, s) => sum + s.average_grade, 0) / studentList.length)
+        : 0;
+      const completionRate = studentList.length > 0
+        ? Math.round((studentList.filter(s => s.progress >= 80).length / studentList.length) * 100)
+        : 0;
+
+      setStats({
+        total_students: studentList.length,
+        active_students: activeStudents,
+        average_progress: avgProgress,
+        average_grade: avgGrade,
+        completion_rate: completionRate,
+      });
+
+      setCourse(prev => prev ? {
+        ...prev,
+        total_students: studentList.length,
+        average_progress: avgProgress,
+        completion_rate: completionRate,
+      } : null);
+
+    } catch (error) {
+      console.error('Error fetching students:', error);
+      toast.error('Failed to load students');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEnrollStudent = async () => {
+    if (!enrollData.email) {
+      toast.error("Please enter a username or email");
+      return;
+    }
+
+    if (!enrollData.offeringId) {
+      toast.error("Please select a course offering");
+      return;
+    }
+
+    setEnrolling(true);
+    const supabase = getSupabaseBrowserClient();
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      // Check if course offering exists and has capacity
+      const { data: offering, error: offeringError } = await supabase
+        .from('course_classes')
+        .select('id, max_students')
+        .eq('id', enrollData.offeringId)
+        .single();
+
+      if (offeringError || !offering) {
+        toast.error('Selected course offering not found');
+        setEnrolling(false);
+        return;
+      }
+
+      // Check capacity if max_students is set
+      if (offering.max_students) {
+        const { count, error: countError } = await supabase
+          .from('class_members')
+          .select('id', { count: 'exact', head: true })
+          .eq('course_class_id', offering.id);
+
+        if (countError) throw countError;
+
+        if (count && count >= offering.max_students) {
+          toast.error(`This course offering has reached its maximum capacity (${offering.max_students} students)`);
+          setEnrolling(false);
+          return;
+        }
+      }
+
+      // Search by username OR try as email (for backward compatibility)
+      let existingUser = null;
+      
+      // First, try to find by username
+      const { data: userByUsername, error: usernameError } = await supabase
+        .from('profiles')
+        .select('id, username, first_name, last_name')
+        .eq('username', enrollData.email)  // Using 'username' column
+        .maybeSingle();
+      
+      if (!usernameError && userByUsername) {
+        existingUser = userByUsername;
+      } else {
+        // If not found by username, try to find by email using a custom function
+        // Since email isn't in profiles, we need to check auth.users
+        // For now, just show error
+        toast.error(`User "${enrollData.email}" not found. Please use their username.`);
+        setEnrolling(false);
+        return;
+      }
+      
+      if (!existingUser) {
+        toast.error(`User with username "${enrollData.email}" does not exist. They need to register first.`);
+        setEnrolling(false);
+        return;
+      }
+
+      // Check if already enrolled in this offering
+      const { data: existingEnrollment, error: enrollmentCheckError } = await supabase
+        .from('class_members')
+        .select('id')
+        .eq('course_class_id', offering.id)
+        .eq('user_id', existingUser.id)
+        .maybeSingle();
+
+      if (enrollmentCheckError) throw enrollmentCheckError;
+
+      if (existingEnrollment) {
+        toast.error('This student is already enrolled in this course offering');
+        setEnrolling(false);
+        return;
+      }
+
+      // Enroll the user
+      const { error: enrollError } = await supabase
+        .from('class_members')
+        .insert({
+          course_class_id: offering.id,
+          user_id: existingUser.id,
+          role: 'student',
+          enrolled_at: new Date().toISOString(),
+        });
+
+      if (enrollError) throw enrollError;
+
+      const studentName = existingUser.first_name 
+        ? `${existingUser.first_name || ''} ${existingUser.last_name || ''}`.trim() 
+        : existingUser.username;
+      
+      toast.success(`${studentName} has been enrolled in the course!`);
+
+      // Refresh student list
+      await fetchStudents();
+      setShowEnrollModal(false);
+      setEnrollData({ email: "", offeringId: courseOfferings[0]?.id || 0 });
+
+    } catch (error) {
+      console.error('Error enrolling student:', error);
+      toast.error('Failed to enroll student. Please try again.');
+    } finally {
+      setEnrolling(false);
+    }
+  };
+
   const handleRemoveStudent = async () => {
     if (!selectedStudent) return;
     
     setRemoving(true);
+    const supabase = getSupabaseBrowserClient();
+
     try {
-      await removeStudentFromCourse(offeringId, selectedStudent.user_id);
-      
-      // Remove from local state
-      setStudents(students.filter(s => s.user_id !== selectedStudent.user_id));
-      toast.success(`${selectedStudent.user.first_name || "Student"} removed from course`);
-      setRemoveModalOpen(false);
+      // Get course classes for this course
+      const { data: courseClasses, error: classesError } = await supabase
+        .from('course_classes')
+        .select('id')
+        .eq('course_id', parseInt(courseId));
+
+      if (classesError) throw classesError;
+
+      const courseClassIds = courseClasses?.map(cc => cc.id) || [];
+
+      // Delete class members records
+      const { error: deleteError } = await supabase
+        .from('class_members')
+        .delete()
+        .in('course_class_id', courseClassIds)
+        .eq('user_id', selectedStudent.id);
+
+      if (deleteError) throw deleteError;
+
+      toast.success(`${selectedStudent.name} has been removed from the course`);
+      setShowRemoveConfirm(false);
       setSelectedStudent(null);
+      
+      // Refresh student list
+      await fetchStudents();
+      
     } catch (error) {
-      console.error("Error removing student:", error);
-      toast.error("Failed to remove student");
+      console.error('Error removing student:', error);
+      toast.error('Failed to remove student');
     } finally {
       setRemoving(false);
     }
   };
-  
-  const handleSendReminder = async (student: StudentWithProgress) => {
-    toast.info(`Reminder sent to ${student.user.email}`);
-    // In production, this would call an API to send email
-  };
-  
-  const handleInviteStudent = async () => {
-    if (!inviteEmail.trim()) {
-      toast.error("Please enter an email address");
+
+  const handleBulkRemove = async () => {
+    if (selectedStudents.length === 0) return;
+    
+    if (!confirm(`Are you sure you want to remove ${selectedStudents.length} students from this course?`)) {
       return;
     }
     
-    setInviting(true);
+    const supabase = getSupabaseBrowserClient();
+
     try {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
+      // Get course classes for this course
+      const { data: courseClasses, error: classesError } = await supabase
+        .from('course_classes')
+        .select('id')
+        .eq('course_id', parseInt(courseId));
+
+      if (classesError) throw classesError;
+
+      const courseClassIds = courseClasses?.map(cc => cc.id) || [];
+
+      // Delete class members records for all selected students
+      const { error: deleteError } = await supabase
+        .from('class_members')
+        .delete()
+        .in('course_class_id', courseClassIds)
+        .in('user_id', selectedStudents);
+
+      if (deleteError) throw deleteError;
+
+      toast.success(`${selectedStudents.length} students have been removed`);
+      setSelectedStudents([]);
+      setShowBulkActions(false);
       
-      // Check if user exists in the system
-      const { data: existingUser } = await supabase
-        .from("profiles")
-        .select("id")
-        .eq("email", inviteEmail)
-        .single();
-      
-      if (existingUser) {
-        // User exists, check if already enrolled
-        const { data: existingEnrollment } = await supabase
-          .from("class_members")
-          .select("id")
-          .eq("course_class_id", offeringId)
-          .eq("user_id", existingUser.id)
-          .single();
-        
-        if (existingEnrollment) {
-          toast.error("User is already enrolled in this course");
-          setInviteModalOpen(false);
-          setInviteEmail("");
-          setInviteMessage("");
-          return;
-        }
-      }
-      
-      // Create invitation (using mock for now - replace with actual invitation system)
-      toast.success(`Invitation sent to ${inviteEmail}`);
-      setInviteModalOpen(false);
-      setInviteEmail("");
-      setInviteMessage("");
+      // Refresh student list
+      await fetchStudents();
       
     } catch (error) {
-      console.error("Error inviting student:", error);
-      toast.error("Failed to send invitation");
-    } finally {
-      setInviting(false);
+      console.error('Error bulk removing students:', error);
+      toast.error('Failed to remove students');
     }
   };
-  
-  const filteredStudents = students.filter(student => {
-    const fullName = `${student.user.first_name || ""} ${student.user.last_name || ""}`.toLowerCase();
-    const email = student.user.email?.toLowerCase() || "";
-    const search = searchTerm.toLowerCase();
-    return fullName.includes(search) || email.includes(search);
-  });
-  
+
+  const handleSendReminder = async (student: Student) => {
+    // This would integrate with a real email service in production
+    toast.info(`Reminder functionality would send an email to ${student.email}. This requires email service integration.`);
+  };
+
+  const handleMessageStudent = async (student: Student) => {
+    router.push(`/messages?user=${student.id}`);
+  };
+
+  const handleViewProgress = (student: Student) => {
+    router.push(`/courses/${courseId}/students/${student.id}/progress`);
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case "active":
+        return "text-green-400 bg-green-400/10";
+      case "inactive":
+        return "text-yellow-400 bg-yellow-400/10";
+      case "blocked":
+        return "text-red-400 bg-red-400/10";
+      default:
+        return "text-gray-400 bg-gray-400/10";
+    }
+  };
+
   const getProgressColor = (progress: number) => {
     if (progress >= 80) return "text-green-400";
     if (progress >= 50) return "text-yellow-400";
-    return "text-blue-400";
+    return "text-red-400";
   };
-  
-  const getInitials = (firstName: string, lastName: string, username: string) => {
-    if (firstName) return firstName[0];
-    if (lastName) return lastName[0];
-    if (username) return username[0];
-    return "S";
+
+  const getGradeColor = (grade: number) => {
+    if (grade >= 90) return "text-green-400";
+    if (grade >= 70) return "text-yellow-400";
+    return "text-red-400";
   };
-  
-  const enrolledCount = students.length;
-  const maxStudents = offering?.max_students || 0;
-  const availableSpots = maxStudents > 0 ? maxStudents - enrolledCount : "Unlimited";
-  const averageProgress = students.length > 0 
-    ? Math.round(students.reduce((sum, s) => sum + s.progress, 0) / students.length)
-    : 0;
-  
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-purple-500" />
-      </div>
+
+  const filteredStudents = students.filter(student => {
+    const matchesSearch = student.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                          student.email.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesStatus = filterStatus === "all" || student.status === filterStatus;
+    return matchesSearch && matchesStatus;
+  });
+
+  const toggleStudentSelection = (studentId: string) => {
+    setSelectedStudents(prev =>
+      prev.includes(studentId)
+        ? prev.filter(id => id !== studentId)
+        : [...prev, studentId]
     );
+  };
+
+  const toggleAllStudents = () => {
+    if (selectedStudents.length === filteredStudents.length) {
+      setSelectedStudents([]);
+    } else {
+      setSelectedStudents(filteredStudents.map(s => s.id));
+    }
+  };
+
+  if (!isTeacher && !isAdmin) {
+    return null;
   }
-  
+
+  const downloadCSV = () => {
+    const headers = ['Name', 'Email', 'Progress', 'Average Grade', 'Status', 'Enrolled Date'];
+    const rows = filteredStudents.map(s => [
+      s.name,
+      s.email,
+      `${s.progress}%`,
+      `${s.average_grade}%`,
+      s.status,
+      new Date(s.enrolled_at).toLocaleDateString(),
+    ]);
+    
+    const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `course_${courseId}_students.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success('Student list exported');
+  };
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 py-8 px-4">
-      <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-8 flex-wrap gap-4">
-          <div className="flex items-center gap-4">
-            <Link href={`/courses/${courseId}/edit?tab=offerings`}>
-              <GlowButton variant="ghost" size="sm">
-                <ArrowLeft className="w-4 h-4 mr-2" />
-                Back to Course
-              </GlowButton>
-            </Link>
-            <div>
-              <h1 className="text-3xl font-bold text-white">Manage Students</h1>
-              <p className="text-gray-400 mt-1">
-                {offering?.name} • {offering?.course?.title}
-              </p>
+    <div className="container mx-auto px-4 py-8">
+      {/* Header */}
+      <div className="mb-6">
+        <Link
+          href={`/courses/${courseId}`}
+          className="text-gray-400 hover:text-white transition-colors flex items-center gap-2 mb-4"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Back to Course
+        </Link>
+        
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold text-white mb-2">Manage Students</h1>
+            <p className="text-gray-400">
+              {course?.title} • {stats?.total_students} students enrolled
+            </p>
+          </div>
+          <div className="flex gap-3">
+            <GlowButton onClick={() => setShowEnrollModal(true)}>
+              <UserPlus className="w-4 h-4 mr-2" />
+              Enroll Student
+            </GlowButton>
+            <GlowButton variant="outline" onClick={downloadCSV}>
+              <Download className="w-4 h-4 mr-2" />
+              Export List
+            </GlowButton>
+          </div>
+        </div>
+      </div>
+
+      {/* Statistics Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-8">
+        <GlowCard>
+          <div className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-gray-400 text-sm">Total Students</p>
+                <p className="text-2xl font-bold text-white">{stats?.total_students || 0}</p>
+              </div>
+              <Users className="w-8 h-8 text-purple-400 opacity-50" />
             </div>
           </div>
-          <GlowButton variant="primary" onClick={() => setInviteModalOpen(true)}>
-            <UserPlus className="w-4 h-4 mr-2" />
-            Invite Student
-          </GlowButton>
-        </div>
+        </GlowCard>
         
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <GlowCard>
-            <div className="p-4">
-              <div className="flex items-center gap-3">
-                <Users className="w-8 h-8 text-purple-400" />
-                <div>
-                  <div className="text-2xl font-bold text-white">{enrolledCount}</div>
-                  <div className="text-sm text-gray-400">Enrolled Students</div>
-                </div>
-              </div>
-            </div>
-          </GlowCard>
-          
-          <GlowCard>
-            <div className="p-4">
-              <div className="flex items-center gap-3">
-                <UserPlus className="w-8 h-8 text-green-400" />
-                <div>
-                  <div className="text-2xl font-bold text-white">
-                    {typeof availableSpots === "number" ? availableSpots : "∞"}
-                  </div>
-                  <div className="text-sm text-gray-400">Available Spots</div>
-                </div>
-              </div>
-            </div>
-          </GlowCard>
-          
-          <GlowCard>
-            <div className="p-4">
-              <div className="flex items-center gap-3">
-                <TrendingUp className="w-8 h-8 text-yellow-400" />
-                <div>
-                  <div className="text-2xl font-bold text-white">{averageProgress}%</div>
-                  <div className="text-sm text-gray-400">Avg. Progress</div>
-                </div>
-              </div>
-            </div>
-          </GlowCard>
-          
-          <GlowCard>
-            <div className="p-4">
-              <div className="flex items-center gap-3">
-                <Award className="w-8 h-8 text-blue-400" />
-                <div>
-                  <div className="text-2xl font-bold text-white">
-                    {students.filter(s => s.progress === 100).length}
-                  </div>
-                  <div className="text-sm text-gray-400">Completed</div>
-                </div>
-              </div>
-            </div>
-          </GlowCard>
-        </div>
-        
-        {/* Main Content */}
         <GlowCard>
-          <div className="p-6">
-            {/* Search Bar */}
-            <div className="flex gap-4 mb-6">
-              <div className="flex-1 relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <div className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-gray-400 text-sm">Active Students</p>
+                <p className="text-2xl font-bold text-green-400">{stats?.active_students || 0}</p>
+              </div>
+              <UserCheck className="w-8 h-8 text-green-400 opacity-50" />
+            </div>
+          </div>
+        </GlowCard>
+        
+        <GlowCard>
+          <div className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-gray-400 text-sm">Avg. Progress</p>
+                <p className="text-2xl font-bold text-blue-400">{stats?.average_progress || 0}%</p>
+              </div>
+              <TrendingUp className="w-8 h-8 text-blue-400 opacity-50" />
+            </div>
+          </div>
+        </GlowCard>
+        
+        <GlowCard>
+          <div className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-gray-400 text-sm">Avg. Grade</p>
+                <p className="text-2xl font-bold text-purple-400">{stats?.average_grade || 0}%</p>
+              </div>
+              <Award className="w-8 h-8 text-purple-400 opacity-50" />
+            </div>
+          </div>
+        </GlowCard>
+        
+        <GlowCard>
+          <div className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-gray-400 text-sm">Completion Rate</p>
+                <p className="text-2xl font-bold text-green-400">{stats?.completion_rate || 0}%</p>
+              </div>
+              <CheckCircle className="w-8 h-8 text-green-400 opacity-50" />
+            </div>
+          </div>
+        </GlowCard>
+      </div>
+
+      {/* Filters and Search */}
+      <GlowCard className="mb-6">
+        <div className="p-5">
+          <div className="flex flex-col md:flex-row gap-4">
+            <div className="flex-1">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
                 <Input
-                  placeholder="Search by name or email..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10"
+                  placeholder="Search students by name or email..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-9"
                 />
               </div>
             </div>
             
-            {/* Students List */}
-            {filteredStudents.length === 0 ? (
-              <div className="text-center py-12">
-                <Users className="w-16 h-16 mx-auto mb-4 text-gray-600" />
-                <h3 className="text-xl font-semibold text-white mb-2">No Students Enrolled</h3>
-                <p className="text-gray-400 mb-6">
-                  {searchTerm ? "No students match your search" : "This offering has no students yet"}
-                </p>
-                {!searchTerm && (
-                  <GlowButton onClick={() => setInviteModalOpen(true)}>
-                    <UserPlus className="w-4 h-4 mr-2" />
-                    Invite Your First Student
-                  </GlowButton>
-                )}
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {filteredStudents.map((student) => (
-                  <div key={student.id} className="bg-slate-800/30 rounded-lg p-4">
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                      {/* Student Info */}
-                      <div className="flex items-center gap-3">
-                        <Avatar className="w-10 h-10">
-                          <AvatarImage src={student.user.avatar_url || undefined} />
-                          <AvatarFallback>
-                            {getInitials(
-                              student.user.first_name || "",
-                              student.user.last_name || "",
-                              student.user.username || ""
-                            )}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <div className="font-semibold text-white">
-                            {student.user.first_name} {student.user.last_name}
-                          </div>
-                          <div className="text-sm text-gray-400">{student.user.email}</div>
-                          <div className="flex items-center gap-2 mt-1 text-xs text-gray-500">
-                            <Calendar className="w-3 h-3" />
-                            <span>Enrolled: {new Date(student.enrolled_at).toLocaleDateString()}</span>
-                          </div>
-                        </div>
-                      </div>
-                      
-                      {/* Progress */}
-                      <div className="flex-1 max-w-xs">
-                        <div className="flex justify-between text-sm mb-1">
-                          <span className="text-gray-400">Progress</span>
-                          <span className={getProgressColor(student.progress)}>
-                            {student.progress}%
-                          </span>
-                        </div>
-                        <Progress value={student.progress} className="h-2" />
-                        <div className="text-xs text-gray-500 mt-1">
-                          {student.completed_lessons} / {student.total_lessons} lessons
-                        </div>
-                      </div>
-                      
-                      {/* Actions */}
-                      <div className="flex gap-2">
-                        <GlowButton
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => handleSendReminder(student)}
-                        >
-                          <Send className="w-3 h-3 mr-1" />
-                          Remind
-                        </GlowButton>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <GlowButton size="sm" variant="ghost">
-                              <MoreVertical className="w-4 h-4" />
-                            </GlowButton>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              className="text-red-400"
-                              onClick={() => {
-                                setSelectedStudent(student);
-                                setRemoveModalOpen(true);
-                              }}
-                            >
-                              <Trash2 className="w-4 h-4 mr-2" />
-                              Remove from Course
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
+            <select
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value)}
+              className="px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-purple-500"
+            >
+              <option value="all">All Status</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+              <option value="blocked">Blocked</option>
+            </select>
+            
+            {selectedStudents.length > 0 && (
+              <GlowButton variant="outline" onClick={handleBulkRemove}>
+                <Trash2 className="w-4 h-4 mr-2" />
+                Remove Selected ({selectedStudents.length})
+              </GlowButton>
             )}
           </div>
-        </GlowCard>
+        </div>
+      </GlowCard>
+
+      {/* Students List */}
+      <div className="space-y-4">
+        {loading ? (
+          <div className="flex justify-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500"></div>
+          </div>
+        ) : filteredStudents.length === 0 ? (
+          <GlowCard>
+            <div className="p-12 text-center">
+              <Users className="w-16 h-16 text-gray-600 mx-auto mb-4" />
+              <h3 className="text-xl font-semibold text-white mb-2">No students found</h3>
+              <p className="text-gray-400">
+                {searchQuery || filterStatus !== "all"
+                  ? "Try adjusting your search or filters"
+                  : "No students are enrolled in this course yet"}
+              </p>
+              {!searchQuery && filterStatus === "all" && (
+                <GlowButton onClick={() => setShowEnrollModal(true)} className="mt-4">
+                  <UserPlus className="w-4 h-4 mr-2" />
+                  Enroll Your First Student
+                </GlowButton>
+              )}
+            </div>
+          </GlowCard>
+        ) : (
+          <>
+            {/* Student Cards */}
+            {filteredStudents.map((student) => (
+              <GlowCard key={student.id}>
+                <div className="p-6">
+                  <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                    {/* Selection Checkbox */}
+                    <div className="flex items-start gap-4">
+                      <input
+                        type="checkbox"
+                        checked={selectedStudents.includes(student.id)}
+                        onChange={() => toggleStudentSelection(student.id)}
+                        className="mt-1 w-4 h-4 rounded border-gray-700 bg-gray-800 text-purple-600 focus:ring-purple-500"
+                      />
+                      
+                      {/* Student Info */}
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-2 flex-wrap">
+                          <h3 className="text-lg font-semibold text-white">
+                            {student.name}
+                          </h3>
+                          <Badge className={getStatusColor(student.status)}>
+                            {student.status}
+                          </Badge>
+                        </div>
+                        
+                        <div className="space-y-2">
+                          <p className="text-sm text-gray-400 flex items-center gap-2">
+                            <Mail className="w-4 h-4" />
+                            {student.email}
+                          </p>
+                          <p className="text-sm text-gray-400 flex items-center gap-2">
+                            <Calendar className="w-4 h-4" />
+                            Enrolled: {new Date(student.enrolled_at).toLocaleDateString()}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {/* Progress Stats */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 flex-1">
+                      <div className="text-center">
+                        <p className="text-xs text-gray-400 mb-1">Progress</p>
+                        <p className={`text-xl font-bold ${getProgressColor(student.progress)}`}>
+                          {student.progress}%
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          {student.completed_lessons}/{student.total_lessons} lessons
+                        </p>
+                      </div>
+                      
+                      <div className="text-center">
+                        <p className="text-xs text-gray-400 mb-1">Avg. Grade</p>
+                        <p className={`text-xl font-bold ${getGradeColor(student.average_grade)}`}>
+                          {student.average_grade}%
+                        </p>
+                      </div>
+                      
+                      <div className="text-center">
+                        <p className="text-xs text-gray-400 mb-1">Assignments</p>
+                        <p className="text-xl font-bold text-white">
+                          {student.assignments_completed}/{student.assignments_total}
+                        </p>
+                        <p className="text-xs text-gray-500">completed</p>
+                      </div>
+                      
+                      <div className="text-center">
+                        <div className="w-full bg-gray-800 rounded-full h-2 mb-1">
+                          <div
+                            className="bg-purple-500 h-2 rounded-full transition-all"
+                            style={{ width: `${student.progress}%` }}
+                          />
+                        </div>
+                        <p className="text-xs text-gray-400">Course Progress</p>
+                      </div>
+                    </div>
+                    
+                    {/* Actions */}
+                    <div className="flex gap-2">
+                      <GlowButton
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleSendReminder(student)}
+                        title="Send reminder email"
+                      >
+                        <Send className="w-4 h-4" />
+                      </GlowButton>
+                      <GlowButton
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleMessageStudent(student)}
+                      >
+                        <MessageSquare className="w-4 h-4" />
+                      </GlowButton>
+                      <GlowButton
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleViewProgress(student)}
+                      >
+                        <BarChart3 className="w-4 h-4" />
+                      </GlowButton>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <GlowButton variant="ghost" size="sm">
+                            <MoreVertical className="w-4 h-4" />
+                          </GlowButton>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onClick={() => handleViewProgress(student)}
+                            className="cursor-pointer"
+                          >
+                            <BarChart3 className="w-4 h-4 mr-2" />
+                            View Detailed Progress
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => handleMessageStudent(student)}
+                            className="cursor-pointer"
+                          >
+                            <MessageSquare className="w-4 h-4 mr-2" />
+                            Send Message
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => handleSendReminder(student)}
+                            className="cursor-pointer"
+                          >
+                            <Send className="w-4 h-4 mr-2" />
+                            Send Reminder
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => {
+                              setSelectedStudent(student);
+                              setShowRemoveConfirm(true);
+                            }}
+                            className="cursor-pointer text-red-400"
+                          >
+                            <UserX className="w-4 h-4 mr-2" />
+                            Remove from Course
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </div>
+                </div>
+              </GlowCard>
+            ))}
+          </>
+        )}
       </div>
-      
-      {/* Remove Student Confirmation Modal */}
-      <Dialog open={removeModalOpen} onOpenChange={setRemoveModalOpen}>
-        <DialogContent className="bg-slate-800 border-slate-700">
+
+      {/* Enroll Student Modal */}
+      <Dialog open={showEnrollModal} onOpenChange={setShowEnrollModal}>
+        <DialogContent className="bg-gray-900 border-gray-800 max-w-md">
           <DialogHeader>
-            <DialogTitle className="text-white">Remove Student</DialogTitle>
+            <DialogTitle className="text-white">Enroll Existing Student</DialogTitle>
           </DialogHeader>
-          <p className="text-gray-300">
-            Are you sure you want to remove{" "}
-            <span className="font-semibold text-white">
-              {selectedStudent?.user.first_name} {selectedStudent?.user.last_name}
-            </span>{" "}
-            from this course? This action cannot be undone.
-          </p>
+          
+          <div className="space-y-4 py-4">
+            <div>
+              <Label htmlFor="username">Student Username</Label>
+              <Input
+                id="username"
+                type="text"
+                placeholder="john_doe"  // Changed from email placeholder
+                value={enrollData.email}
+                onChange={(e) => setEnrollData({ ...enrollData, email: e.target.value })}
+                className="mt-1"
+              />
+              <p className="text-xs text-gray-400 mt-1">
+                Enter the student's username (not email). The student must already have an account.
+              </p>
+            </div>
+
+            <div>
+              <Label htmlFor="offering">Course Offering</Label>
+              <Select
+                value={enrollData.offeringId.toString()}
+                onValueChange={(value) => setEnrollData({ ...enrollData, offeringId: parseInt(value) })}
+              >
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Select offering" />
+                </SelectTrigger>
+                <SelectContent>
+                  {courseOfferings.map((offering) => (
+                    <SelectItem key={offering.id} value={offering.id.toString()}>
+                      {offering.name} ({offering.status})
+                      {offering.max_students && ` - Max: ${offering.max_students}`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {courseOfferings.length === 0 && !loadingOfferings && (
+                <p className="text-xs text-yellow-400 mt-1">
+                  No active course offerings available. Please create an offering first.
+                </p>
+              )}
+            </div>
+            
+            <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
+              <p className="text-sm text-blue-400">
+                Enter the student's <strong>username</strong> to enroll them. 
+                The student must have an existing account.
+              </p>
+            </div>
+          </div>
+          
           <DialogFooter>
-            <GlowButton variant="ghost" onClick={() => setRemoveModalOpen(false)}>
+            <GlowButton
+              variant="outline"
+              onClick={() => {
+                setShowEnrollModal(false);
+                setEnrollData({ email: "", offeringId: courseOfferings[0]?.id || 0 });
+              }}
+            >
               Cancel
             </GlowButton>
             <GlowButton
-              variant="primary"
-              className="bg-red-500 hover:bg-red-600"
-              onClick={handleRemoveStudent}
-              isLoading={removing}
+              onClick={handleEnrollStudent}
+              isLoading={enrolling}
+              disabled={courseOfferings.length === 0}
             >
-              Remove
+              <UserPlus className="w-4 h-4 mr-2" />
+              Enroll Student
             </GlowButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      
-      {/* Invite Student Modal */}
-      <Dialog open={inviteModalOpen} onOpenChange={setInviteModalOpen}>
-        <DialogContent className="bg-slate-800 border-slate-700 max-w-md">
+
+      {/* Remove Student Confirmation Modal */}
+      <Dialog open={showRemoveConfirm} onOpenChange={setShowRemoveConfirm}>
+        <DialogContent className="bg-gray-900 border-gray-800 max-w-md">
           <DialogHeader>
-            <DialogTitle className="text-white">Invite Student</DialogTitle>
+            <DialogTitle className="text-white">Remove Student</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="email">Email Address *</Label>
-              <Input
-                id="email"
-                type="email"
-                value={inviteEmail}
-                onChange={(e) => setInviteEmail(e.target.value)}
-                placeholder="student@example.com"
-                className="mt-2"
-              />
-            </div>
-            <div>
-              <Label htmlFor="message">Personal Message (Optional)</Label>
-              <Textarea
-                id="message"
-                value={inviteMessage}
-                onChange={(e) => setInviteMessage(e.target.value)}
-                placeholder="Welcome to the course! Here's what you'll learn..."
-                rows={3}
-                className="mt-2"
-              />
-            </div>
-            <div className="bg-blue-500/10 rounded-lg p-3 text-sm text-blue-400">
-              <p>The student will receive an email invitation to join this course.</p>
-            </div>
+          
+          <div className="py-4">
+            <p className="text-gray-300">
+              Are you sure you want to remove <span className="font-semibold text-white">{selectedStudent?.name}</span> from this course?
+            </p>
+            <p className="text-sm text-red-400 mt-2">
+              This action cannot be undone. The student will lose access to all course materials and their progress will be deleted.
+            </p>
           </div>
+          
           <DialogFooter>
-            <GlowButton variant="ghost" onClick={() => setInviteModalOpen(false)}>
+            <GlowButton
+              variant="outline"
+              onClick={() => setShowRemoveConfirm(false)}
+            >
               Cancel
             </GlowButton>
-            <GlowButton onClick={handleInviteStudent} isLoading={inviting}>
-              Send Invitation
+            <GlowButton
+              onClick={handleRemoveStudent}
+              isLoading={removing}
+              variant="outline"
+              className="border-red-500 text-red-400 hover:bg-red-500/10"
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              Remove Student
             </GlowButton>
           </DialogFooter>
         </DialogContent>
