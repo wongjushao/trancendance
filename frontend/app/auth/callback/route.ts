@@ -11,6 +11,10 @@ function getSiteOrigin(): string {
   return "https://localhost:3000";
 }
 
+function getAuthServiceOrigin(): string {
+  return (process.env.NEXT_PUBLIC_BACKEND_URL || "https://auth-service:5001").replace(/\/$/, "");
+}
+
 async function createSupabaseServerClient() {
   const cookieStore = await cookies();
   
@@ -33,13 +37,13 @@ async function createSupabaseServerClient() {
   );
 }
 
-async function checkMFAStatus(userId: string, token: string): Promise<{
+async function checkMFAStatus(token: string): Promise<{
   enabled_mfa: boolean;
   totp_configured: boolean;
 }> {
   try {
     const response = await fetch(
-      `${getSiteOrigin()}/api/auth-service/mfa/status`,
+      `${getAuthServiceOrigin()}/api/auth-service/mfa/status`,
       {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -48,7 +52,7 @@ async function checkMFAStatus(userId: string, token: string): Promise<{
     );
     if (!response.ok) {
       console.error("[Auth Callback] MFA status check failed:", response.status);
-      return { enabled_mfa: false, totp_configured: false };
+      throw new Error("MFA status check failed");
     }
     const data = await response.json();
     console.log("[Auth Callback] MFA status response:", data);
@@ -58,7 +62,7 @@ async function checkMFAStatus(userId: string, token: string): Promise<{
     };
   } catch (error) {
     console.error("[Auth Callback] Error checking MFA status:", error);
-    return { enabled_mfa: false, totp_configured: false };
+    throw error;
   }
 }
 
@@ -120,28 +124,26 @@ export async function GET(request: NextRequest) {
 
     // Check MFA status
     console.log("[Auth Callback] Checking MFA status...");
-    const mfaStatus = await checkMFAStatus(user.id, accessToken);
+    const mfaStatus = await checkMFAStatus(accessToken);
     console.log("[Auth Callback] MFA Status:", mfaStatus);
 
     const mfaEnabled = mfaStatus.enabled_mfa && mfaStatus.totp_configured;
 
-  if (mfaEnabled) {
-    console.log("[Auth Callback] MFA is enabled - redirecting to MFA verification without creating session");
-    
-    const html = `
+    if (mfaEnabled) {
+      console.log("[Auth Callback] MFA is enabled - redirecting to MFA verification without creating session");
+
+      const html = `
       <!DOCTYPE html>
       <html>
         <head>
           <title>MFA Required</title>
           <script>
-            // Clear any existing session data
-            localStorage.clear();
-            
             // Store tokens in sessionStorage (client-side only)
-            sessionStorage.setItem('mfa_access_token', '${accessToken}');
-            sessionStorage.setItem('mfa_refresh_token', '${refreshToken}');
-            sessionStorage.setItem('mfa_user_id', '${user.id}');
+            sessionStorage.setItem('mfa_access_token', ${JSON.stringify(accessToken)});
+            sessionStorage.setItem('mfa_refresh_token', ${JSON.stringify(refreshToken)});
+            sessionStorage.setItem('mfa_user_id', ${JSON.stringify(user.id)});
             sessionStorage.setItem('mfa_required', 'true');
+            document.cookie = 'mfa_pending=true; path=/; max-age=600; SameSite=Lax';
             
             console.log('MFA data stored in sessionStorage');
             console.log('Refresh token stored:', !!sessionStorage.getItem('mfa_refresh_token'));
@@ -157,13 +159,13 @@ export async function GET(request: NextRequest) {
         </body>
       </html>
     `;
-    
-    return new NextResponse(html, {
-      headers: {
-        'Content-Type': 'text/html',
-      },
-    });
-  }
+
+      return new NextResponse(html, {
+        headers: {
+          'Content-Type': 'text/html',
+        },
+      });
+    }
 
     // No MFA required, proceed to dashboard
     console.log("[Auth Callback] No MFA required, redirecting to dashboard");
