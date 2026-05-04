@@ -963,6 +963,7 @@ function AssignmentSubmission({
 }
 
 // Sidebar Component
+// Update SidebarProps interface
 interface SidebarProps {
   course: CourseData;
   modules: ModuleData[];
@@ -972,8 +973,15 @@ interface SidebarProps {
   onToggleCollapse: () => void;
   overallProgress: number;
   classMemberId: number | null;
+  userReview: any;
+  onRateClick: () => void;
+  onGetCertificate: () => void;
+  averageRating: number;  // Add this
+  courseReviews: any[];   // Add this for the count
+  dashboardSidebarCollapsed: boolean;  // ADD THIS
 }
 
+// Sidebar Component - Updated with Course Info Footer
 function Sidebar({ 
   course, 
   modules, 
@@ -982,7 +990,13 @@ function Sidebar({
   isCollapsed, 
   onToggleCollapse,
   overallProgress,
-  classMemberId
+  classMemberId,
+  userReview,
+  onRateClick,
+  onGetCertificate,
+  averageRating,  // Add this
+  courseReviews,  // Add this
+  dashboardSidebarCollapsed 
 }: SidebarProps) {
   const [expandedModules, setExpandedModules] = useState<Set<number>>(new Set(modules.map(m => m.id)));
 
@@ -997,14 +1011,14 @@ function Sidebar({
   };
 
   return (
-    <div className={`fixed left-0 top-16 bottom-0 z-20 bg-gray-900 border-r border-gray-800 transition-all duration-300 flex flex-col ${
+    <div className={`fixed top-16 bottom-0 z-20 bg-gray-900 border-r border-gray-800 transition-all duration-300 flex flex-col ${
       isCollapsed ? "w-16" : "w-80"
-    }`}>
-      {/* Header */}
-      <div className="p-4 border-b border-gray-800 flex items-center justify-between">
+    } ${dashboardSidebarCollapsed ? "left-16" : "left-64"}`}>
+      {/* Header - Course Title & Progress */}
+      <div className="p-4 border-b border-gray-800">
         {!isCollapsed && (
-          <div className="flex-1">
-            <h2 className="font-semibold text-white truncate">{course.title}</h2>
+          <div className="mb-3">
+            <h2 className="font-semibold text-white truncate text-lg">{course.title}</h2>
             <div className="mt-2">
               <div className="flex justify-between text-xs text-gray-400 mb-1">
                 <span>Progress</span>
@@ -1016,85 +1030,170 @@ function Sidebar({
         )}
         <button
           onClick={onToggleCollapse}
-          className="p-2 rounded-lg hover:bg-gray-800 transition-colors"
+          className={`p-2 rounded-lg hover:bg-gray-800 transition-colors ${isCollapsed ? 'mx-auto' : ''}`}
         >
           {isCollapsed ? <ChevronRight className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
         </button>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto p-2 space-y-2">
-        {modules.map((module) => (
-          <div key={module.id} className="space-y-1">
-            {/* Module Header */}
-            <button
-              onClick={() => toggleModule(module.id)}
-              className={`w-full flex items-center gap-2 p-2 rounded-lg hover:bg-gray-800 transition-colors ${
-                isCollapsed ? "justify-center" : ""
-              }`}
-            >
-              {expandedModules.has(module.id) ? (
-                <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
-              ) : (
-                <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
-              )}
-              {!isCollapsed && (
-                <div className="flex-1 text-left">
-                  <p className="text-sm font-medium text-white truncate">{module.title}</p>
-                  {module.progress > 0 && (
-                    <Progress value={module.progress} className="h-1 mt-1" />
-                  )}
+      {/* Course Content - Scrollable Area */}
+      <div className="flex-1 overflow-y-auto p-2 space-y-4">
+        {/* Curriculum Section */}
+        <div className="space-y-2">
+          {!isCollapsed && (
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-2">Curriculum</h3>
+          )}
+          {modules.map((module) => (
+            <div key={module.id} className="space-y-1">
+              {/* Module Header */}
+              <button
+                onClick={() => toggleModule(module.id)}
+                className={`w-full flex items-center gap-2 p-2 rounded-lg hover:bg-gray-800 transition-colors ${
+                  isCollapsed ? "justify-center" : ""
+                }`}
+              >
+                {expandedModules.has(module.id) ? (
+                  <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                ) : (
+                  <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                )}
+                {!isCollapsed && (
+                  <div className="flex-1 text-left">
+                    <p className="text-sm font-medium text-white truncate">{module.title}</p>
+                    {module.progress > 0 && (
+                      <Progress value={module.progress} className="h-1 mt-1" />
+                    )}
+                  </div>
+                )}
+              </button>
+
+              {/* Module Content */}
+              {expandedModules.has(module.id) && !isCollapsed && (
+                <div className="ml-6 space-y-1">
+                  {module.classes.map((classItem) => (
+                    <div key={classItem.id} className="space-y-1">
+                      <p className="text-xs font-medium text-gray-400 px-2 py-1">
+                        {classItem.title}
+                      </p>
+                      <div className="space-y-1">
+                        {classItem.lessons.map((lesson) => (
+                          <button
+                            key={lesson.id}
+                            onClick={() => onLessonSelect(lesson.id)}
+                            className={`w-full flex items-center gap-2 p-2 rounded-lg transition-colors text-left ${
+                              currentLessonId === lesson.id
+                                ? "bg-purple-500/20 text-purple-400"
+                                : lesson.is_completed
+                                ? "text-green-400 hover:bg-gray-800"
+                                : "text-gray-300 hover:bg-gray-800"
+                            }`}
+                          >
+                            {lesson.is_completed ? (
+                              <CheckCircle className="w-4 h-4 flex-shrink-0" />
+                            ) : (
+                              <div className="w-4 h-4 flex-shrink-0" />
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm truncate">{lesson.title}</p>
+                              {lesson.progress_percent > 0 && lesson.progress_percent < 100 && (
+                                <Progress value={lesson.progress_percent} className="h-0.5 mt-1" />
+                              )}
+                            </div>
+                            {lesson.duration_seconds && (
+                              <span className="text-xs text-gray-500 flex-shrink-0">
+                                {Math.floor(lesson.duration_seconds / 60)}min
+                              </span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
-            </button>
+            </div>
+          ))}
+        </div>
+      </div>
 
-            {/* Module Content */}
-            {expandedModules.has(module.id) && !isCollapsed && (
-              <div className="ml-6 space-y-1">
-                {module.classes.map((classItem) => (
-                  <div key={classItem.id} className="space-y-1">
-                    <p className="text-xs font-medium text-gray-400 px-2 py-1">
-                      {classItem.title}
-                    </p>
-                    <div className="space-y-1">
-                      {classItem.lessons.map((lesson) => (
-                        <button
-                          key={lesson.id}
-                          onClick={() => onLessonSelect(lesson.id)}
-                          className={`w-full flex items-center gap-2 p-2 rounded-lg transition-colors text-left ${
-                            currentLesson?.id === lesson.id
-                              ? "bg-purple-500/20 text-purple-400"
-                              : lesson.is_completed
-                              ? "text-green-400 hover:bg-gray-800"
-                              : "text-gray-300 hover:bg-gray-800"
-                          }`}
-                        >
-                          {lesson.is_completed ? (
-                            <CheckCircle className="w-4 h-4 flex-shrink-0" />
-                          ) : (
-                            <div className="w-4 h-4 flex-shrink-0" />
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm truncate">{lesson.title}</p>
-                            {lesson.progress_percent > 0 && lesson.progress_percent < 100 && (
-                              <Progress value={lesson.progress_percent} className="h-0.5 mt-1" />
-                            )}
-                          </div>
-                          {lesson.duration_seconds && (
-                            <span className="text-xs text-gray-500 flex-shrink-0">
-                              {Math.floor(lesson.duration_seconds / 60)}min
-                            </span>
-                          )}
-                        </button>
-                      ))}
-                    </div>
+      {/* Footer Section - Course Info & Actions */}
+      {!isCollapsed && (
+        <div className="border-t border-gray-800 p-4 space-y-4">
+          {/* Instructor Info */}
+          <div className="flex items-center gap-3">
+            <Avatar className="w-10 h-10">
+              <AvatarFallback className="bg-purple-600 text-white">
+                {course.instructor_name?.charAt(0) || "I"}
+              </AvatarFallback>
+            </Avatar>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-gray-400">Instructor</p>
+              <p className="text-sm text-white font-medium truncate">{course.instructor_name}</p>
+            </div>
+          </div>
+
+          {/* Rating Section */}
+          <div className="space-y-2">
+            {userReview ? (
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1">
+                  <div className="flex">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <Star
+                        key={star}
+                        className={`w-4 h-4 ${
+                          star <= userReview.rating
+                            ? "text-yellow-400 fill-yellow-400"
+                            : "text-gray-600"
+                        }`}
+                      />
+                    ))}
                   </div>
-                ))}
+                  <span className="text-xs text-gray-400">You rated this</span>
+                </div>
               </div>
+            ) : (
+              <GlowButton variant="outline" size="sm" fullWidth onClick={onRateClick}>
+                <Star className="w-4 h-4 mr-2" />
+                Rate This Course
+              </GlowButton>
             )}
           </div>
-        ))}
-      </div>
+
+          {/* Certificate Button */}
+          <GlowButton variant="outline" size="sm" fullWidth onClick={onGetCertificate}>
+            <Award className="w-4 h-4 mr-2" />
+            Get Certificate
+          </GlowButton>
+
+          {/* Course Stats (Optional) */}
+          {courseReviews.length > 0 && (
+            <div className="pt-2 border-t border-gray-800">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-400">Course Rating</span>
+                <div className="flex items-center gap-1">
+                  <div className="flex">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <Star
+                        key={star}
+                        className={`w-3 h-3 ${
+                          star <= averageRating
+                            ? "text-yellow-400 fill-yellow-400"
+                            : "text-gray-600"
+                        }`}
+                      />
+                    ))}
+                  </div>
+                  <span className="text-gray-400">{averageRating.toFixed(1)}</span>
+                </div>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                {courseReviews.length} {courseReviews.length === 1 ? "review" : "reviews"}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1709,128 +1808,35 @@ export default function CourseLearnPage() {
 
   return (
     <div className="min-h-screen bg-gray-950">
-      {/* Lesson Sidebar - positioned based on dashboard sidebar state */}
-      <div 
-        className={`fixed top-16 bottom-0 z-20 bg-gray-900 border-r border-gray-800 transition-all duration-300 flex flex-col ${
-          sidebarCollapsed ? "w-16" : "w-80"
-        } ${dashboardSidebarCollapsed ? "left-16" : "left-64"}`}
-      >
-        {/* Sidebar Header */}
-        <div className="p-4 border-b border-gray-800 flex items-center justify-between">
-          {!sidebarCollapsed && (
-            <div className="flex-1">
-              <h2 className="font-semibold text-white truncate">{course.title}</h2>
-              <div className="mt-2">
-                <div className="flex justify-between text-xs text-gray-400 mb-1">
-                  <span>Progress</span>
-                  <span>{Math.floor(overallProgress)}%</span>
-                </div>
-                <Progress value={overallProgress} className="h-1.5" />
-              </div>
-            </div>
-          )}
-          <button
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            className="p-2 rounded-lg hover:bg-gray-800 transition-colors"
-          >
-            {sidebarCollapsed ? <ChevronRight className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
-          </button>
-        </div>
-
-        {/* Sidebar Content */}
-        <div className="flex-1 overflow-y-auto p-2 space-y-2">
-          {modules.map((module) => (
-            <div key={module.id} className="space-y-1">
-              {/* Module Header */}
-              <button
-                onClick={() => {
-                  const newSet = new Set(expandedModules);
-                  if (newSet.has(module.id)) {
-                    newSet.delete(module.id);
-                  } else {
-                    newSet.add(module.id);
-                  }
-                  setExpandedModules(newSet);
-                }}
-                className={`w-full flex items-center gap-2 p-2 rounded-lg hover:bg-gray-800 transition-colors ${
-                  sidebarCollapsed ? "justify-center" : ""
-                }`}
-              >
-                {expandedModules.has(module.id) ? (
-                  <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                ) : (
-                  <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                )}
-                {!sidebarCollapsed && (
-                  <div className="flex-1 text-left">
-                    <p className="text-sm font-medium text-white truncate">{module.title}</p>
-                    {module.progress > 0 && (
-                      <Progress value={module.progress} className="h-1 mt-1" />
-                    )}
-                  </div>
-                )}
-              </button>
-
-              {/* Module Content */}
-              {expandedModules.has(module.id) && !sidebarCollapsed && (
-                <div className="ml-6 space-y-1">
-                  {module.classes.map((classItem) => (
-                    <div key={classItem.id} className="space-y-1">
-                      <p className="text-xs font-medium text-gray-400 px-2 py-1">
-                        {classItem.title}
-                      </p>
-                      <div className="space-y-1">
-                        {classItem.lessons.map((lesson) => (
-                          <button
-                            key={lesson.id}
-                            onClick={() => {
-                              // Find lesson indices
-                              for (let mIdx = 0; mIdx < modules.length; mIdx++) {
-                                for (let cIdx = 0; cIdx < modules[mIdx].classes.length; cIdx++) {
-                                  for (let lIdx = 0; lIdx < modules[mIdx].classes[cIdx].lessons.length; lIdx++) {
-                                    if (modules[mIdx].classes[cIdx].lessons[lIdx].id === lesson.id) {
-                                      navigateToLesson(mIdx, cIdx, lIdx);
-                                      return;
-                                    }
-                                  }
-                                }
-                              }
-                            }}
-                            className={`w-full flex items-center gap-2 p-2 rounded-lg transition-colors text-left ${
-                              currentLesson?.id === lesson.id
-                                ? "bg-purple-500/20 text-purple-400"
-                                : lesson.is_completed
-                                ? "text-green-400 hover:bg-gray-800"
-                                : "text-gray-300 hover:bg-gray-800"
-                            }`}
-                          >
-                            {lesson.is_completed ? (
-                              <CheckCircle className="w-4 h-4 flex-shrink-0" />
-                            ) : (
-                              <div className="w-4 h-4 flex-shrink-0" />
-                            )}
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm truncate">{lesson.title}</p>
-                              {lesson.progress_percent > 0 && lesson.progress_percent < 100 && (
-                                <Progress value={lesson.progress_percent} className="h-0.5 mt-1" />
-                              )}
-                            </div>
-                            {lesson.duration_seconds && (
-                              <span className="text-xs text-gray-500 flex-shrink-0">
-                                {Math.floor(lesson.duration_seconds / 60)}min
-                              </span>
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
+      {/* Lesson Sidebar - using the Sidebar component */}
+      <Sidebar
+        course={course}
+        modules={modules}
+        currentLessonId={currentLesson?.id ?? null}
+        onLessonSelect={(lessonId) => {
+          // Find lesson indices
+          for (let mIdx = 0; mIdx < modules.length; mIdx++) {
+            for (let cIdx = 0; cIdx < modules[mIdx].classes.length; cIdx++) {
+              for (let lIdx = 0; lIdx < modules[mIdx].classes[cIdx].lessons.length; lIdx++) {
+                if (modules[mIdx].classes[cIdx].lessons[lIdx].id === lessonId) {
+                  navigateToLesson(mIdx, cIdx, lIdx);
+                  return;
+                }
+              }
+            }
+          }
+        }}
+        isCollapsed={sidebarCollapsed}
+        onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+        overallProgress={overallProgress}
+        classMemberId={classMemberId}
+        userReview={userReview}
+        averageRating={averageRating}
+        courseReviews={courseReviews}
+        onRateClick={() => setShowRatingModal(true)}
+        onGetCertificate={() => router.push(`/certificates/generate?courseId=${courseId}`)}
+        dashboardSidebarCollapsed={dashboardSidebarCollapsed}
+      />
 
       {/* Main Content - adjust margin based on both sidebars */}
       <div 
@@ -1857,6 +1863,7 @@ export default function CourseLearnPage() {
             </div>
           </div>
         </div>
+
         {/* Lesson Content */}
         <div className="max-w-5xl mx-auto px-6 py-8">
           {/* Lesson Header */}
@@ -2068,77 +2075,6 @@ export default function CourseLearnPage() {
             </TabsContent>
           </Tabs>
 
-          {/* Course Info Footer */}
-          <div className="mt-8 pt-6 border-t border-gray-800">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <Avatar className="w-10 h-10">
-                  <AvatarFallback className="bg-purple-600 text-white">
-                    {course.instructor_name?.charAt(0) || "I"}
-                  </AvatarFallback>
-                </Avatar>
-                <div>
-                  <p className="text-sm text-gray-400">Instructor</p>
-                  <p className="text-white font-medium">{course.instructor_name}</p>
-                </div>
-              </div>
-              
-              <div className="flex items-center gap-4">
-                {userReview ? (
-                  <div className="flex items-center gap-2">
-                    <div className="flex">
-                      {[1, 2, 3, 4, 5].map((star) => (
-                        <Star
-                          key={star}
-                          className={`w-4 h-4 ${
-                            star <= userReview.rating
-                              ? "text-yellow-400 fill-yellow-400"
-                              : "text-gray-600"
-                          }`}
-                        />
-                      ))}
-                    </div>
-                    <span className="text-sm text-gray-400">You rated this course</span>
-                  </div>
-                ) : (
-                  <GlowButton variant="outline" size="sm" onClick={() => setShowRatingModal(true)}>
-                    <Star className="w-4 h-4 mr-2" />
-                    Rate This Course
-                  </GlowButton>
-                )}
-                
-                <Link href={`/certificates/generate?courseId=${courseId}`}>
-                  <GlowButton variant="outline" size="sm">
-                    <Award className="w-4 h-4 mr-2" />
-                    Get Certificate
-                  </GlowButton>
-                </Link>
-              </div>
-            </div>
-            
-            {/* Course Statistics */}
-            {courseReviews.length > 0 && (
-              <div className="mt-4 flex items-center gap-4 text-sm">
-                <div className="flex items-center gap-1">
-                  <div className="flex">
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <Star
-                        key={star}
-                        className={`w-3 h-3 ${
-                          star <= averageRating
-                            ? "text-yellow-400 fill-yellow-400"
-                            : "text-gray-600"
-                        }`}
-                      />
-                    ))}
-                  </div>
-                  <span className="text-gray-400">{averageRating.toFixed(1)}</span>
-                </div>
-                <span className="text-gray-400">•</span>
-                <span className="text-gray-400">{courseReviews.length} {courseReviews.length === 1 ? "review" : "reviews"}</span>
-              </div>
-            )}
-          </div>
           {/* Rating Modal */}
           {showRatingModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80">
