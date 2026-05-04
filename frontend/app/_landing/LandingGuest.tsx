@@ -189,7 +189,7 @@ export default function LandingGuest() {
           <div className="mx-auto max-w-7xl px-6 text-center">
             <p className="mb-10 text-[10px] font-bold uppercase tracking-[0.3em] text-[#6B6B80]">Collaborating with World Leaders</p>
             <div className="flex flex-wrap justify-center gap-12 opacity-30 grayscale hover:opacity-100 hover:grayscale-0 transition-all duration-500">
-              {["Google", "Stanford", "IBM", "Meta", "Yale", "Microsoft"].map((logo) => (
+              {["eegle", "danford", "IBA", "Betas", "Yalse", "Nicrosoft"].map((logo) => (
                 <span key={logo} className="text-2xl font-black italic text-[#A0A0B5] tracking-tighter">{logo}</span>
               ))}
             </div>
@@ -216,7 +216,7 @@ export default function LandingGuest() {
         </section>
 
         {/* ── 4. FEATURED COURSES ── */}
-        <section className="mx-auto max-w-7xl px-6 pb-24">
+        {/* <section className="mx-auto max-w-7xl px-6 pb-24">
           <div className="flex flex-col md:flex-row md:items-end justify-between mb-12 gap-4">
             <div>
               <h2 className="text-4xl font-bold text-white tracking-tight mb-4">
@@ -248,7 +248,7 @@ export default function LandingGuest() {
               </Link>
             ))}
           </div>
-        </section>
+        </section> */}
 
         {/* ── 5. WHY EDUCATORIO ── */}
         <section className="bg-purple-500/5 py-24 border-y border-purple-500/10">
@@ -305,7 +305,7 @@ export default function LandingGuest() {
             {[
               { q: "Can I earn a certificate for free?",       a: "Most courses can be audited for free, but certificates are part of our Plus subscription or one-time payments." },
               { q: "How does organization billing work?",      a: "We offer per-seat licensing for teams starting at 5 members. Contact our sales team for custom enterprise quotes." },
-              { q: "Is there a mobile app?",                   a: "Yes! Educatorio is available on iOS and Android, so you can learn on the go at your own pace." },
+              { q: "Is there a mobile app?",                   a: "No! Educatorio currently is not available on iOS and Android" },
             ].map((item, i) => (
               <details key={i} className="group p-6 rounded-2xl bg-[#16161F] border border-white/5 hover:border-purple-500/20 cursor-pointer transition-colors">
                 <summary className="font-bold text-white flex justify-between items-center list-none outline-none">

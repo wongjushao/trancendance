@@ -38,6 +38,9 @@ const publicOnlyRoutes = [
 // Routes that should be accessible to both authenticated and unauthenticated users
 const publicRoutes = [
   "/",
+  "/privacy",
+  "/terms",
+  "/contact",
   "/auth/callback",
   "/auth/confirm",
   "/auth/error",
