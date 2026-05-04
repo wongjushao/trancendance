@@ -104,7 +104,7 @@ export async function isEnrolled(courseClassId: number, userId: string) {
   
   const { data, error } = await supabase
     .from("class_members")
-    .select("id, role")
+    .select("id, member_role")
     .eq("course_class_id", courseClassId)
     .eq("user_id", userId)
     .single();

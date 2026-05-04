@@ -69,6 +69,7 @@ export default function CoursesPage() {
     fetchData();
   }, []);
 
+// Replace the entire fetchData function in courses/page.tsx with this simplified version:
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -89,105 +90,168 @@ export default function CoursesPage() {
       
       const profileMap = new Map(profiles?.map(p => [p.id, p]) || []);
       
-      // 2. Fetch enrolled courses (where user is a member) - only published (not archived)
-      const { data: memberships, error: membershipError } = await supabase
+      // 2. Get unique enrolled course IDs from BOTH tables
+      const enrolledCourseIds = new Set<number>();
+      
+      // 2a. From course_members (direct course enrollment)
+      const { data: courseMembers } = await supabase
         .from("course_members")
-        .select(`
-          course_id,
-          role,
-          joined_at,
-          status
-        `)
+        .select("course_id")
         .eq("user_id", user.id)
         .eq("status", "active");
       
-      if (!membershipError && memberships) {
-        const enrolledIds = memberships.map(m => m.course_id);
+      courseMembers?.forEach(cm => {
+        enrolledCourseIds.add(cm.course_id);
+      });
+      
+      // 2b. From class_members (offering-based enrollment)
+      const { data: classMembers } = await supabase
+        .from("class_members")
+        .select(`
+          course_class_id,
+          course_classes!inner(course_id)
+        `)
+        .eq("user_id", user.id);
+      
+      classMembers?.forEach(cm => {
+        if (cm.course_classes?.course_id) {
+          enrolledCourseIds.add(cm.course_classes.course_id);
+        }
+      });
+      
+      console.log("Unique enrolled course IDs:", Array.from(enrolledCourseIds));
+      
+      // 3. Fetch enrolled course details
+      const enrolledCoursesData: EnrolledCourse[] = [];
+      
+      if (enrolledCourseIds.size > 0) {
+        const enrolledIdsArray = Array.from(enrolledCourseIds);
+        const { data: coursesData } = await supabase
+          .from("courses")
+          .select("*")
+          .in("id", enrolledIdsArray)
+          .eq("status", "published");
         
-        if (enrolledIds.length > 0) {
-          // Fetch course details for enrolled courses - only published
-          const { data: coursesData } = await supabase
-            .from("courses")
-            .select("*")
-            .in("id", enrolledIds)
-            .eq("status", "published");
-          
-          if (coursesData) {
-            // Calculate progress for each course
-            const coursesWithProgress = await Promise.all(
-              coursesData.map(async (course) => {
-                // Get all modules for this course
-                const { data: modules } = await supabase
-                  .from("modules")
-                  .select("id")
-                  .eq("course_id", course.id);
-                
-                if (!modules || modules.length === 0) {
-                  return {
-                    ...course,
-                    instructor_name: getInstructorName(course.created_by, profileMap),
-                    instructor_avatar: getInstructorAvatar(course.created_by, profileMap),
-                    enrolled: true,
-                    progress: 0,
-                    total_lessons: 0,
-                    completed_lessons: 0,
-                  };
-                }
-                
-                const moduleIds = modules.map(m => m.id);
-                
-                // Get all lessons for these modules
-                const { data: lessons } = await supabase
+        if (coursesData) {
+          // For each course, calculate progress
+          for (const course of coursesData) {
+            // Get total lessons count directly - simpler approach
+            let totalLessons = 0;
+            
+            // Get modules for this course
+            const { data: modules } = await supabase
+              .from("modules")
+              .select(`
+                id,
+                classes ( id )
+              `)
+              .eq("course_id", course.id);
+            
+            if (modules && modules.length > 0) {
+              // Get all class IDs
+              const classIds = modules.flatMap(m => m.classes?.map((c: any) => c.id) || []);
+              
+              if (classIds.length > 0) {
+                // Get lesson count for these classes
+                const { count } = await supabase
                   .from("lessons")
-                  .select("id")
-                  .in("module_id", moduleIds);
-                
-                const totalLessons = lessons?.length || 0;
-                
-                // Get completed lessons count
-                const { data: completedProgress } = await supabase
-                  .from("lesson_progress")
-                  .select("lesson_id")
-                  .eq("user_id", user.id)
-                  .eq("status", "completed")
-                  .in("lesson_id", lessons?.map(l => l.id) || []);
-                
-                const completedLessons = completedProgress?.length || 0;
-                const progress = totalLessons > 0 ? Math.round((completedLessons / totalLessons) * 100) : 0;
-                
-                return {
-                  ...course,
-                  instructor_name: getInstructorName(course.created_by, profileMap),
-                  instructor_avatar: getInstructorAvatar(course.created_by, profileMap),
-                  enrolled: true,
-                  progress,
-                  total_lessons: totalLessons,
-                  completed_lessons: completedLessons,
-                  last_accessed: memberships.find(m => m.course_id === course.id)?.joined_at,
-                };
-              })
-            );
-            setEnrolledCourses(coursesWithProgress);
+                  .select("id", { count: "exact", head: true })
+                  .in("class_id", classIds);
+                totalLessons = count || 0;
+              }
+            }
+            
+            // Get completed lessons count for this user in this course
+            let completedLessons = 0;
+            
+            // Get all lessons for this course first
+            const { data: courseLessons } = await supabase
+              .from("lessons")
+              .select(`
+                id,
+                classes!inner (
+                  module_id,
+                  modules!inner (
+                    course_id
+                  )
+                )
+              `)
+              .eq("classes.modules.course_id", course.id);
+            
+            const lessonIds = courseLessons?.map(l => l.id) || [];
+            
+            if (lessonIds.length > 0) {
+              const { data: completedProgress } = await supabase
+                .from("lesson_progress")
+                .select("lesson_id")
+                .eq("user_id", user.id)
+                .eq("status", "completed")
+                .in("lesson_id", lessonIds);
+              
+              completedLessons = completedProgress?.length || 0;
+            }
+            
+            const progress = totalLessons > 0 ? Math.round((completedLessons / totalLessons) * 100) : 0;
+            
+            enrolledCoursesData.push({
+              id: course.id,
+              title: course.title,
+              description: course.description,
+              visibility: course.visibility,
+              status: course.status,
+              organization_id: course.organization_id,
+              created_by: course.created_by,
+              created_at: course.created_at,
+              instructor_name: getInstructorName(course.created_by, profileMap),
+              instructor_avatar: getInstructorAvatar(course.created_by, profileMap),
+              enrolled: true,
+              progress,
+              total_lessons: totalLessons,
+              completed_lessons: completedLessons,
+            });
           }
         }
       }
       
-      // 3. Fetch discoverable courses (public courses user is not enrolled in) - only published
-      const enrolledIds = memberships?.map(m => m.course_id) || [];
+      setEnrolledCourses(enrolledCoursesData);
+      console.log("Enrolled courses count:", enrolledCoursesData.length);
       
+      // 4. Get enrolled course IDs for discover filter
+      const enrolledIds = Array.from(enrolledCourseIds);
+      
+      // 5. Get user's organization memberships for visibility filtering
+      const { data: orgMemberships } = await supabase
+        .from("organization_members")
+        .select("organization_id")
+        .eq("user_id", user.id)
+        .not("member_role", "eq", "pending");
+      
+      const userOrgIds = orgMemberships?.map(m => m.organization_id) || [];
+      
+      // 6. Fetch discoverable courses
       let discoverQuery = supabase
         .from("courses")
         .select("*")
-        .eq("visibility", "public")
         .eq("status", "published");
       
+      // Exclude enrolled courses
       if (enrolledIds.length > 0) {
         discoverQuery = discoverQuery.not("id", "in", `(${enrolledIds.join(",")})`);
       }
       
-      const { data: discoverData, error: discoverError } = await discoverQuery;
+      // Apply visibility filter
+      if (userOrgIds.length > 0) {
+        discoverQuery = discoverQuery.or(
+          `visibility.eq.public,` +
+          `and(visibility.eq.org,organization_id.in.(${userOrgIds.join(",")}))`
+        );
+      } else {
+        discoverQuery = discoverQuery.eq("visibility", "public");
+      }
       
-      if (!discoverError && discoverData) {
+      const { data: discoverData } = await discoverQuery;
+      
+      if (discoverData) {
         const formattedCourses = discoverData.map(course => ({
           ...course,
           instructor_name: getInstructorName(course.created_by, profileMap),
@@ -195,17 +259,18 @@ export default function CoursesPage() {
           enrolled: false,
         }));
         setDiscoverCourses(formattedCourses);
+        console.log("Discover courses count:", formattedCourses.length);
       }
       
-      // 4. Fetch created courses (for teachers/admins) - exclude archived
+      // 7. Fetch created courses (for teachers/admins)
       if (roleData.role === "teacher" || roleData.role === "org_admin") {
-        const { data: createdData, error: createdError } = await supabase
+        const { data: createdData } = await supabase
           .from("courses")
           .select("*")
           .eq("created_by", user.id)
           .in("status", ["draft", "published"]);
         
-        if (!createdError && createdData) {
+        if (createdData) {
           const formattedCreated = createdData.map(course => ({
             ...course,
             instructor_name: "You",
@@ -214,14 +279,14 @@ export default function CoursesPage() {
           setCreatedCourses(formattedCreated);
         }
         
-        // 5. Fetch archived courses for teachers
-        const { data: archivedData, error: archivedError } = await supabase
+        // 8. Fetch archived courses for teachers
+        const { data: archivedData } = await supabase
           .from("courses")
           .select("*")
           .eq("created_by", user.id)
           .eq("status", "archived");
         
-        if (!archivedError && archivedData) {
+        if (archivedData) {
           const formattedArchived = archivedData.map(course => ({
             ...course,
             instructor_name: "You",
