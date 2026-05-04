@@ -1,6 +1,8 @@
 // frontend/app/(main)/courses/[id]/edit/page.tsx
 "use client";
 
+import { FileUpload } from "@/components/ui/file-upload";
+
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
@@ -117,6 +119,7 @@ import {
 } from "@dnd-kit/sortable";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { RichTextEditor } from "@/components/ui/rich-text-editor";
 
 // Sortable Components
 function SortableModuleItem({ module, index, onEdit, onDelete, onToggleExpand, isExpanded, children }: any) {
@@ -338,6 +341,8 @@ export default function EditCoursePage() {
     content_json: null as any,
     duration_seconds: 0,
     is_free_preview: false,
+    notes: "",
+    resources: [] as Array<{ url: string; name: string; type: string; size: number }>,
   });
   const [assignmentForm, setAssignmentForm] = useState({
     title: "",
@@ -1042,6 +1047,7 @@ const getDayName = (day: number): string => {
   };
 
   // Lesson CRUD
+  // REPLACE the existing openAddLessonModal with this:
   const openAddLessonModal = (classId: number, moduleId: number) => {
     setEditingLesson(null);
     setLessonForm({
@@ -1051,24 +1057,57 @@ const getDayName = (day: number): string => {
       content_json: null,
       duration_seconds: 0,
       is_free_preview: false,
+      notes: "",
+      resources: [], // ADD THIS LINE
     });
     setEditingLesson({ lesson: {} as any, classId, moduleId });
     setLessonModalOpen(true);
   };
   
+  // REPLACE the existing openEditLessonModal with this:
   const openEditLessonModal = async (lesson: LessonWithAssignments, classId: number, moduleId: number) => {
+    let notes = "";
+    let resources: Array<{ url: string; name: string; type: string; size: number }> = [];
+    let contentJson = lesson.content_json;
+    let textContent = ""; // Add this for text lesson content
+    let quizData = null; // Add this for quiz data
+    
+    // Extract based on content type
+    if (lesson.content_type === "video" && lesson.content_json) {
+      notes = lesson.content_json.notes || "";
+      resources = lesson.content_json.resources || [];
+      contentJson = lesson.content_json;
+    } else if (lesson.content_type === "text" && lesson.content_json) {
+      // For text lessons, content is stored in the "content" field
+      textContent = lesson.content_json.content || "";
+      resources = lesson.content_json.resources || [];
+      contentJson = lesson.content_json.content; // Set to the actual content for the editor
+    } else if (lesson.content_type === "quiz" && lesson.content_json) {
+      quizData = lesson.content_json;
+      resources = lesson.content_json.resources || [];
+      contentJson = lesson.content_json;
+    } else if (lesson.content_json) {
+      // Fallback for any other case
+      resources = lesson.content_json.resources || [];
+      textContent = lesson.content_json.content || lesson.content_json;
+      contentJson = lesson.content_json.content || lesson.content_json;
+    }
+    
     setEditingLesson({ lesson, classId, moduleId });
     setLessonForm({
       title: lesson.title,
       content_type: lesson.content_type as any,
       content_url: lesson.content_url || "",
-      content_json: lesson.content_json,
+      content_json: contentJson,
       duration_seconds: lesson.duration_seconds || 0,
       is_free_preview: lesson.is_free_preview || false,
+      notes: notes,
+      resources: resources,
     });
     setLessonModalOpen(true);
   };
-  
+    
+
   const saveLesson = async () => {
     if (!lessonForm.title.trim() || !editingLesson) {
       toast.error("Please enter a lesson title");
@@ -1076,15 +1115,37 @@ const getDayName = (day: number): string => {
     }
     
     try {
+      const lessonData: any = {
+        title: lessonForm.title,
+        content_type: lessonForm.content_type,
+        is_free_preview: lessonForm.is_free_preview,
+        duration_seconds: lessonForm.duration_seconds,
+      };
+      
+      // Handle different content types
+      if (lessonForm.content_type === "video") {
+        lessonData.content_url = lessonForm.content_url;
+        lessonData.content_json = {
+          notes: lessonForm.notes || "",
+          video_url: lessonForm.content_url,
+          resources: lessonForm.resources, // Add resources
+        };
+      } else if (lessonForm.content_type === "text") {
+        lessonData.content_json = {
+          content: lessonForm.content_json,
+          resources: lessonForm.resources, // Add resources
+        };
+        lessonData.content_url = null;
+      } else if (lessonForm.content_type === "quiz") {
+        lessonData.content_json = {
+          ...lessonForm.content_json,
+          resources: lessonForm.resources, // Add resources
+        };
+        lessonData.content_url = null;
+      }
+      
       if (editingLesson.lesson.id) {
-        await updateLesson(editingLesson.lesson.id, {
-          title: lessonForm.title,
-          content_type: lessonForm.content_type,
-          content_url: lessonForm.content_url,
-          content_json: lessonForm.content_json,
-          duration_seconds: lessonForm.duration_seconds,
-          is_free_preview: lessonForm.is_free_preview,
-        });
+        await updateLesson(editingLesson.lesson.id, lessonData);
         
         const updatedModules = course?.modules?.map(m =>
           m.id === editingLesson.moduleId
@@ -1096,7 +1157,7 @@ const getDayName = (day: number): string => {
                         ...c,
                         lessons: c.lessons.map(l =>
                           l.id === editingLesson.lesson.id
-                            ? { ...l, ...lessonForm }
+                            ? { ...l, ...lessonData }
                             : l
                         )
                       }
@@ -1109,15 +1170,10 @@ const getDayName = (day: number): string => {
         toast.success("Lesson updated");
       } else {
         const newLesson = await addLesson(editingLesson.classId, {
-          title: lessonForm.title,
-          content_type: lessonForm.content_type,
-          content_url: lessonForm.content_url,
-          content_json: lessonForm.content_json,
+          ...lessonData,
           order_index: course?.modules
             ?.find(m => m.id === editingLesson.moduleId)
             ?.classes.find(c => c.id === editingLesson.classId)?.lessons.length || 0,
-          duration_seconds: lessonForm.duration_seconds,
-          is_free_preview: lessonForm.is_free_preview,
         });
         
         const updatedModules = course?.modules?.map(m =>
@@ -1137,6 +1193,7 @@ const getDayName = (day: number): string => {
       }
       setLessonModalOpen(false);
     } catch (error) {
+      console.error("Error saving lesson:", error);
       toast.error("Failed to save lesson");
     }
   };
@@ -1887,178 +1944,173 @@ const getDayName = (day: number): string => {
           </TabsContent>
           
           {/* Offerings Tab */}
-          <TabsContent value="offerings" className="space-y-6">
-            <div className="flex justify-between items-center">
-              <div>
-                <h3 className="text-lg font-semibold text-white">Course Offerings</h3>
-                <p className="text-sm text-gray-400 mt-1">
-                  Manage different sessions/classes for this course
-                </p>
-              </div>
-              <GlowButton onClick={openAddOfferingModal}>
-                <Plus className="w-4 h-4 mr-2" />
-                Add Offering
-              </GlowButton>
-            </div>
+          {/* Offerings Tab - NOW CONSISTENT with Basic Info and Curriculum tabs */}
+          <TabsContent value="offerings">
+            <GlowCard>
+              <div className="p-6">
+                <div className="flex justify-between items-center mb-6">
+                  <div>
+                    <h3 className="text-lg font-semibold text-white">Course Offerings</h3>
+                    <p className="text-sm text-gray-400 mt-1">
+                      Manage different sessions/classes for this course
+                    </p>
+                  </div>
+                  <GlowButton onClick={openAddOfferingModal}>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Add Offering
+                  </GlowButton>
+                </div>
 
-            {course?.course_classes && course.course_classes.length > 0 ? (
-              <div className="grid grid-cols-1 gap-4">
-                {course.course_classes.map((offering) => (
-                  <GlowCard key={offering.id} className="p-5">
-                    <div className="flex justify-between items-start">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                          <h4 className="font-semibold text-white text-lg">{offering.name}</h4>
-                          <Badge className={`
-                            ${offering.status === 'upcoming' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' :
-                              offering.status === 'ongoing' ? 'bg-green-500/20 text-green-400 border-green-500/30' :
-                              offering.status === 'completed' ? 'bg-gray-500/20 text-gray-400 border-gray-500/30' :
-                              'bg-red-500/20 text-red-400 border-red-500/30'}
-                          `}>
-                            {offering.status}
-                          </Badge>
-                        </div>
-                        {offering.description && (
-                          <p className="text-sm text-gray-400 mb-3">{offering.description}</p>
-                        )}
-                        <div className="flex flex-wrap gap-4 text-sm text-gray-400">
-                          {offering.start_date && (
-                            <div className="flex items-center gap-1">
-                              <Calendar className="w-4 h-4" />
-                              <span>Starts: {new Date(offering.start_date).toLocaleDateString()}</span>
+                {course?.course_classes && course.course_classes.length > 0 ? (
+                  <div className="space-y-4">
+                    {course.course_classes.map((offering) => (
+                      <div key={offering.id} className="border border-slate-700 rounded-lg p-5 bg-slate-800/20">
+                        {/* offering content - same as before, just remove GlowCard wrapper */}
+                        <div className="flex justify-between items-start">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-2">
+                              <h4 className="font-semibold text-white text-lg">{offering.name}</h4>
+                              <Badge className={`
+                                ${offering.status === 'upcoming' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' :
+                                  offering.status === 'ongoing' ? 'bg-green-500/20 text-green-400 border-green-500/30' :
+                                  offering.status === 'completed' ? 'bg-gray-500/20 text-gray-400 border-gray-500/30' :
+                                  'bg-red-500/20 text-red-400 border-red-500/30'}
+                              `}>
+                                {offering.status}
+                              </Badge>
                             </div>
-                          )}
-                          {offering.end_date && (
-                            <div className="flex items-center gap-1">
-                              <Calendar className="w-4 h-4" />
-                              <span>Ends: {new Date(offering.end_date).toLocaleDateString()}</span>
+                            {offering.description && (
+                              <p className="text-sm text-gray-400 mb-3">{offering.description}</p>
+                            )}
+                            <div className="flex flex-wrap gap-4 text-sm text-gray-400">
+                              {offering.start_date && (
+                                <div className="flex items-center gap-1">
+                                  <Calendar className="w-4 h-4" />
+                                  <span>Starts: {new Date(offering.start_date).toLocaleDateString()}</span>
+                                </div>
+                              )}
+                              {offering.end_date && (
+                                <div className="flex items-center gap-1">
+                                  <Calendar className="w-4 h-4" />
+                                  <span>Ends: {new Date(offering.end_date).toLocaleDateString()}</span>
+                                </div>
+                              )}
+                              {offering.max_students && (
+                                <div className="flex items-center gap-1">
+                                  <Users className="w-4 h-4" />
+                                  <span>Max: {offering.max_students} students</span>
+                                </div>
+                              )}
                             </div>
-                          )}
-                          {offering.max_students && (
-                            <div className="flex items-center gap-1">
-                              <Users className="w-4 h-4" />
-                              <span>Max: {offering.max_students} students</span>
-                            </div>
-                          )}
-                        </div>
-                        
 
-                        {/* Display Schedules */}
-                        {offering.schedules && offering.schedules.length > 0 && (
-                          <div className="mt-3">
-                            <div className="flex items-center gap-2 mb-3">
-                              <Clock className="w-4 h-4 text-purple-400" />
-                              <span className="text-sm font-medium text-gray-300">Schedule:</span>
-                            </div>
-                            <div className="flex flex-col gap-2">
-                              {offering.schedules.map((schedule) => (
-                                <div 
-                                  key={schedule.id} 
-                                  className="group flex items-center gap-2 transition-all duration-200"
-                                >
-                                  {/* Schedule Card */}
-                                  <div className="flex-1 flex items-center justify-between bg-slate-800/30 rounded-lg px-3 py-2 border border-slate-700/50 group-hover:border-purple-500/30 group-hover:bg-slate-800/50 transition-all duration-200">
-                                    <div className="flex items-center gap-3">
-                                      {/* Day indicator dot */}
-                                      <div className="w-2 h-2 rounded-full bg-purple-400/60 group-hover:bg-purple-400 transition-colors duration-200" />
-                                      
-                                      {/* Day and Time */}
-                                      <div className="flex items-center gap-2">
-                                        <span className="text-sm font-medium text-gray-200 min-w-[90px]">
-                                          {getDayName(schedule.day_of_week)}
-                                        </span>
-                                        <span className="text-sm text-gray-300">
-                                          {schedule.start_time} - {schedule.end_time}
-                                        </span>
+                            {/* Display Schedules */}
+                            {offering.schedules && offering.schedules.length > 0 && (
+                              <div className="mt-3">
+                                <div className="flex items-center gap-2 mb-3">
+                                  <Clock className="w-4 h-4 text-purple-400" />
+                                  <span className="text-sm font-medium text-gray-300">Schedule:</span>
+                                </div>
+                                <div className="flex flex-col gap-2">
+                                  {offering.schedules.map((schedule) => (
+                                    <div 
+                                      key={schedule.id} 
+                                      className="group flex items-center gap-2 transition-all duration-200"
+                                    >
+                                      <div className="flex-1 flex items-center justify-between bg-slate-800/30 rounded-lg px-3 py-2 border border-slate-700/50 group-hover:border-purple-500/30 group-hover:bg-slate-800/50 transition-all duration-200">
+                                        <div className="flex items-center gap-3">
+                                          <div className="w-2 h-2 rounded-full bg-purple-400/60 group-hover:bg-purple-400 transition-colors duration-200" />
+                                          <div className="flex items-center gap-2">
+                                            <span className="text-sm font-medium text-gray-200 min-w-[90px]">
+                                              {getDayName(schedule.day_of_week)}
+                                            </span>
+                                            <span className="text-sm text-gray-300">
+                                              {schedule.start_time} - {schedule.end_time}
+                                            </span>
+                                          </div>
+                                        </div>
+                                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all duration-200 translate-x-1 group-hover:translate-x-0">
+                                          <button
+                                            onClick={() => openEditScheduleModal(schedule, offering.id)}
+                                            className="p-1.5 rounded-md hover:bg-purple-500/20 transition-all duration-200"
+                                            title="Edit schedule"
+                                          >
+                                            <Edit className="w-3.5 h-3.5 text-gray-400 hover:text-purple-400 transition-colors" />
+                                          </button>
+                                          <button
+                                            onClick={() => deleteSchedule(schedule.id, getDayName(schedule.day_of_week))}
+                                            className="p-1.5 rounded-md hover:bg-red-500/20 transition-all duration-200"
+                                            title="Delete schedule"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5 text-gray-400 hover:text-red-400 transition-colors" />
+                                          </button>
+                                        </div>
                                       </div>
                                     </div>
-                                    
-                                    {/* Action Buttons - Hidden by default, show on hover */}
-                                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all duration-200 translate-x-1 group-hover:translate-x-0">
-                                      <button
-                                        onClick={() => openEditScheduleModal(schedule, offering.id)}
-                                        className="p-1.5 rounded-md hover:bg-purple-500/20 transition-all duration-200"
-                                        title="Edit schedule"
-                                      >
-                                        <Edit className="w-3.5 h-3.5 text-gray-400 hover:text-purple-400 transition-colors" />
-                                      </button>
-                                      <button
-                                        onClick={() => deleteSchedule(schedule.id, getDayName(schedule.day_of_week))}
-                                        className="p-1.5 rounded-md hover:bg-red-500/20 transition-all duration-200"
-                                        title="Delete schedule"
-                                      >
-                                        <Trash2 className="w-3.5 h-3.5 text-gray-400 hover:text-red-400 transition-colors" />
-                                      </button>
-                                    </div>
-                                  </div>
+                                  ))}
                                 </div>
-                              ))}
-                            </div>
+                              </div>
+                            )}
                           </div>
-                        )}
+                          <div className="flex gap-2">
+                            <GlowButton
+                              size="sm"
+                              variant="outline"
+                              onClick={() => openAddScheduleModal(offering.id)}
+                            >
+                              <Clock className="w-4 h-4 mr-2" />
+                              Add Schedule
+                            </GlowButton>
+                            <GlowButton
+                              size="sm"
+                              variant="outline"
+                              onClick={() => router.push(`/courses/${courseId}/offerings/${offering.id}/students`)}
+                            >
+                              <Users className="w-4 h-4 mr-2" />
+                              Manage Students
+                            </GlowButton>
+                            <GlowButton
+                              size="sm"
+                              variant="outline"
+                              onClick={() => router.push(`/courses/${courseId}/offerings/${offering.id}/chat`)}
+                            >
+                              <MessageSquare className="w-4 h-4 mr-2" />
+                              Chat Room
+                            </GlowButton>
+                            <GlowButton
+                              size="sm"
+                              variant="outline"
+                              onClick={() => openEditOfferingModal(offering)}
+                            >
+                              <Edit className="w-4 h-4 mr-2" />
+                              Edit
+                            </GlowButton>
+                            <GlowButton
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                if (confirm(`Are you sure you want to delete "${offering.name}"?`)) {
+                                  deleteOffering(offering.id);
+                                }
+                              }}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </GlowButton>
+                          </div>
+                        </div>
                       </div>
-                      <div className="flex gap-2">
-                        <GlowButton
-                          size="sm"
-                          variant="outline"
-                          onClick={() => openAddScheduleModal(offering.id)}
-                        >
-                          <Clock className="w-4 h-4 mr-2" />
-                          Add Schedule
-                        </GlowButton>
-                        <GlowButton
-                          size="sm"
-                          variant="outline"
-                          onClick={() => router.push(`/courses/${courseId}/offerings/${offering.id}/students`)}
-                        >
-                          <Users className="w-4 h-4 mr-2" />
-                          Manage Students
-                        </GlowButton>
-                        <GlowButton
-                          size="sm"
-                          variant="outline"
-                          onClick={() => router.push(`/courses/${courseId}/offerings/${offering.id}/chat`)}
-                        >
-                          <MessageSquare className="w-4 h-4 mr-2" />
-                          Chat Room
-                        </GlowButton>
-                        <GlowButton
-                          size="sm"
-                          variant="outline"
-                          onClick={() => openEditOfferingModal(offering)}
-                        >
-                          <Edit className="w-4 h-4 mr-2" />
-                          Edit
-                        </GlowButton>
-                        <GlowButton
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            if (confirm(`Are you sure you want to delete "${offering.name}"?`)) {
-                              deleteOffering(offering.id);
-                            }
-                          }}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </GlowButton>
-                      </div>
-                    </div>
-                  </GlowCard>
-                ))}
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-12">
+                    <Calendar className="w-12 h-12 text-gray-600 mx-auto mb-3" />
+                    <h4 className="text-lg font-semibold text-white mb-2">No Offerings Yet</h4>
+                    <p className="text-gray-400 mb-4">
+                      Create your first course offering to start enrolling students.
+                    </p>
+                  </div>
+                )}
               </div>
-            ) : (
-              <GlowCard className="p-8 text-center">
-                <Calendar className="w-12 h-12 text-gray-600 mx-auto mb-3" />
-                <h4 className="text-lg font-semibold text-white mb-2">No Offerings Yet</h4>
-                <p className="text-gray-400 mb-4">
-                  Create your first course offering to start enrolling students.
-                </p>
-                <GlowButton onClick={openAddOfferingModal}>
-                  <Plus className="w-4 h-4 mr-2" />
-                  Create Offering
-                </GlowButton>
-              </GlowCard>
-            )}
+            </GlowCard>
           </TabsContent>
         </Tabs>
       </div>
@@ -2117,83 +2169,614 @@ const getDayName = (day: number): string => {
         </DialogContent>
       </Dialog>
       
-      {/* Lesson Modal */}
+      {/* Lesson Modal - Complete replacement */}
       <Dialog open={lessonModalOpen} onOpenChange={setLessonModalOpen}>
-        <DialogContent className="bg-slate-800 border-slate-700 max-w-2xl">
+        <DialogContent className="bg-slate-800 border-slate-700 max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-white">
               {editingLesson?.lesson.id ? "Edit Lesson" : "Add Lesson"}
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label>Lesson Title</Label>
-              <Input
-                value={lessonForm.title}
-                onChange={(e) => setLessonForm({ ...lessonForm, title: e.target.value })}
-                placeholder="Lesson title"
-                className="mt-2"
-              />
-            </div>
-            
-            <div className="grid grid-cols-2 gap-4">
+          
+          <div className="space-y-6">
+            {/* Basic Info Section */}
+            <div className="space-y-4">
               <div>
-                <Label>Content Type</Label>
-                <Select
-                  value={lessonForm.content_type}
-                  onValueChange={(value: any) => setLessonForm({ ...lessonForm, content_type: value })}
-                >
-                  <SelectTrigger className="mt-2">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="video">Video Lesson</SelectItem>
-                    <SelectItem value="text">Text Lesson</SelectItem>
-                    <SelectItem value="quiz">Quiz</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label className="text-base font-semibold">Lesson Title</Label>
+                <Input
+                  value={lessonForm.title}
+                  onChange={(e) => setLessonForm({ ...lessonForm, title: e.target.value })}
+                  placeholder="Enter lesson title"
+                  className="mt-2"
+                />
               </div>
               
-              <div>
-                <Label>Duration (seconds)</Label>
-                <Input
-                  type="number"
-                  value={lessonForm.duration_seconds}
-                  onChange={(e) => setLessonForm({ ...lessonForm, duration_seconds: parseInt(e.target.value) || 0 })}
-                  className="mt-2"
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>Content Type</Label>
+                  <Select
+                    value={lessonForm.content_type}
+                    onValueChange={(value: any) => {
+                      setLessonForm({ 
+                        ...lessonForm, 
+                        content_type: value,
+                        content_url: "",
+                        content_json: null,
+                        notes: "",
+                      });
+                    }}
+                  >
+                    <SelectTrigger className="mt-2">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="video">
+                        <div className="flex items-center gap-2">
+                          <Video className="w-4 h-4" />
+                          <span>Video Lesson</span>
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="text">
+                        <div className="flex items-center gap-2">
+                          <FileText className="w-4 h-4" />
+                          <span>Text Lesson</span>
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="quiz">
+                        <div className="flex items-center gap-2">
+                          <FileQuestion className="w-4 h-4" />
+                          <span>Quiz / Assessment</span>
+                        </div>
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                <div>
+                  <Label>Estimated Duration (seconds)</Label>
+                  <Input
+                    type="number"
+                    value={lessonForm.duration_seconds}
+                    onChange={(e) => setLessonForm({ ...lessonForm, duration_seconds: parseInt(e.target.value) || 0 })}
+                    placeholder="e.g., 600 for 10 minutes"
+                    className="mt-2"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">
+                    Help students know how long this lesson takes
+                  </p>
+                </div>
+              </div>
+              
+              <div className="flex items-center gap-3">
+                <Switch
+                  checked={lessonForm.is_free_preview}
+                  onCheckedChange={(checked) => setLessonForm({ ...lessonForm, is_free_preview: checked })}
                 />
+                <Label>Free Preview (available to non-enrolled users)</Label>
               </div>
             </div>
-            
+
+            {/* VIDEO LESSON CONTENT */}
             {lessonForm.content_type === "video" && (
-              <div>
-                <Label>Video URL</Label>
-                <Input
-                  value={lessonForm.content_url}
-                  onChange={(e) => setLessonForm({ ...lessonForm, content_url: e.target.value })}
-                  placeholder="YouTube URL or direct video link"
-                  className="mt-2"
-                />
+              <div className="space-y-6 border-t border-slate-700 pt-4">
+                <div className="space-y-4">
+                  <div>
+                    <Label className="text-base font-semibold">Video Source</Label>
+                    <Tabs defaultValue="url" className="mt-2">
+                      <TabsList className="bg-slate-800/50">
+                        <TabsTrigger value="url">Video URL</TabsTrigger>
+                        <TabsTrigger value="upload">Upload Video</TabsTrigger>
+                      </TabsList>
+                      <TabsContent value="url" className="mt-3">
+                        <Input
+                          value={lessonForm.content_url}
+                          onChange={(e) => setLessonForm({ ...lessonForm, content_url: e.target.value })}
+                          placeholder="https://www.youtube.com/watch?v=... or https://vimeo.com/... or direct MP4 URL"
+                          className="font-mono text-sm"
+                        />
+                        <p className="text-xs text-gray-400 mt-1">
+                          Supported: YouTube, Vimeo, or direct video file URLs
+                        </p>
+                      </TabsContent>
+                      <TabsContent value="upload" className="mt-3">
+                        <FileUpload
+                          bucket="course-videos"
+                          folder={`courses/${courseId}/videos`}
+                          accept="video/mp4,video/webm,video/quicktime"
+                          maxFiles={1}
+                          maxSizeMB={500}
+                          onUploadComplete={(files) => {
+                            if (files[0]) {
+                              setLessonForm({ ...lessonForm, content_url: files[0].url });
+                            }
+                          }}
+                        />
+                      </TabsContent>
+                    </Tabs>
+                  </div>
+                  
+                  {/* Video Preview */}
+                  {lessonForm.content_url && (
+                    <div className="bg-slate-900 rounded-lg overflow-hidden">
+                      <div className="aspect-video bg-black flex items-center justify-center">
+                        {lessonForm.content_url.includes("youtube.com") || lessonForm.content_url.includes("youtu.be") ? (
+                          (() => {
+                            const videoId = lessonForm.content_url.split("v=")[1]?.split("&")[0] || 
+                                            lessonForm.content_url.split("youtu.be/")[1]?.split("?")[0];
+                            return videoId ? (
+                              <iframe
+                                src={`https://www.youtube.com/embed/${videoId}`}
+                                className="w-full h-full"
+                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                allowFullScreen
+                                title="Video preview"
+                              />
+                            ) : (
+                              <div className="text-gray-400">Unable to preview video</div>
+                            );
+                          })()
+                        ) : (
+                          <video
+                            src={lessonForm.content_url}
+                            controls
+                            className="max-w-full max-h-full"
+                          />
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                
+                {/* Lesson Notes - Rich Text Editor for Video Lessons */}
+                <div className="space-y-2">
+                  <Label className="text-base font-semibold">Lesson Notes / Transcript</Label>
+                  <p className="text-xs text-gray-400 mb-2">
+                    Add notes, key takeaways, or a transcript for students to reference
+                  </p>
+                  <RichTextEditor
+                    value={lessonForm.notes || ""}
+                    onChange={(html) => setLessonForm({ ...lessonForm, notes: html })}
+                    placeholder="Add lesson notes, key points, or transcript here..."
+                  />
+                </div>
+
+                {/* Additional Resources (add this) */}
+                <div className="space-y-4 border-t border-slate-700 pt-4">
+                  <Label className="text-base font-semibold">Additional Resources</Label>
+                  <p className="text-xs text-gray-400 mb-3">
+                    Upload supplementary materials for students (PDFs, presentations, worksheets, etc.)
+                  </p>
+                  <FileUpload
+                    bucket="course-resources"
+                    folder={`courses/${courseId}/lessons/${editingLesson?.lesson.id || 'new'}`}
+                    accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.zip,.mp3,.jpg,.png"
+                    maxFiles={10}
+                    maxSizeMB={50}
+                    existingFiles={lessonForm.resources}
+                    onUploadComplete={(files) => setLessonForm({ ...lessonForm, resources: files })}
+                  />
+                </div>
+
               </div>
             )}
             
-            <div className="flex items-center gap-3">
-              <Switch
-                checked={lessonForm.is_free_preview}
-                onCheckedChange={(checked) => setLessonForm({ ...lessonForm, is_free_preview: checked })}
-              />
-              <Label>Free Preview (available to non-enrolled users)</Label>
-            </div>
+            {/* TEXT LESSON CONTENT */}
+            {lessonForm.content_type === "text" && (
+              <div className="space-y-4 border-t border-slate-700 pt-4">
+                <div>
+                  <Label className="text-base font-semibold">Lesson Content</Label>
+                  <p className="text-xs text-gray-400 mb-2">
+                    Write your lesson content using the rich text editor. You can format text, add images, links, and more.
+                  </p>
+                  <div className="mt-2">
+                    <RichTextEditor
+                      value={lessonForm.content_json || ""}
+                      onChange={(html) => setLessonForm({ ...lessonForm, content_json: html })}
+                      placeholder="Write your lesson content here..."
+                    />
+                  </div>
+                </div>
+
+                {/* ADD THIS - Additional Resources for Text Lessons */}
+                <div className="space-y-4 border-t border-slate-700 pt-4">
+                  <Label className="text-base font-semibold">Additional Resources</Label>
+                  <p className="text-xs text-gray-400 mb-3">
+                    Upload supplementary materials for students (PDFs, presentations, worksheets, etc.)
+                  </p>
+                  <FileUpload
+                    bucket="course-resources"
+                    folder={`courses/${courseId}/lessons/${editingLesson?.lesson.id || 'new'}`}
+                    accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.zip,.mp3,.jpg,.png"
+                    maxFiles={10}
+                    maxSizeMB={50}
+                    existingFiles={lessonForm.resources}
+                    onUploadComplete={(files) => setLessonForm({ ...lessonForm, resources: files })}
+                  />
+                </div>
+              </div>
+            )}
+            
+            {/* QUIZ LESSON CONTENT - REPLACE THE ENTIRE SECTION */}
+            {lessonForm.content_type === "quiz" && (
+              <div className="space-y-4 border-t border-slate-700 pt-4">
+                <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
+                  <h4 className="text-blue-400 font-semibold mb-2">Quiz Configuration</h4>
+                  <p className="text-sm text-gray-300">
+                    Create quizzes to assess student understanding. You can add multiple choice questions, 
+                    single choice, and true/false questions. Quiz results will be tracked in student progress.
+                  </p>
+                </div>
+                
+                {/* Quiz Builder UI with fixes */}
+                {(() => {
+                  const quizData = lessonForm.content_json || { questions: [], passing_score: 70, time_limit_minutes: null };
+                  const questions = quizData.questions || [];
+                  
+                  const addQuestion = () => {
+                    const newQuestions = [...questions, {
+                      id: Date.now().toString(),
+                      text: "",
+                      type: "single_choice",
+                      options: ["", ""],
+                      correct_answer: "",
+                      points: 10
+                    }];
+                    setLessonForm({ 
+                      ...lessonForm, 
+                      content_json: { ...quizData, questions: newQuestions }
+                    });
+                  };
+                  
+                  const updateQuestion = (index: number, field: string, value: any) => {
+                    const updatedQuestions = [...questions];
+                    updatedQuestions[index] = { ...updatedQuestions[index], [field]: value };
+                    // Reset correct_answer when changing type to avoid mismatches
+                    if (field === 'type') {
+                      updatedQuestions[index].correct_answer = "";
+                      if (value === 'true_false') {
+                        updatedQuestions[index].options = [];
+                      } else if (value === 'multiple_choice' && (!updatedQuestions[index].options || updatedQuestions[index].options.length < 2)) {
+                        updatedQuestions[index].options = ["", ""];
+                      } else if (value === 'single_choice' && (!updatedQuestions[index].options || updatedQuestions[index].options.length < 2)) {
+                        updatedQuestions[index].options = ["", ""];
+                      }
+                    }
+                    setLessonForm({ 
+                      ...lessonForm, 
+                      content_json: { ...quizData, questions: updatedQuestions }
+                    });
+                  };
+                  
+                  const deleteQuestion = (index: number) => {
+                    const updatedQuestions = questions.filter((_: any, i: number) => i !== index);
+                    setLessonForm({ 
+                      ...lessonForm, 
+                      content_json: { ...quizData, questions: updatedQuestions }
+                    });
+                  };
+                  
+                  const updateOption = (questionIndex: number, optionIndex: number, value: string) => {
+                    const updatedQuestions = [...questions];
+                    const options = [...(updatedQuestions[questionIndex].options || [])];
+                    options[optionIndex] = value;
+                    updatedQuestions[questionIndex].options = options;
+                    setLessonForm({ 
+                      ...lessonForm, 
+                      content_json: { ...quizData, questions: updatedQuestions }
+                    });
+                  };
+                  
+                  const addOption = (questionIndex: number) => {
+                    const updatedQuestions = [...questions];
+                    const options = [...(updatedQuestions[questionIndex].options || [])];
+                    options.push("");
+                    updatedQuestions[questionIndex].options = options;
+                    setLessonForm({ 
+                      ...lessonForm, 
+                      content_json: { ...quizData, questions: updatedQuestions }
+                    });
+                  };
+                  
+                  const deleteOption = (questionIndex: number, optionIndex: number) => {
+                    const updatedQuestions = [...questions];
+                    const options = [...(updatedQuestions[questionIndex].options || [])];
+                    options.splice(optionIndex, 1);
+                    updatedQuestions[questionIndex].options = options;
+                    // If the deleted option was the correct answer, clear it
+                    if (updatedQuestions[questionIndex].correct_answer === options[optionIndex]) {
+                      updatedQuestions[questionIndex].correct_answer = "";
+                    }
+                    setLessonForm({ 
+                      ...lessonForm, 
+                      content_json: { ...quizData, questions: updatedQuestions }
+                    });
+                  };
+                  
+                  const handleCorrectAnswerChange = (questionIndex: number, value: string | string[]) => {
+                    const updatedQuestions = [...questions];
+                    updatedQuestions[questionIndex].correct_answer = value;
+                    setLessonForm({ 
+                      ...lessonForm, 
+                      content_json: { ...quizData, questions: updatedQuestions }
+                    });
+                  };
+                  
+                  return (
+                    <div className="space-y-4">
+                      {/* Quiz Settings */}
+                      <div className="grid grid-cols-2 gap-4 p-4 bg-slate-800/30 rounded-lg">
+                        <div>
+                          <Label>Passing Score (%)</Label>
+                          <Input
+                            type="number"
+                            value={quizData.passing_score || 70}
+                            onChange={(e) => setLessonForm({ 
+                              ...lessonForm, 
+                              content_json: { ...quizData, passing_score: parseInt(e.target.value) || 70 }
+                            })}
+                            className="mt-1"
+                            min="0"
+                            max="100"
+                          />
+                        </div>
+                        <div>
+                          <Label>Time Limit (minutes)</Label>
+                          <Input
+                            type="number"
+                            value={quizData.time_limit_minutes || ""}
+                            onChange={(e) => setLessonForm({ 
+                              ...lessonForm, 
+                              content_json: { ...quizData, time_limit_minutes: e.target.value ? parseInt(e.target.value) : null }
+                            })}
+                            className="mt-1"
+                            placeholder="No limit"
+                            min="1"
+                          />
+                        </div>
+                      </div>
+                      
+                      {/* Questions List */}
+                      <div className="space-y-4">
+                        <div className="flex justify-between items-center">
+                          <Label className="text-base font-semibold">Questions</Label>
+                          <GlowButton size="sm" onClick={addQuestion}>
+                            <Plus className="w-3 h-3 mr-1" />
+                            Add Question
+                          </GlowButton>
+                        </div>
+                        
+                        {questions.length === 0 && (
+                          <div className="text-center py-8 text-gray-400 border border-dashed border-slate-700 rounded-lg">
+                            <FileQuestion className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                            <p>No questions yet. Click "Add Question" to get started.</p>
+                          </div>
+                        )}
+                        
+                        {questions.map((q: any, idx: number) => (
+                          <div key={q.id} className="border border-slate-700 rounded-lg p-4 bg-slate-800/20">
+                            <div className="flex justify-between items-start mb-3">
+                              <h4 className="text-white font-medium">Question {idx + 1}</h4>
+                              <button
+                                onClick={() => deleteQuestion(idx)}
+                                className="text-red-400 hover:text-red-300"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                            
+                            <div className="space-y-3">
+                              <div>
+                                <Label>Question Text</Label>
+                                <Input
+                                  value={q.text}
+                                  onChange={(e) => updateQuestion(idx, "text", e.target.value)}
+                                  placeholder="Enter your question here..."
+                                  className="mt-1"
+                                />
+                              </div>
+                              
+                              <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                  <Label>Question Type</Label>
+                                  <Select
+                                    value={q.type}
+                                    onValueChange={(value) => updateQuestion(idx, "type", value)}
+                                  >
+                                    <SelectTrigger>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="single_choice">
+                                        <div className="flex items-center gap-2">
+                                          <div className="w-4 h-4 rounded-full border border-gray-400" />
+                                          <span>Single Choice (Radio)</span>
+                                        </div>
+                                      </SelectItem>
+                                      <SelectItem value="multiple_choice">
+                                        <div className="flex items-center gap-2">
+                                          <div className="w-4 h-4 border border-gray-400 rounded" />
+                                          <span>Multiple Choice (Checkbox)</span>
+                                        </div>
+                                      </SelectItem>
+                                      <SelectItem value="true_false">
+                                        <div className="flex items-center gap-2">
+                                          <span>T / F</span>
+                                          <span>True / False</span>
+                                        </div>
+                                      </SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div>
+                                  <Label>Points</Label>
+                                  <Input
+                                    type="number"
+                                    value={q.points || 10}
+                                    onChange={(e) => updateQuestion(idx, "points", parseInt(e.target.value) || 0)}
+                                    className="mt-1"
+                                    min="1"
+                                  />
+                                </div>
+                              </div>
+                              
+                              {/* Options for single choice */}
+                              {q.type === "single_choice" && (
+                                <div className="space-y-2">
+                                  <Label>Options (Select one)</Label>
+                                  {q.options && q.options.map((opt: string, optIdx: number) => (
+                                    <div key={optIdx} className="flex gap-2 items-center">
+                                      <input
+                                        type="radio"
+                                        name={`question_${idx}`}
+                                        checked={q.correct_answer === opt}
+                                        onChange={() => handleCorrectAnswerChange(idx, opt)}
+                                        className="w-4 h-4"
+                                      />
+                                      <Input
+                                        value={opt}
+                                        onChange={(e) => updateOption(idx, optIdx, e.target.value)}
+                                        placeholder={`Option ${optIdx + 1}`}
+                                        className="flex-1"
+                                      />
+                                      <button
+                                        onClick={() => deleteOption(idx, optIdx)}
+                                        className="p-1 rounded hover:bg-red-500/20"
+                                        disabled={q.options.length <= 2}
+                                      >
+                                        <Trash2 className="w-3 h-3 text-gray-400 hover:text-red-400" />
+                                      </button>
+                                    </div>
+                                  ))}
+                                  <button
+                                    onClick={() => addOption(idx)}
+                                    className="text-xs text-purple-400 hover:text-purple-300"
+                                  >
+                                    + Add Option
+                                  </button>
+                                </div>
+                              )}
+                              
+                              {/* Options for multiple choice */}
+                              {q.type === "multiple_choice" && (
+                                <div className="space-y-2">
+                                  <Label>Options (Select multiple - store as comma-separated)</Label>
+                                  <p className="text-xs text-gray-400 mb-1">
+                                    For multiple correct answers, separate with commas (e.g., "opt1,opt2")
+                                  </p>
+                                  {q.options && q.options.map((opt: string, optIdx: number) => (
+                                    <div key={optIdx} className="flex gap-2 items-center">
+                                      <input
+                                        type="checkbox"
+                                        className="w-4 h-4"
+                                        checked={q.correct_answer?.split(",").includes(opt)}
+                                        onChange={(e) => {
+                                          let newCorrect = q.correct_answer ? q.correct_answer.split(",") : [];
+                                          if (e.target.checked) {
+                                            newCorrect.push(opt);
+                                          } else {
+                                            newCorrect = newCorrect.filter((c: string) => c !== opt);
+                                          }
+                                          handleCorrectAnswerChange(idx, newCorrect.join(","));
+                                        }}
+                                      />
+                                      <Input
+                                        value={opt}
+                                        onChange={(e) => updateOption(idx, optIdx, e.target.value)}
+                                        placeholder={`Option ${optIdx + 1}`}
+                                        className="flex-1"
+                                      />
+                                      <button
+                                        onClick={() => deleteOption(idx, optIdx)}
+                                        className="p-1 rounded hover:bg-red-500/20"
+                                        disabled={q.options.length <= 2}
+                                      >
+                                        <Trash2 className="w-3 h-3 text-gray-400 hover:text-red-400" />
+                                      </button>
+                                    </div>
+                                  ))}
+                                  <button
+                                    onClick={() => addOption(idx)}
+                                    className="text-xs text-purple-400 hover:text-purple-300"
+                                  >
+                                    + Add Option
+                                  </button>
+                                  {q.correct_answer && q.correct_answer.split(",").filter((c: string) => c).length > 1 && (
+                                    <p className="text-xs text-green-400 mt-1">
+                                      ✓ Multiple correct answers selected
+                                    </p>
+                                  )}
+                                </div>
+                              )}
+                              
+                              {/* True/False options */}
+                              {q.type === "true_false" && (
+                                <div className="space-y-2">
+                                  <Label>Correct Answer</Label>
+                                  <div className="flex gap-4">
+                                    <label className="flex items-center gap-2">
+                                      <input
+                                        type="radio"
+                                        name={`tf_${idx}`}
+                                        checked={q.correct_answer === "true"}
+                                        onChange={() => handleCorrectAnswerChange(idx, "true")}
+                                        className="w-4 h-4"
+                                      />
+                                      True
+                                    </label>
+                                    <label className="flex items-center gap-2">
+                                      <input
+                                        type="radio"
+                                        name={`tf_${idx}`}
+                                        checked={q.correct_answer === "false"}
+                                        onChange={() => handleCorrectAnswerChange(idx, "false")}
+                                        className="w-4 h-4"
+                                      />
+                                      False
+                                    </label>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Additional Resources for Quiz Lessons */}
+                <div className="space-y-4 border-t border-slate-700 pt-4">
+                  <Label className="text-base font-semibold">Additional Resources</Label>
+                  <p className="text-xs text-gray-400 mb-3">
+                    Upload supplementary materials for students (reference sheets, study guides, etc.)
+                  </p>
+                  <FileUpload
+                    bucket="course-resources"
+                    folder={`courses/${courseId}/lessons/${editingLesson?.lesson.id || 'new'}`}
+                    accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.zip,.mp3,.jpg,.png"
+                    maxFiles={10}
+                    maxSizeMB={50}
+                    existingFiles={lessonForm.resources}
+                    onUploadComplete={(files) => setLessonForm({ ...lessonForm, resources: files })}
+                  />
+                </div>
+              </div>
+            )}
           </div>
-          <DialogFooter>
-            <GlowButton variant="ghost" onClick={() => setLessonModalOpen(false)}>Cancel</GlowButton>
-            <GlowButton onClick={saveLesson}>Save</GlowButton>
+          
+          <DialogFooter className="mt-6">
+            <GlowButton variant="ghost" onClick={() => setLessonModalOpen(false)}>
+              Cancel
+            </GlowButton>
+            <GlowButton onClick={saveLesson}>
+              {editingLesson?.lesson.id ? "Save Changes" : "Create Lesson"}
+            </GlowButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      
+            
       {/* Assignment Modal */}
-      {/* Assignment Modal - FULLY SAFE */}
+      {/* Assignment Modal - Update the description field */}
       <Dialog open={assignmentModalOpen} onOpenChange={(open) => {
         if (!open) {
           setEditingAssignment(null);
@@ -2206,10 +2789,9 @@ const getDayName = (day: number): string => {
         }
         setAssignmentModalOpen(open);
       }}>
-        <DialogContent className="bg-slate-800 border-slate-700 max-w-2xl">
+        <DialogContent className="bg-slate-800 border-slate-700 max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-white">
-              {/* SAFE: Check if editingAssignment exists AND has assignment with id */}
               {(editingAssignment && editingAssignment.assignment && editingAssignment.assignment.id) ? "Edit Assignment" : "Add Assignment"}
             </DialogTitle>
             <DialogDescription>
@@ -2229,15 +2811,19 @@ const getDayName = (day: number): string => {
               />
             </div>
             
+            {/* REPLACE the existing description Textarea with this */}
             <div>
-              <Label>Description</Label>
-              <Textarea
-                value={assignmentForm.description}
-                onChange={(e) => setAssignmentForm({ ...assignmentForm, description: e.target.value })}
-                placeholder="Describe the assignment..."
-                rows={3}
-                className="mt-2"
-              />
+              <Label>Description / Instructions</Label>
+              <p className="text-xs text-gray-400 mb-2">
+                Provide detailed instructions for students. You can format text, add links, images, etc.
+              </p>
+              <div className="mt-2">
+                <RichTextEditor
+                  value={assignmentForm.description}
+                  onChange={(html) => setAssignmentForm({ ...assignmentForm, description: html })}
+                  placeholder="Describe the assignment, provide instructions, rubric, etc..."
+                />
+              </div>
             </div>
             
             <div className="grid grid-cols-2 gap-4">
@@ -2263,14 +2849,12 @@ const getDayName = (day: number): string => {
             </div>
           </div>
           <DialogFooter>
-            {/* SAFE: Check if editingAssignment exists AND has assignment with id */}
             {(editingAssignment && editingAssignment.assignment && editingAssignment.assignment.id) && (
               <GlowButton
                 variant="ghost"
                 className="text-red-400"
                 onClick={async () => {
                   if (editingAssignment && editingAssignment.assignment && editingAssignment.assignment.id) {
-                    // Disable the button while deleting
                     const btn = document.activeElement as HTMLButtonElement;
                     if (btn) btn.disabled = true;
                     await handleDeleteAssignment(editingAssignment.assignment.id);
