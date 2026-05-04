@@ -650,16 +650,8 @@ export default function LandingGuest() {
             </div>
 
             <div>
-              <h3 className="font-semibold text-white mb-4 text-sm uppercase tracking-wider">Explore</h3>
-              <ul className="space-y-2 text-sm text-gray-400">
-                <li><Link href="/courses" className="hover:text-purple-400 transition">All Courses</Link></li>
-              </ul>
-            </div>
-
-            <div>
               <h3 className="font-semibold text-white mb-4 text-sm uppercase tracking-wider">Resources</h3>
               <ul className="space-y-2 text-sm text-gray-400">
-                <li><Link href="/faq" className="hover:text-purple-400 transition">Help Center</Link></li>
                 <li><Link href="/contact" className="hover:text-purple-400 transition">Contact</Link></li>
               </ul>
             </div>
