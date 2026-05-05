@@ -304,3 +304,61 @@
   pointer-events: none;
   height: 0;
 }
+
+/* Hide scrollbar for Chrome, Safari and Opera */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Hide scrollbar for IE, Edge and Firefox */
+.scrollbar-hide {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
+/* Add these animations and drop shadows to your globals.css */
+
+@keyframes gradient {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.animate-gradient {
+  background-size: 200% auto;
+  animation: gradient 3s linear infinite;
+}
+
+.animate-shimmer {
+  animation: shimmer 2s infinite;
+}
+
+.animation-delay-2000 {
+  animation-delay: 2s;
+}
+
+.animation-delay-4000 {
+  animation-delay: 4s;
+}
+
+/* Glow drop shadows for partner logos */
+.drop-shadow-glow-blue {
+  filter: drop-shadow(0 0 8px rgba(66, 133, 244, 0.5));
+}
+
+.drop-shadow-glow-red {
+  filter: drop-shadow(0 0 8px rgba(234, 67, 53, 0.5));
+}
+
+.drop-shadow-glow-yellow {
+  filter: drop-shadow(0 0 8px rgba(251, 188, 5, 0.5));
+}
+
+.drop-shadow-glow-green {
+  filter: drop-shadow(0 0 8px rgba(52, 168, 83, 0.5));
+}

@@ -1,4 +1,7 @@
+// frontend/app/(main)/courses/[id]/edit/page.tsx
 "use client";
+
+import { FileUpload } from "@/components/ui/file-upload";
 
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -23,6 +26,23 @@ import {
   Layers,
   Rocket,
   Archive,
+  Upload,
+  Loader2,
+  X,
+  Save,
+  Globe,
+  Lock,
+  Building2,
+  Calendar,
+  Clock,
+  MessageSquare,
+  Award,
+  GraduationCap,
+  CheckCircle,
+  HelpCircle,
+  Copy,
+  Eye,
+  Download,
 } from "lucide-react";
 import { GlowCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
@@ -35,6 +55,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -45,9 +66,40 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
-import { RichTextEditor } from "@/components/ui/rich-text-editor";
+import {
+  getCourseWithDetails,
+  updateCourse,
+  addModule,
+  updateModule,
+  deleteModule,
+  addClass,
+  updateClass,
+  deleteClass,
+  addLesson,
+  updateLesson,
+  deleteLesson,
+  addAssignment,
+  updateAssignment,
+  deleteAssignment,
+  addCourseClass,
+  updateCourseClass,
+  deleteCourseClass,
+  addClassSchedule,
+  updateClassSchedule,
+  deleteClassSchedule,
+  publishCourse,
+  unpublishCourse,
+  archiveCourse,
+  CourseWithDetails,
+  ModuleWithClasses,
+  ClassWithLessons,
+  LessonWithAssignments,
+  CourseClassWithDetails,
+} from "@/lib/supabase/courses";
+import CourseBasicForm from "@/components/course/CourseBasicForm";
 
 // Drag and drop imports
 import {
@@ -67,51 +119,10 @@ import {
 } from "@dnd-kit/sortable";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { RichTextEditor } from "@/components/ui/rich-text-editor";
 
-interface Class {
-  id: number;
-  title: string;
-  module_id: number;
-  order_index: number;
-  lessons?: Lesson[];
-}
-
-interface Lesson {
-  id: number;
-  title: string;
-  content_type: string;
-  content_url: string | null;
-  content_json: any;
-  order_index: number;
-  class_id: number;
-  assignment?: any;
-}
-
-interface Module {
-  id: number;
-  title: string;
-  order_index: number;
-  course_id: number;
-  classes: Class[];
-}
-
-interface Course {
-  id: number;
-  title: string;
-  description: string | null;
-  visibility: string;
-  created_by: string;
-  status?: "draft" | "published" | "archived";
-}
-
-const contentTypes = [
-  { value: "video", label: "Video Lesson", icon: Video, color: "blue" },
-  { value: "text", label: "Text Lesson", icon: FileText, color: "green" },
-  { value: "quiz", label: "Quiz", icon: FileQuestion, color: "purple" },
-];
-
-// Sortable Module Item Component
-function SortableModuleItem({ module, index, expandedModules, toggleModule, onEdit, onDelete, children }: any) {
+// Sortable Components
+function SortableModuleItem({ module, index, onEdit, onDelete, onToggleExpand, isExpanded, children }: any) {
   const {
     attributes,
     listeners,
@@ -128,57 +139,32 @@ function SortableModuleItem({ module, index, expandedModules, toggleModule, onEd
   };
 
   return (
-    <div ref={setNodeRef} style={style} {...attributes}>
-      <div className="border border-gray-800 rounded-lg overflow-hidden">
-        <div className="bg-gray-800/50 p-4 flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-3 flex-wrap">
-            <div {...listeners} className="cursor-grab active:cursor-grabbing p-1 hover:bg-gray-700 rounded">
-              <GripVertical className="w-5 h-5 text-gray-400" />
-            </div>
-            <button
-              onClick={() => toggleModule(module.id)}
-              className="text-gray-400 hover:text-white"
-            >
-              {expandedModules.includes(module.id) ? (
-                <ChevronDown className="w-5 h-5" />
-              ) : (
-                <ChevronRight className="w-5 h-5" />
-              )}
-            </button>
-            <h3 className="text-white font-medium text-lg">
-              Module {index + 1}: {module.title}
-            </h3>
-            <Badge variant="outline" className="text-xs">
-              {module.classes.length} classes
-            </Badge>
+    <div ref={setNodeRef} style={style} className="border border-slate-700 rounded-lg overflow-hidden">
+      <div className="bg-slate-800/50 p-4 flex items-center justify-between">
+        <div className="flex items-center gap-3 flex-1">
+          <div {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing">
+            <GripVertical className="w-5 h-5 text-gray-400" />
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => onEdit(module)}
-              className="px-3 py-1.5 text-sm bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded-lg transition-colors flex items-center gap-2"
-            >
-              <Edit className="w-4 h-4" />
-              Edit
-            </button>
-            <button
-              onClick={() => onDelete(module.id)}
-              className="px-3 py-1.5 text-sm bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded-lg transition-colors flex items-center gap-2"
-            >
-              <Trash2 className="w-4 h-4" />
-              Delete
-            </button>
-          </div>
+          <button onClick={() => onToggleExpand(module.id)} className="flex items-center gap-2">
+            {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+            <span className="font-semibold text-white">{module.title}</span>
+          </button>
         </div>
-        {expandedModules.includes(module.id) && (
-          <div className="p-4">{children}</div>
-        )}
+        <div className="flex gap-2">
+          <GlowButton size="sm" variant="secondary" onClick={() => onEdit(module)}>
+            <Edit className="w-4 h-4" />
+          </GlowButton>
+          <GlowButton size="sm" variant="ghost" onClick={() => onDelete(module.id)}>
+            <Trash2 className="w-4 h-4" />
+          </GlowButton>
+        </div>
       </div>
+      {isExpanded && <div className="p-4">{children}</div>}
     </div>
   );
 }
 
-// Sortable Class Item Component
-function SortableClassItem({ classItem, index, moduleId, onEdit, onDelete, children }: any) {
+function SortableClassItem({ classItem, index, moduleId, onEdit, onDelete, onToggleExpand, isExpanded, children }: any) {
   const {
     attributes,
     listeners,
@@ -186,7 +172,7 @@ function SortableClassItem({ classItem, index, moduleId, onEdit, onDelete, child
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: `${moduleId}-class-${classItem.id}` });
+  } = useSortable({ id: classItem.id });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -195,1752 +181,3069 @@ function SortableClassItem({ classItem, index, moduleId, onEdit, onDelete, child
   };
 
   return (
-    <div ref={setNodeRef} style={style} {...attributes}>
-      <div className="border-l-2 border-purple-500/30 ml-2">
-        <div className="bg-gray-800/30 rounded-lg p-3">
-          <div className="flex items-center justify-between flex-wrap gap-3 mb-3">
-            <div className="flex items-center gap-2">
-              <div {...listeners} className="cursor-grab active:cursor-grabbing p-1 hover:bg-gray-700 rounded">
-                <GripVertical className="w-4 h-4 text-gray-400" />
-              </div>
-              <h4 className="text-white font-medium">
-                Class {index + 1}: {classItem.title}
-              </h4>
-              <Badge className="bg-purple-600/20 text-purple-400 text-xs">
-                {classItem.lessons?.length || 0} lessons
-              </Badge>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => onEdit(classItem, moduleId)}
-                className="px-2 py-1 text-xs bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded-lg transition-colors flex items-center gap-1"
-              >
-                <Edit className="w-3 h-3" />
-                Edit
-              </button>
-              <button
-                onClick={() => onDelete(classItem.id, moduleId)}
-                className="px-2 py-1 text-xs bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded-lg transition-colors flex items-center gap-1"
-              >
-                <Trash2 className="w-3 h-3" />
-                Delete
-              </button>
-            </div>
-          </div>
-          {children}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Sortable Lesson Item Component
-function SortableLessonItem({ lesson, index, classId, moduleId, onEdit, onDelete, onAssignment, getContentTypeIcon }: any) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: `${moduleId}-${classId}-lesson-${lesson.id}` });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-  };
-
-  return (
-    <div ref={setNodeRef} style={style} {...attributes}>
-      <div className="flex items-center justify-between bg-gray-800/50 rounded p-3 group">
-        <div className="flex items-center gap-3">
-          <div {...listeners} className="cursor-grab active:cursor-grabbing p-1 hover:bg-gray-700 rounded">
+    <div ref={setNodeRef} style={style} className="border border-slate-700/50 rounded-lg">
+      <div className="bg-slate-800/30 p-3 flex items-center justify-between">
+        <div className="flex items-center gap-3 flex-1">
+          <div {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing">
             <GripVertical className="w-4 h-4 text-gray-400" />
           </div>
-          {getContentTypeIcon(lesson.content_type)}
-          <span className="text-white">{lesson.title}</span>
-          <span className="text-xs text-gray-500 capitalize px-2 py-0.5 bg-gray-700 rounded">
-            {lesson.content_type}
-          </span>
+          <button onClick={() => onToggleExpand(classItem.id)} className="flex items-center gap-2">
+            {isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+            <span className="text-white">{classItem.title}</span>
+          </button>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => onEdit(lesson, classId, moduleId)}
-            className="px-2 py-1 text-xs bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded-lg transition-colors flex items-center gap-1"
-          >
+        <div className="flex gap-2">
+          <GlowButton size="sm" variant="secondary" onClick={() => onEdit(classItem, moduleId)}>
             <Edit className="w-3 h-3" />
-            Edit
-          </button>
-          {!lesson.assignment ? (
-            <button
-              onClick={() => onAssignment(lesson)}
-              className="px-2 py-1 text-xs bg-green-600/20 hover:bg-green-600/40 text-green-400 rounded-lg transition-colors flex items-center gap-1"
-            >
-              <ClipboardList className="w-3 h-3" />
-              Add
-            </button>
-          ) : (
-            <button
-              onClick={() => onAssignment(lesson)}
-              className="px-2 py-1 text-xs bg-purple-600/20 hover:bg-purple-600/40 text-purple-400 rounded-lg transition-colors flex items-center gap-1"
-            >
-              <ClipboardList className="w-3 h-3" />
-              Edit
-            </button>
-          )}
-          <button
-            onClick={() => onDelete(lesson.id, classId, moduleId)}
-            className="px-2 py-1 text-xs bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded-lg transition-colors flex items-center gap-1"
-          >
+          </GlowButton>
+          <GlowButton size="sm" variant="ghost" onClick={() => onDelete(classItem.id, moduleId)}>
             <Trash2 className="w-3 h-3" />
-            Delete
-          </button>
+          </GlowButton>
+        </div>
+      </div>
+      {isExpanded && <div className="p-3">{children}</div>}
+    </div>
+  );
+}
+
+function SortableLessonItem({ lesson, index, classId, moduleId, onEdit, onDelete, onAddAssignment }: any) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: lesson.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  const getContentIcon = () => {
+    switch (lesson.content_type) {
+      case "video": return <Video className="w-4 h-4 text-blue-400" />;
+      case "text": return <FileText className="w-4 h-4 text-green-400" />;
+      case "quiz": return <FileQuestion className="w-4 h-4 text-yellow-400" />;
+      default: return <FileText className="w-4 h-4" />;
+    }
+  };
+
+  const hasAssignment = lesson.assignments && lesson.assignments.length > 0;
+
+  return (
+    <div ref={setNodeRef} style={style} className="bg-slate-900/50 rounded-lg p-3">
+      <div className="flex items-start gap-3">
+        <div {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing mt-1">
+          <GripVertical className="w-4 h-4 text-gray-400" />
+        </div>
+        <div className="flex-1">
+          <div className="flex items-center gap-2 mb-2 flex-wrap">
+            {getContentIcon()}
+            <span className="text-white font-medium">{lesson.title}</span>
+            {lesson.is_free_preview && (
+              <Badge variant="secondary" className="text-xs">Free Preview</Badge>
+            )}
+            {hasAssignment && (
+              <Badge className="bg-purple-500/20 text-purple-300 text-xs">
+                <ClipboardList className="w-3 h-3 mr-1" />
+                {lesson.assignments.length} Assignment
+              </Badge>
+            )}
+          </div>
+          {lesson.duration_seconds && (
+            <div className="text-xs text-gray-400">
+              Duration: {Math.floor(lesson.duration_seconds / 60)} minutes
+            </div>
+          )}
+          {!hasAssignment && (
+            <div className="mt-2">
+              <button
+                onClick={() => onAddAssignment(lesson, classId, moduleId)}
+                className="text-xs text-purple-400 hover:text-purple-300 transition-colors flex items-center gap-1"
+              >
+                <Plus className="w-3 h-3" />
+                Add Assignment
+              </button>
+            </div>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <GlowButton 
+            size="sm" 
+            variant="secondary" 
+            onClick={() => onAddAssignment(lesson, classId, moduleId)}
+            title={hasAssignment ? "Edit Assignment" : "Add Assignment"}
+          >
+            <ClipboardList className="w-3 h-3" />
+          </GlowButton>
+          <GlowButton size="sm" variant="secondary" onClick={() => onEdit(lesson, classId, moduleId)}>
+            <Edit className="w-3 h-3" />
+          </GlowButton>
+          <GlowButton size="sm" variant="ghost" onClick={() => onDelete(lesson.id, classId, moduleId)}>
+            <Trash2 className="w-3 h-3" />
+          </GlowButton>
         </div>
       </div>
     </div>
   );
 }
-
-export default function CourseEditPage() {
+export default function EditCoursePage() {
   const params = useParams();
   const router = useRouter();
   const courseId = parseInt(params.id as string);
-
-  const [course, setCourse] = useState<Course | null>(null);
-  const [modules, setModules] = useState<Module[]>([]);
-  const [expandedModules, setExpandedModules] = useState<number[]>([]);
+  
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [showPublishModal, setShowPublishModal] = useState(false);
+  const [course, setCourse] = useState<CourseWithDetails | null>(null);
+  const [activeTab, setActiveTab] = useState("basic");
+  const [expandedModules, setExpandedModules] = useState<Set<number>>(new Set());
+  const [expandedClasses, setExpandedClasses] = useState<Set<number>>(new Set());
+  const [organizations, setOrganizations] = useState<any[]>([]);
+  const [selectedOrgId, setSelectedOrgId] = useState<number | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   
   // Modal states
-  const [isModuleModalOpen, setIsModuleModalOpen] = useState(false);
-  const [isClassModalOpen, setIsClassModalOpen] = useState(false);
-  const [isLessonModalOpen, setIsLessonModalOpen] = useState(false);
-  const [isAssignmentModalOpen, setIsAssignmentModalOpen] = useState(false);
-  
+  const [moduleModalOpen, setModuleModalOpen] = useState(false);
+  const [classModalOpen, setClassModalOpen] = useState(false);
+  const [lessonModalOpen, setLessonModalOpen] = useState(false);
+  const [assignmentModalOpen, setAssignmentModalOpen] = useState(false);
+  const [offeringModalOpen, setOfferingModalOpen] = useState(false);
+  const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
+  const [publishConfirmOpen, setPublishConfirmOpen] = useState(false);
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [availableOrganizations, setAvailableOrganizations] = useState<Array<{id: number, name: string}>>([]);
+  const [selectedTargetOrg, setSelectedTargetOrg] = useState<number | null>(null);
+  const [isTransferring, setIsTransferring] = useState(false);
+  const [deleteModuleModalOpen, setDeleteModuleModalOpen] = useState(false);
+  const [moduleToDelete, setModuleToDelete] = useState<{ id: number; title: string } | null>(null);
+  const [deleteClassModalOpen, setDeleteClassModalOpen] = useState(false);
+  const [classToDelete, setClassToDelete] = useState<{ id: number; title: string; moduleId: number } | null>(null);
+  const [deleteLessonModalOpen, setDeleteLessonModalOpen] = useState(false);
+  const [lessonToDelete, setLessonToDelete] = useState<{ id: number; title: string; classId: number; moduleId: number } | null>(null);
+
   // Edit states
-  const [editingModule, setEditingModule] = useState<Module | null>(null);
-  const [editingClass, setEditingClass] = useState<Class | null>(null);
-  const [editingLesson, setEditingLesson] = useState<Lesson | null>(null);
-  const [selectedModuleForClass, setSelectedModuleForClass] = useState<Module | null>(null);
-  const [selectedClassForLesson, setSelectedClassForLesson] = useState<Class | null>(null);
+  const [editingModule, setEditingModule] = useState<ModuleWithClasses | null>(null);
+  const [editingClass, setEditingClass] = useState<{ class: ClassWithLessons; moduleId: number } | null>(null);
+  const [editingLesson, setEditingLesson] = useState<{ lesson: LessonWithAssignments; classId: number; moduleId: number } | null>(null);
+  const [editingAssignment, setEditingAssignment] = useState<{ assignment: any; lessonId: number } | null>(null);
+  const [editingOffering, setEditingOffering] = useState<CourseClassWithDetails | null>(null);
   
   // Form states
-  const [moduleTitle, setModuleTitle] = useState("");
-  const [classTitle, setClassTitle] = useState("");
+  const [moduleForm, setModuleForm] = useState({ title: "" });
+  const [classForm, setClassForm] = useState({ title: "" });
   const [lessonForm, setLessonForm] = useState({
     title: "",
-    content_type: "video",
-    video_url: "",
-    video_notes: "",
-    text_content: "",
-    quiz_questions: [] as Array<{
-      question: string;
-      type: "multiple_choice" | "true_false" | "short_answer";
-      options?: string[];
-      correct_answer: string | number;
-    }>,
+    content_type: "video" as "video" | "text" | "quiz",
+    content_url: "",
+    content_json: null as any,
+    duration_seconds: 0,
+    is_free_preview: false,
+    notes: "",
+    resources: [] as Array<{ url: string; name: string; type: string; size: number }>,
   });
   const [assignmentForm, setAssignmentForm] = useState({
     title: "",
     description: "",
     due_at: "",
+    points: 100,
   });
-  const [activeTab, setActiveTab] = useState("curriculum");
+  const [offeringForm, setOfferingForm] = useState({
+    name: "",
+    description: "",
+    instructor_id: null,
+    start_date: "",
+    end_date: "",
+    max_students: 30,
+    status: "upcoming" as "upcoming" | "ongoing" | "completed" | "cancelled",
+  });
+  const [scheduleForm, setScheduleForm] = useState({
+    day_of_week: 1,
+    start_time: "09:00",
+    end_time: "11:00",
+  });
+  const [selectedOfferingId, setSelectedOfferingId] = useState<number | null>(null);
+  
+  // Add these with your other modal states
+  const [editScheduleModalOpen, setEditScheduleModalOpen] = useState(false);
+  const [editingSchedule, setEditingSchedule] = useState<{ id: number; offeringId: number; day_of_week: number; start_time: string; end_time: string } | null>(null);
+  const [editScheduleForm, setEditScheduleForm] = useState({
+    day_of_week: 0,
+    start_time: "",
+    end_time: "",
+  });
 
-  // Setup drag and drop sensors
+  // Drag and drop sensors
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
         distance: 5,
+      },
+      // Add this to debug pointer events
+      onActivation: ({ event }) => {
+        console.log("Pointer activated:", event.target);
       },
     }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
     })
   );
-
-  // Load course data
-  useEffect(() => {
-    if (courseId) {
-      fetchCourseData();
+  
+  // Fetch available organizations for transfer
+  const fetchAvailableOrganizations = async () => {
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) return;
+      
+      const { data: memberships } = await supabase
+        .from('organization_members')
+        .select('organization_id, organizations(id, name)')
+        .eq('user_id', user.id)
+        .in('member_role', ['admin', 'sub_admin']);
+      
+      if (memberships) {
+        setAvailableOrganizations(memberships.map(m => ({
+          id: m.organization_id,
+          name: m.organizations?.name || `Organization ${m.organization_id}`
+        })));
+      }
+    } catch (error) {
+      console.error("Error fetching organizations:", error);
     }
-  }, [courseId]);
+  };
 
-  const fetchCourseData = async () => {
-    setLoading(true);
+  // Transfer course to another organization
+  const handleTransferCourse = async () => {
+    if (!selectedTargetOrg) {
+      toast.error("Please select an organization to transfer to");
+      return;
+    }
+    
+    setIsTransferring(true);
+    
     try {
       const supabase = getSupabaseBrowserClient();
       
-      const { data: courseData, error: courseError } = await supabase
-        .from("courses")
-        .select("*")
-        .eq("id", courseId)
-        .single();
+      const { error } = await supabase
+        .from('courses')
+        .update({ organization_id: selectedTargetOrg })
+        .eq('id', courseId);
       
-      if (courseError) throw courseError;
-      setCourse({ ...courseData, status: courseData.status || "draft" });
+      if (error) throw error;
       
-      const { data: modulesData, error: modulesError } = await supabase
-        .from("modules")
-        .select("*")
-        .eq("course_id", courseId)
-        .order("order_index", { ascending: true });
+      toast.success("Course transferred successfully!");
+      setShowTransferModal(false);
       
-      if (modulesError) throw modulesError;
-      
-      const modulesWithClasses = await Promise.all(
-        (modulesData || []).map(async (module) => {
-          const { data: classesData, error: classesError } = await supabase
-            .from("classes")
-            .select("*")
-            .eq("module_id", module.id)
-            .order("order_index", { ascending: true });
-          
-          if (classesError) throw classesError;
-          
-          const classesWithLessons = await Promise.all(
-            (classesData || []).map(async (classItem) => {
-              const { data: lessonsData, error: lessonsError } = await supabase
-                .from("lessons")
-                .select("*")
-                .eq("class_id", classItem.id)
-                .order("order_index", { ascending: true });
-              
-              if (lessonsError) throw lessonsError;
-              
-              const lessonsWithAssignments = await Promise.all(
-                (lessonsData || []).map(async (lesson) => {
-                  const { data: assignmentData, error: assignmentError } = await supabase
-                    .from("assignments")
-                    .select("*")
-                    .eq("lesson_id", lesson.id)
-                    .maybeSingle();
-                  
-                  return { ...lesson, assignment: assignmentData || null };
-                })
-              );
-              
-              return { ...classItem, lessons: lessonsWithAssignments };
-            })
-          );
-          
-          return { ...module, classes: classesWithLessons };
-        })
-      );
-      
-      setModules(modulesWithClasses);
-      
-      if (modulesWithClasses.length > 0 && expandedModules.length === 0) {
-        setExpandedModules([modulesWithClasses[0].id]);
-      }
+      // Reload course data
+      const refreshedCourse = await getCourseWithDetails(courseId);
+      setCourse(refreshedCourse);
       
     } catch (error) {
-      console.error("Error fetching course data:", error);
-      toast.error("Failed to load course data");
+      console.error("Error transferring course:", error);
+      toast.error("Failed to transfer course. Please try again.");
+    } finally {
+      setIsTransferring(false);
+    }
+  };
+
+  // Fetch user's organizations
+  useEffect(() => {
+    const fetchOrganizations = async () => {
+      const supabase = getSupabaseBrowserClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (user) {
+        const { data: memberships } = await supabase
+          .from("organization_members")
+          .select("organization_id, organizations(*)")
+          .eq("user_id", user.id);
+        
+        if (memberships) {
+          const orgs = memberships.map(m => m.organizations).filter(Boolean);
+          setOrganizations(orgs);
+          if (orgs.length > 0) {
+            setSelectedOrgId(orgs[0].id);
+          }
+        }
+      }
+    };
+    
+    fetchOrganizations();
+  }, []);
+
+  // Get current user ID
+  useEffect(() => {
+    const getCurrentUser = async () => {
+      const supabase = getSupabaseBrowserClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        console.log("Current user ID:", user.id);
+        setCurrentUserId(user.id);
+      } else {
+        console.error("No user found!");
+      }
+    };
+    getCurrentUser();
+  }, []);
+  
+  // Load course data
+  const loadCourse = async () => {
+    try {
+      setLoading(true);
+      const data = await getCourseWithDetails(courseId);
+      setCourse(data);
+      
+      // Auto-expand first module
+      if (data?.modules && data.modules.length > 0) {
+        setExpandedModules(new Set([data.modules[0].id]));
+      }
+    } catch (error) {
+      console.error("Error loading course:", error);
+      toast.error("Failed to load course");
     } finally {
       setLoading(false);
     }
   };
-
-  // Drag and drop handlers with Supabase save
+  
+  useEffect(() => {
+    if (courseId) {
+      loadCourse();
+    }
+  }, [courseId]);
+  
+  // Toggle expand/collapse
+  const toggleModule = (moduleId: number) => {
+    const newSet = new Set(expandedModules);
+    if (newSet.has(moduleId)) {
+      newSet.delete(moduleId);
+    } else {
+      newSet.add(moduleId);
+    }
+    setExpandedModules(newSet);
+  };
+  
+  const toggleClass = (classId: number) => {
+    const newSet = new Set(expandedClasses);
+    if (newSet.has(classId)) {
+      newSet.delete(classId);
+    } else {
+      newSet.add(classId);
+    }
+    setExpandedClasses(newSet);
+  };
+  
+  // Drag and drop handlers
   const handleDragEndModules = async (event: DragEndEvent) => {
     const { active, over } = event;
-    
-    if (!over) return;
-    if (active.id === over.id) return;
-    
-    const oldIndex = modules.findIndex((m) => m.id === active.id);
-    const newIndex = modules.findIndex((m) => m.id === over.id);
-    
-    if (oldIndex === -1 || newIndex === -1) return;
-    
-    const reorderedModules = arrayMove(modules, oldIndex, newIndex);
-    const finalModules = reorderedModules.map((module, idx) => ({
-      ...module,
-      order_index: idx,
-    }));
-    
-    // Update local state immediately for UI feedback
-    setModules(finalModules);
-    
-    // Save to Supabase
-    setSaving(true);
-    try {
-      const supabase = getSupabaseBrowserClient();
+    if (!course?.modules) return;
+    if (active.id !== over?.id) {
+      const oldIndex = course.modules.findIndex((m) => m.id === active.id);
+      const newIndex = course.modules.findIndex((m) => m.id === over?.id);
+      const newModules = arrayMove(course.modules, oldIndex, newIndex);
       
-      for (const module of finalModules) {
-        const { error } = await supabase
-          .from("modules")
-          .update({ order_index: module.order_index })
-          .eq("id", module.id);
+      // Update UI immediately for smooth visual feedback
+      setCourse({ ...course, modules: newModules });
+      
+      try {
+        const supabase = getSupabaseBrowserClient();
         
-        if (error) throw error;
+        // Step 1: Set all order_indexes to temporary negative values to avoid conflicts
+        for (let i = 0; i < newModules.length; i++) {
+          await supabase
+            .from('modules')
+            .update({ order_index: - (i + 1) - 1000 }) // Use large negative offset
+            .eq('id', newModules[i].id);
+        }
+        
+        // Step 2: Set them to the correct values
+        for (let i = 0; i < newModules.length; i++) {
+          await supabase
+            .from('modules')
+            .update({ order_index: i })
+            .eq('id', newModules[i].id);
+        }
+        
+        toast.success("Module order updated");
+      } catch (error) {
+        console.error("Error updating module order:", error);
+        toast.error("Failed to update module order. Please try again.");
+        // Revert on error - reload from server
+        await loadCourse();
       }
-      
-      toast.success("Module order saved");
-    } catch (error: any) {
-      console.error("Error saving module order:", error);
-      toast.error("Failed to save order");
-      await fetchCourseData();
-    } finally {
-      setSaving(false);
     }
   };
 
-  const handleDragEndClasses = async (moduleId: number, event: DragEndEvent) => {
+  // Replace the existing handleDragEndClasses with this:
+  const handleDragEndClasses = async (event: DragEndEvent) => {
+    console.log("=== DRAG END CLASSES ===");
+    console.log("Active:", event.active);
+    console.log("Over:", event.over);
+    
     const { active, over } = event;
-    if (!over) return;
-    if (active.id === over.id) return;
+    if (!course?.modules) {
+      console.log("No course modules found");
+      return;
+    }
+    if (!over) {
+      console.log("No over target found");
+      return;
+    }
     
-    const module = modules.find(m => m.id === moduleId);
-    if (!module) return;
+    const activeId = active.id as number;
+    const overId = over.id as number;
     
-    const activeId = String(active.id);
-    const overId = String(over.id);
+    console.log("Active ID:", activeId, "Over ID:", overId);
     
-    const activeClassId = parseInt(activeId.split("-class-")[1]);
-    const overClassId = parseInt(overId.split("-class-")[1]);
+    if (activeId === overId) {
+      console.log("Same item, ignoring");
+      return;
+    }
     
-    const oldIndex = module.classes.findIndex((c) => c.id === activeClassId);
-    const newIndex = module.classes.findIndex((c) => c.id === overClassId);
+    // Find source class and its parent module
+    let sourceModuleId: number | null = null;
+    let sourceClass: any = null;
+    let sourceClassIndex: number = -1;
     
-    if (oldIndex === -1 || newIndex === -1) return;
+    console.log("Searching for source class...");
+    for (const module of course.modules) {
+      console.log(`Checking module ${module.id} (${module.title}) with ${module.classes.length} classes`);
+      const foundIndex = module.classes.findIndex(c => c.id === activeId);
+      if (foundIndex !== -1) {
+        sourceModuleId = module.id;
+        sourceClass = module.classes[foundIndex];
+        sourceClassIndex = foundIndex;
+        console.log(`Found source class in module ${sourceModuleId} at index ${sourceClassIndex}`);
+        break;
+      }
+    }
     
-    const reorderedClasses = arrayMove(module.classes, oldIndex, newIndex);
-    const finalClasses = reorderedClasses.map((classItem, idx) => ({
-      ...classItem,
-      order_index: idx,
-    }));
+    if (!sourceModuleId || !sourceClass) {
+      console.log("Source class not found!");
+      return;
+    }
     
-    // Update local state
-    setModules(prevModules =>
-      prevModules.map(m =>
-        m.id === moduleId ? { ...m, classes: finalClasses } : m
-      )
-    );
+    // Find target location
+    let targetModuleId: number | null = null;
+    let targetClassIndex: number = -1;
+    let targetType = "";
     
-    // Save to Supabase
-    setSaving(true);
+    // Check if over is a class
+    console.log("Searching for target (checking if over is a class)...");
+    for (const module of course.modules) {
+      const foundIndex = module.classes.findIndex(c => c.id === overId);
+      if (foundIndex !== -1) {
+        targetModuleId = module.id;
+        targetClassIndex = foundIndex;
+        targetType = "class";
+        console.log(`Found target class in module ${targetModuleId} at index ${targetClassIndex}`);
+        break;
+      }
+    }
+    
+    // If over is a module (not a class), append to end of that module
+    if (targetModuleId === null) {
+      console.log("Target is not a class, checking if it's a module...");
+      const targetModule = course.modules.find(m => m.id === overId);
+      if (targetModule) {
+        targetModuleId = targetModule.id;
+        targetClassIndex = targetModule.classes.length;
+        targetType = "module";
+        console.log(`Found target module ${targetModuleId}, will append at end (index ${targetClassIndex})`);
+      }
+    }
+    
+    if (targetModuleId === null) {
+      console.log("Target not found as class or module!");
+      return;
+    }
+    
+    console.log(`Moving class from module ${sourceModuleId} to module ${targetModuleId} (target type: ${targetType})`);
+    
+    // Create updated modules structure
+    let updatedModules = [...course.modules];
+    
+    // Find source module index
+    const sourceModuleIndex = updatedModules.findIndex(m => m.id === sourceModuleId);
+    // Remove from source
+    const [removedClass] = updatedModules[sourceModuleIndex].classes.splice(sourceClassIndex, 1);
+    console.log(`Removed class "${removedClass.title}" from module ${sourceModuleId}`);
+    
+    // Find target module index
+    const targetModuleIndex = updatedModules.findIndex(m => m.id === targetModuleId);
+    // Insert at target position
+    const insertIndex = targetClassIndex === -1 ? updatedModules[targetModuleIndex].classes.length : targetClassIndex;
+    updatedModules[targetModuleIndex].classes.splice(insertIndex, 0, removedClass);
+    console.log(`Inserted class at module ${targetModuleId}, index ${insertIndex}`);
+    
+    // Update UI immediately
+    setCourse({ ...course, modules: updatedModules });
+    
     try {
       const supabase = getSupabaseBrowserClient();
       
-      for (const classItem of finalClasses) {
-        const { error } = await supabase
-          .from("classes")
-          .update({ order_index: classItem.order_index })
-          .eq("id", classItem.id);
-        
-        if (error) throw error;
+      // Collect all classes that need updates
+      const allClassesToUpdate: { id: number; module_id: number; order_index: number }[] = [];
+      
+      // Add classes from source module (if it still has classes)
+      if (updatedModules[sourceModuleIndex].classes.length > 0) {
+        for (let i = 0; i < updatedModules[sourceModuleIndex].classes.length; i++) {
+          allClassesToUpdate.push({
+            id: updatedModules[sourceModuleIndex].classes[i].id,
+            module_id: sourceModuleId,
+            order_index: i
+          });
+        }
+        console.log(`Updated ${updatedModules[sourceModuleIndex].classes.length} classes in source module`);
       }
       
-      toast.success("Class order saved");
-    } catch (error: any) {
-      console.error("Error saving class order:", error);
-      toast.error("Failed to save order");
-      await fetchCourseData();
-    } finally {
-      setSaving(false);
+      // Add classes from target module
+      for (let i = 0; i < updatedModules[targetModuleIndex].classes.length; i++) {
+        allClassesToUpdate.push({
+          id: updatedModules[targetModuleIndex].classes[i].id,
+          module_id: targetModuleId,
+          order_index: i
+        });
+      }
+      console.log(`Updated ${updatedModules[targetModuleIndex].classes.length} classes in target module`);
+      console.log("Classes to update:", allClassesToUpdate);
+      
+      // Step 1: Set all affected classes to temporary negative values
+      for (const classToUpdate of allClassesToUpdate) {
+        await supabase
+          .from('classes')
+          .update({ order_index: -classToUpdate.order_index - 1000 })
+          .eq('id', classToUpdate.id);
+      }
+      console.log("Set temporary order_index values");
+      
+      // Step 2: Set them to correct values with proper module_id
+      for (const classToUpdate of allClassesToUpdate) {
+        await supabase
+          .from('classes')
+          .update({ 
+            order_index: classToUpdate.order_index,
+            module_id: classToUpdate.module_id
+          })
+          .eq('id', classToUpdate.id);
+      }
+      console.log("Set final order_index values");
+      
+      toast.success(sourceModuleId === targetModuleId ? "Class order updated" : "Class moved to new module");
+    } catch (error) {
+      console.error("Error updating class order:", error);
+      toast.error("Failed to update class order. Please try again.");
+      await loadCourse();
     }
   };
 
-  const handleDragEndLessons = async (moduleId: number, classId: number, event: DragEndEvent) => {
+const getDayName = (day: number): string => {
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  return days[day] || 'Unknown';
+};
+
+  // Replace the existing handleDragEndLessons with this:
+  const handleDragEndLessons = async (event: DragEndEvent) => {
     const { active, over } = event;
+    if (!course?.modules) return;
     if (!over) return;
-    if (active.id === over.id) return;
     
-    const module = modules.find(m => m.id === moduleId);
-    if (!module) return;
-    const classItem = module.classes.find(c => c.id === classId);
-    if (!classItem) return;
+    const activeId = active.id as number;
+    const overId = over.id as number;
     
-    const activeId = String(active.id);
-    const overId = String(over.id);
+    if (activeId === overId) return;
     
-    const activeLessonId = parseInt(activeId.split("-lesson-")[1]);
-    const overLessonId = parseInt(overId.split("-lesson-")[1]);
+    // Find source lesson, its class, and its module
+    let sourceModuleId: number | null = null;
+    let sourceClassId: number | null = null;
+    let sourceLesson: any = null;
+    let sourceLessonIndex: number = -1;
     
-    const oldIndex = classItem.lessons.findIndex((l) => l.id === activeLessonId);
-    const newIndex = classItem.lessons.findIndex((l) => l.id === overLessonId);
+    for (const module of course.modules) {
+      for (const classItem of module.classes) {
+        const foundIndex = classItem.lessons.findIndex(l => l.id === activeId);
+        if (foundIndex !== -1) {
+          sourceModuleId = module.id;
+          sourceClassId = classItem.id;
+          sourceLesson = classItem.lessons[foundIndex];
+          sourceLessonIndex = foundIndex;
+          break;
+        }
+      }
+      if (sourceClassId) break;
+    }
     
-    if (oldIndex === -1 || newIndex === -1) return;
+    if (!sourceModuleId || !sourceClassId || !sourceLesson) return;
     
-    const reorderedLessons = arrayMove(classItem.lessons, oldIndex, newIndex);
-    const finalLessons = reorderedLessons.map((lesson, idx) => ({
-      ...lesson,
-      order_index: idx,
-    }));
+    // Find target location
+    let targetClassId: number | null = null;
+    let targetLessonIndex: number = -1;
     
-    // Update local state
-    setModules(prevModules =>
-      prevModules.map(m =>
-        m.id === moduleId
-          ? {
-              ...m,
-              classes: m.classes.map(c =>
-                c.id === classId ? { ...c, lessons: finalLessons } : c
-              ),
-            }
-          : m
-      )
-    );
+    // First check if over is a lesson
+    for (const module of course.modules) {
+      for (const classItem of module.classes) {
+        const foundIndex = classItem.lessons.findIndex(l => l.id === overId);
+        if (foundIndex !== -1) {
+          targetClassId = classItem.id;
+          targetLessonIndex = foundIndex;
+          break;
+        }
+      }
+      if (targetClassId) break;
+    }
     
-    // Save to Supabase
-    setSaving(true);
+    // If over is a class (not a lesson), append to end of that class
+    if (targetClassId === null) {
+      for (const module of course.modules) {
+        const foundClass = module.classes.find(c => c.id === overId);
+        if (foundClass) {
+          targetClassId = foundClass.id;
+          targetLessonIndex = foundClass.lessons.length;
+          break;
+        }
+      }
+    }
+    
+    if (targetClassId === null) return;
+    
+    // Create updated structure
+    let updatedModules = [...course.modules];
+    
+    // Find source locations
+    let sourceModuleIndex = updatedModules.findIndex(m => m.id === sourceModuleId);
+    let sourceClassIndex = updatedModules[sourceModuleIndex].classes.findIndex(c => c.id === sourceClassId);
+    
+    // Remove from source
+    const [removedLesson] = updatedModules[sourceModuleIndex].classes[sourceClassIndex].lessons.splice(sourceLessonIndex, 1);
+    
+    // Find target locations
+    let targetModuleIndex = -1;
+    let targetClassIndex = -1;
+    
+    for (let mIdx = 0; mIdx < updatedModules.length; mIdx++) {
+      const cIdx = updatedModules[mIdx].classes.findIndex(c => c.id === targetClassId);
+      if (cIdx !== -1) {
+        targetModuleIndex = mIdx;
+        targetClassIndex = cIdx;
+        break;
+      }
+    }
+    
+    if (targetModuleIndex === -1) return;
+    
+    // Insert at target position
+    const insertIndex = targetLessonIndex === -1 ? updatedModules[targetModuleIndex].classes[targetClassIndex].lessons.length : targetLessonIndex;
+    updatedModules[targetModuleIndex].classes[targetClassIndex].lessons.splice(insertIndex, 0, removedLesson);
+    
+    // Update UI immediately
+    setCourse({ ...course, modules: updatedModules });
+    
     try {
       const supabase = getSupabaseBrowserClient();
       
-      for (const lesson of finalLessons) {
-        const { error } = await supabase
-          .from("lessons")
-          .update({ order_index: lesson.order_index })
-          .eq("id", lesson.id);
-        
-        if (error) throw error;
+      // Collect all lessons that need updates
+      const allLessonsToUpdate: { id: number; class_id: number; order_index: number }[] = [];
+      
+      // Add lessons from source class (if it still has lessons)
+      if (updatedModules[sourceModuleIndex].classes[sourceClassIndex].lessons.length > 0) {
+        for (let i = 0; i < updatedModules[sourceModuleIndex].classes[sourceClassIndex].lessons.length; i++) {
+          allLessonsToUpdate.push({
+            id: updatedModules[sourceModuleIndex].classes[sourceClassIndex].lessons[i].id,
+            class_id: sourceClassId,
+            order_index: i
+          });
+        }
       }
       
-      toast.success("Lesson order saved");
-    } catch (error: any) {
-      console.error("Error saving lesson order:", error);
-      toast.error("Failed to save order");
-      await fetchCourseData();
-    } finally {
-      setSaving(false);
+      // Add lessons from target class
+      for (let i = 0; i < updatedModules[targetModuleIndex].classes[targetClassIndex].lessons.length; i++) {
+        allLessonsToUpdate.push({
+          id: updatedModules[targetModuleIndex].classes[targetClassIndex].lessons[i].id,
+          class_id: targetClassId,
+          order_index: i
+        });
+      }
+      
+      // Step 1: Set all affected lessons to temporary negative values
+      for (const lessonToUpdate of allLessonsToUpdate) {
+        await supabase
+          .from('lessons')
+          .update({ order_index: -lessonToUpdate.order_index - 1000 })
+          .eq('id', lessonToUpdate.id);
+      }
+      
+      // Step 2: Set them to correct values with proper class_id
+      for (const lessonToUpdate of allLessonsToUpdate) {
+        await supabase
+          .from('lessons')
+          .update({ 
+            order_index: lessonToUpdate.order_index,
+            class_id: lessonToUpdate.class_id
+          })
+          .eq('id', lessonToUpdate.id);
+      }
+      
+      toast.success(sourceClassId === targetClassId ? "Lesson order updated" : "Lesson moved to new class");
+    } catch (error) {
+      console.error("Error updating lesson order:", error);
+      toast.error("Failed to update lesson order. Please try again.");
+      await loadCourse();
     }
   };
 
   // Module CRUD
   const openAddModuleModal = () => {
     setEditingModule(null);
-    setModuleTitle("");
-    setIsModuleModalOpen(true);
+    setModuleForm({ title: "" });
+    setModuleModalOpen(true);
   };
-
-  const openEditModuleModal = (module: Module) => {
+  
+  const openEditModuleModal = (module: ModuleWithClasses) => {
     setEditingModule(module);
-    setModuleTitle(module.title);
-    setIsModuleModalOpen(true);
+    setModuleForm({ title: module.title });
+    setModuleModalOpen(true);
   };
-
+  
   const saveModule = async () => {
-    if (!moduleTitle.trim()) {
-      toast.error("Module title is required");
+    if (!moduleForm.title.trim()) {
+      toast.error("Please enter a module title");
       return;
     }
-
-    setSaving(true);
+    
     try {
-      const supabase = getSupabaseBrowserClient();
-
       if (editingModule) {
-        const { error } = await supabase
-          .from("modules")
-          .update({ title: moduleTitle })
-          .eq("id", editingModule.id);
-        
-        if (error) throw error;
-        
-        setModules(modules.map(m => 
-          m.id === editingModule.id ? { ...m, title: moduleTitle } : m
-        ));
+        await updateModule(editingModule.id, { title: moduleForm.title });
+        setCourse({
+          ...course!,
+          modules: course!.modules?.map(m =>
+            m.id === editingModule.id ? { ...m, title: moduleForm.title } : m
+          )
+        });
         toast.success("Module updated");
       } else {
-        const newOrderIndex = modules.length;
-        const { data, error } = await supabase
-          .from("modules")
-          .insert({
-            title: moduleTitle,
-            course_id: courseId,
-            order_index: newOrderIndex,
-          })
-          .select()
-          .single();
-        
-        if (error) throw error;
-        
-        setModules([...modules, { ...data, classes: [] }]);
-        toast.success("Module created");
+        const newModule = await addModule(courseId, {
+          title: moduleForm.title,
+          order_index: course?.modules?.length || 0,
+        });
+        setCourse({
+          ...course!,
+          modules: [...(course?.modules || []), { ...newModule, classes: [] }]
+        });
+        toast.success("Module added");
       }
-      
-      setIsModuleModalOpen(false);
-    } catch (error: any) {
-      console.error("Error saving module:", error);
-      toast.error(error.message || "Failed to save module");
-    } finally {
-      setSaving(false);
+      setModuleModalOpen(false);
+    } catch (error) {
+      toast.error("Failed to save module");
     }
   };
 
-  const deleteModule = async (moduleId: number) => {
-    if (!confirm("Are you sure? This will delete all classes and lessons in this module.")) return;
+  // Add this function to perform the actual deletion
+  const confirmDeleteModule = async () => {
+    if (!moduleToDelete) return;
     
-    setSaving(true);
     try {
-      const supabase = getSupabaseBrowserClient();
-      const { error } = await supabase
-        .from("modules")
-        .delete()
-        .eq("id", moduleId);
-      
-      if (error) throw error;
-      
-      const filteredModules = modules.filter(m => m.id !== moduleId);
-      const reorderedModules = filteredModules.map((m, idx) => ({ ...m, order_index: idx }));
-      setModules(reorderedModules);
-      
-      // Update order_index for remaining modules in database
-      for (const module of reorderedModules) {
-        await supabase
-          .from("modules")
-          .update({ order_index: module.order_index })
-          .eq("id", module.id);
-      }
-      
-      toast.success("Module deleted");
-    } catch (error: any) {
+      await deleteModule(moduleToDelete.id);
+      setCourse({
+        ...course!,
+        modules: course!.modules?.filter(m => m.id !== moduleToDelete.id)
+      });
+      toast.success(`Module "${moduleToDelete.title}" deleted`);
+      setDeleteModuleModalOpen(false);
+      setModuleToDelete(null);
+    } catch (error) {
       console.error("Error deleting module:", error);
-      toast.error(error.message || "Failed to delete module");
-      await fetchCourseData();
-    } finally {
-      setSaving(false);
+      toast.error("Failed to delete module");
     }
   };
 
+  // Replace the existing deleteModule function (around line 350)
+  const promptDeleteModule = (moduleId: number, moduleTitle: string) => {
+    setModuleToDelete({ id: moduleId, title: moduleTitle });
+    setDeleteModuleModalOpen(true);
+  };
+  
   // Class CRUD
-  const openAddClassModal = (module: Module) => {
-    setSelectedModuleForClass(module);
+  const openAddClassModal = (moduleId: number) => {
     setEditingClass(null);
-    setClassTitle("");
-    setIsClassModalOpen(true);
+    setClassForm({ title: "" });
+    setEditingClass({ class: {} as any, moduleId });
+    setClassModalOpen(true);
   };
-
-  const openEditClassModal = (classItem: Class, moduleId: number) => {
-    const module = modules.find(m => m.id === moduleId);
-    setSelectedModuleForClass(module || null);
-    setEditingClass(classItem);
-    setClassTitle(classItem.title);
-    setIsClassModalOpen(true);
+  
+  const openEditClassModal = (classItem: ClassWithLessons, moduleId: number) => {
+    setEditingClass({ class: classItem, moduleId });
+    setClassForm({ title: classItem.title });
+    setClassModalOpen(true);
   };
-
+  
   const saveClass = async () => {
-    if (!classTitle.trim()) {
-      toast.error("Class title is required");
+    if (!classForm.title.trim() || !editingClass) {
+      toast.error("Please enter a class title");
       return;
     }
-    if (!selectedModuleForClass) return;
-
-    setSaving(true);
+    
     try {
-      const supabase = getSupabaseBrowserClient();
-
-      if (editingClass) {
-        const { error } = await supabase
-          .from("classes")
-          .update({ title: classTitle })
-          .eq("id", editingClass.id);
+      if (editingClass.class.id) {
+        await updateClass(editingClass.class.id, { title: classForm.title });
         
-        if (error) throw error;
-        
-        setModules(modules.map(m =>
-          m.id === selectedModuleForClass.id
+        const updatedModules = course?.modules?.map(m =>
+          m.id === editingClass.moduleId
             ? {
                 ...m,
                 classes: m.classes.map(c =>
-                  c.id === editingClass.id ? { ...c, title: classTitle } : c
-                ),
+                  c.id === editingClass.class.id ? { ...c, title: classForm.title } : c
+                )
               }
             : m
-        ));
+        );
+        setCourse({ ...course!, modules: updatedModules });
         toast.success("Class updated");
       } else {
-        const newOrderIndex = selectedModuleForClass.classes.length;
-        const { data, error } = await supabase
-          .from("classes")
-          .insert({
-            title: classTitle,
-            module_id: selectedModuleForClass.id,
-            order_index: newOrderIndex,
-          })
-          .select()
-          .single();
+        const newClass = await addClass(editingClass.moduleId, {
+          title: classForm.title,
+          order_index: course?.modules?.find(m => m.id === editingClass.moduleId)?.classes.length || 0,
+        });
         
-        if (error) throw error;
-        
-        setModules(modules.map(m =>
-          m.id === selectedModuleForClass.id
-            ? { ...m, classes: [...m.classes, { ...data, lessons: [] }] }
+        const updatedModules = course?.modules?.map(m =>
+          m.id === editingClass.moduleId
+            ? { ...m, classes: [...m.classes, { ...newClass, lessons: [] }] }
             : m
-        ));
-        toast.success("Class created");
+        );
+        setCourse({ ...course!, modules: updatedModules });
+        toast.success("Class added");
       }
-      
-      setIsClassModalOpen(false);
-    } catch (error: any) {
-      console.error("Error saving class:", error);
-      toast.error(error.message || "Failed to save class");
-    } finally {
-      setSaving(false);
+      setClassModalOpen(false);
+    } catch (error) {
+      toast.error("Failed to save class");
     }
   };
-
-  const deleteClass = async (classId: number, moduleId: number) => {
-    if (!confirm("Are you sure? This will delete all lessons in this class.")) return;
+  
+  const promptDeleteClass = (classId: number, moduleId: number, classTitle: string) => {
+    setClassToDelete({ id: classId, title: classTitle, moduleId });
+    setDeleteClassModalOpen(true);
+  };
+  
+  const confirmDeleteClass = async () => {
+    if (!classToDelete) return;
     
-    setSaving(true);
     try {
-      const supabase = getSupabaseBrowserClient();
-      const { error } = await supabase
-        .from("classes")
-        .delete()
-        .eq("id", classId);
-      
-      if (error) throw error;
-      
-      const updatedModules = modules.map(m =>
-        m.id === moduleId
-          ? {
-              ...m,
-              classes: m.classes.filter(c => c.id !== classId).map((c, idx) => ({ ...c, order_index: idx })),
-            }
+      await deleteClass(classToDelete.id);
+      const updatedModules = course?.modules?.map(m =>
+        m.id === classToDelete.moduleId
+          ? { ...m, classes: m.classes.filter(c => c.id !== classToDelete.id) }
           : m
       );
-      setModules(updatedModules);
-      
-      // Update order_index for remaining classes in database
-      const module = updatedModules.find(m => m.id === moduleId);
-      if (module) {
-        for (const classItem of module.classes) {
-          await supabase
-            .from("classes")
-            .update({ order_index: classItem.order_index })
-            .eq("id", classItem.id);
-        }
-      }
-      
-      toast.success("Class deleted");
-    } catch (error: any) {
+      setCourse({ ...course!, modules: updatedModules });
+      toast.success(`Class "${classToDelete.title}" deleted`);
+      setDeleteClassModalOpen(false);
+      setClassToDelete(null);
+    } catch (error) {
       console.error("Error deleting class:", error);
-      toast.error(error.message || "Failed to delete class");
-      await fetchCourseData();
-    } finally {
-      setSaving(false);
+      toast.error("Failed to delete class");
     }
   };
 
   // Lesson CRUD
-  const openAddLessonModal = (classItem: Class) => {
-    setSelectedClassForLesson(classItem);
+  // REPLACE the existing openAddLessonModal with this:
+  const openAddLessonModal = (classId: number, moduleId: number) => {
     setEditingLesson(null);
     setLessonForm({
       title: "",
       content_type: "video",
-      video_url: "",
-      video_notes: "",
-      text_content: "",
-      quiz_questions: [],
+      content_url: "",
+      content_json: null,
+      duration_seconds: 0,
+      is_free_preview: false,
+      notes: "",
+      resources: [], // ADD THIS LINE
     });
-    setIsLessonModalOpen(true);
+    setEditingLesson({ lesson: {} as any, classId, moduleId });
+    setLessonModalOpen(true);
   };
-
-  const openEditLessonModal = async (lesson: Lesson, classId: number, moduleId: number) => {
-    const module = modules.find(m => m.id === moduleId);
-    const classItem = module?.classes.find(c => c.id === classId);
-    setSelectedClassForLesson(classItem || null);
-    setEditingLesson(lesson);
+  
+  // REPLACE the existing openEditLessonModal with this:
+  const openEditLessonModal = async (lesson: LessonWithAssignments, classId: number, moduleId: number) => {
+    let notes = "";
+    let resources: Array<{ url: string; name: string; type: string; size: number }> = [];
+    let contentJson = lesson.content_json;
+    let textContent = ""; // Add this for text lesson content
+    let quizData = null; // Add this for quiz data
     
-    let video_url = "";
-    let video_notes = "";
-    let text_content = "";
-    let quiz_questions = [];
-    
-    if (lesson.content_json) {
-      if (lesson.content_type === "video") {
-        video_url = lesson.content_url || "";
-        video_notes = lesson.content_json.notes || "";
-      } else if (lesson.content_type === "text") {
-        text_content = lesson.content_json.body || "";
-      } else if (lesson.content_type === "quiz") {
-        quiz_questions = lesson.content_json.questions || [];
-      }
+    // Extract based on content type
+    if (lesson.content_type === "video" && lesson.content_json) {
+      notes = lesson.content_json.notes || "";
+      resources = lesson.content_json.resources || [];
+      contentJson = lesson.content_json;
+    } else if (lesson.content_type === "text" && lesson.content_json) {
+      // For text lessons, content is stored in the "content" field
+      textContent = lesson.content_json.content || "";
+      resources = lesson.content_json.resources || [];
+      contentJson = lesson.content_json.content; // Set to the actual content for the editor
+    } else if (lesson.content_type === "quiz" && lesson.content_json) {
+      quizData = lesson.content_json;
+      resources = lesson.content_json.resources || [];
+      contentJson = lesson.content_json;
+    } else if (lesson.content_json) {
+      // Fallback for any other case
+      resources = lesson.content_json.resources || [];
+      textContent = lesson.content_json.content || lesson.content_json;
+      contentJson = lesson.content_json.content || lesson.content_json;
     }
     
+    setEditingLesson({ lesson, classId, moduleId });
     setLessonForm({
       title: lesson.title,
-      content_type: lesson.content_type,
-      video_url,
-      video_notes,
-      text_content,
-      quiz_questions,
+      content_type: lesson.content_type as any,
+      content_url: lesson.content_url || "",
+      content_json: contentJson,
+      duration_seconds: lesson.duration_seconds || 0,
+      is_free_preview: lesson.is_free_preview || false,
+      notes: notes,
+      resources: resources,
     });
-    setIsLessonModalOpen(true);
+    setLessonModalOpen(true);
   };
+    
 
   const saveLesson = async () => {
-    if (!lessonForm.title.trim()) {
-      toast.error("Lesson title is required");
+    if (!lessonForm.title.trim() || !editingLesson) {
+      toast.error("Please enter a lesson title");
       return;
     }
-    if (!selectedClassForLesson) return;
-
-    setSaving(true);
+    
     try {
-      const supabase = getSupabaseBrowserClient();
+      const lessonData: any = {
+        title: lessonForm.title,
+        content_type: lessonForm.content_type,
+        is_free_preview: lessonForm.is_free_preview,
+        duration_seconds: lessonForm.duration_seconds,
+      };
       
-      let contentJson = null;
-      let contentUrl = null;
-      
+      // Handle different content types
       if (lessonForm.content_type === "video") {
-        contentUrl = lessonForm.video_url;
-        contentJson = { notes: lessonForm.video_notes };
+        lessonData.content_url = lessonForm.content_url;
+        lessonData.content_json = {
+          notes: lessonForm.notes || "",
+          video_url: lessonForm.content_url,
+          resources: lessonForm.resources, // Add resources
+        };
       } else if (lessonForm.content_type === "text") {
-        contentJson = { body: lessonForm.text_content };
+        lessonData.content_json = {
+          content: lessonForm.content_json,
+          resources: lessonForm.resources, // Add resources
+        };
+        lessonData.content_url = null;
       } else if (lessonForm.content_type === "quiz") {
-        contentJson = { questions: lessonForm.quiz_questions };
+        lessonData.content_json = {
+          ...lessonForm.content_json,
+          resources: lessonForm.resources, // Add resources
+        };
+        lessonData.content_url = null;
       }
-
-      if (editingLesson) {
-        const { error } = await supabase
-          .from("lessons")
-          .update({
-            title: lessonForm.title,
-            content_type: lessonForm.content_type,
-            content_url: contentUrl,
-            content_json: contentJson,
-          })
-          .eq("id", editingLesson.id);
+      
+      if (editingLesson.lesson.id) {
+        await updateLesson(editingLesson.lesson.id, lessonData);
         
-        if (error) throw error;
-        
-        setModules(modules.map(m =>
-          m.id === selectedClassForLesson.module_id
+        const updatedModules = course?.modules?.map(m =>
+          m.id === editingLesson.moduleId
             ? {
                 ...m,
                 classes: m.classes.map(c =>
-                  c.id === selectedClassForLesson.id
+                  c.id === editingLesson.classId
                     ? {
                         ...c,
                         lessons: c.lessons.map(l =>
-                          l.id === editingLesson.id
-                            ? { 
-                                ...l, 
-                                title: lessonForm.title, 
-                                content_type: lessonForm.content_type,
-                                content_url: contentUrl,
-                                content_json: contentJson,
-                              }
+                          l.id === editingLesson.lesson.id
+                            ? { ...l, ...lessonData }
                             : l
-                        ),
+                        )
                       }
                     : c
-                ),
+                )
               }
             : m
-        ));
+        );
+        setCourse({ ...course!, modules: updatedModules });
         toast.success("Lesson updated");
       } else {
-        const newOrderIndex = selectedClassForLesson.lessons?.length || 0;
-        const { data, error } = await supabase
-          .from("lessons")
-          .insert({
-            title: lessonForm.title,
-            content_type: lessonForm.content_type,
-            content_url: contentUrl,
-            content_json: contentJson,
-            order_index: newOrderIndex,
-            class_id: selectedClassForLesson.id,
-          })
-          .select()
-          .single();
+        const newLesson = await addLesson(editingLesson.classId, {
+          ...lessonData,
+          order_index: course?.modules
+            ?.find(m => m.id === editingLesson.moduleId)
+            ?.classes.find(c => c.id === editingLesson.classId)?.lessons.length || 0,
+        });
         
-        if (error) throw error;
-        
-        setModules(modules.map(m =>
-          m.id === selectedClassForLesson.module_id
+        const updatedModules = course?.modules?.map(m =>
+          m.id === editingLesson.moduleId
             ? {
                 ...m,
                 classes: m.classes.map(c =>
-                  c.id === selectedClassForLesson.id
-                    ? { ...c, lessons: [...(c.lessons || []), { ...data, assignment: null }] }
+                  c.id === editingLesson.classId
+                    ? { ...c, lessons: [...c.lessons, newLesson] }
                     : c
-                ),
+                )
               }
             : m
-        ));
-        toast.success("Lesson created");
+        );
+        setCourse({ ...course!, modules: updatedModules });
+        toast.success("Lesson added");
       }
-      
-      setIsLessonModalOpen(false);
-    } catch (error: any) {
+      setLessonModalOpen(false);
+    } catch (error) {
       console.error("Error saving lesson:", error);
-      toast.error(error.message || "Failed to save lesson");
-    } finally {
-      setSaving(false);
+      toast.error("Failed to save lesson");
     }
   };
+  
+  const promptDeleteLesson = (lessonId: number, classId: number, moduleId: number, lessonTitle: string) => {
+    setLessonToDelete({ id: lessonId, title: lessonTitle, classId, moduleId });
+    setDeleteLessonModalOpen(true);
+  };
 
-  const deleteLesson = async (lessonId: number, classId: number, moduleId: number) => {
-    if (!confirm("Are you sure you want to delete this lesson?")) return;
+  const confirmDeleteLesson = async () => {
+    if (!lessonToDelete) return;
     
-    setSaving(true);
     try {
-      const supabase = getSupabaseBrowserClient();
+      await deleteLesson(lessonToDelete.id);
       
-      await supabase.from("assignments").delete().eq("lesson_id", lessonId);
-      
-      const { error: lessonError } = await supabase
-        .from("lessons")
-        .delete()
-        .eq("id", lessonId);
-      
-      if (lessonError) throw lessonError;
-      
-      const updatedModules = modules.map(m =>
-        m.id === moduleId
+      const updatedModules = course?.modules?.map(m =>
+        m.id === lessonToDelete.moduleId
           ? {
               ...m,
               classes: m.classes.map(c =>
-                c.id === classId
-                  ? { ...c, lessons: c.lessons.filter(l => l.id !== lessonId).map((l, idx) => ({ ...l, order_index: idx })) }
+                c.id === lessonToDelete.classId
+                  ? { ...c, lessons: c.lessons.filter(l => l.id !== lessonToDelete.id) }
                   : c
-              ),
+              )
             }
           : m
       );
-      setModules(updatedModules);
-      
-      // Update order_index for remaining lessons in database
-      const module = updatedModules.find(m => m.id === moduleId);
-      if (module) {
-        const classItem = module.classes.find(c => c.id === classId);
-        if (classItem) {
-          for (const lesson of classItem.lessons) {
-            await supabase
-              .from("lessons")
-              .update({ order_index: lesson.order_index })
-              .eq("id", lesson.id);
-          }
-        }
-      }
-      
-      toast.success("Lesson deleted");
-    } catch (error: any) {
+      setCourse({ ...course!, modules: updatedModules });
+      toast.success(`Lesson "${lessonToDelete.title}" deleted`);
+      setDeleteLessonModalOpen(false);
+      setLessonToDelete(null);
+    } catch (error) {
       console.error("Error deleting lesson:", error);
-      toast.error(error.message || "Failed to delete lesson");
-      await fetchCourseData();
-    } finally {
-      setSaving(false);
+      toast.error("Failed to delete lesson");
     }
   };
-
-  // Assignment CRUD
-  const openAssignmentModal = async (lesson: Lesson) => {
-    setEditingLesson(lesson);
+  
+  // Assignment CRUD - FULLY FIXED with null checks
+  const openAssignmentModal = async (lesson: LessonWithAssignments, classId: number, moduleId: number) => {
+    console.log("=== OPEN ASSIGNMENT MODAL ===");
+    console.log("Lesson ID:", lesson.id);
     
-    try {
-      const supabase = getSupabaseBrowserClient();
-      const { data, error } = await supabase
-        .from("assignments")
-        .select("*")
-        .eq("lesson_id", lesson.id)
-        .maybeSingle();
-      
-      if (!error && data) {
-        setAssignmentForm({
-          title: data.title,
-          description: data.description || "",
-          due_at: data.due_at || "",
-        });
-      } else {
-        setAssignmentForm({
-          title: "",
-          description: "",
-          due_at: "",
-        });
-      }
-      
-      setIsAssignmentModalOpen(true);
-    } catch (error) {
-      console.error("Error fetching assignment:", error);
+    const existingAssignment = lesson.assignments?.[0];
+    
+    if (existingAssignment) {
+      console.log("Editing existing assignment:", existingAssignment);
+      setEditingAssignment({ 
+        assignment: existingAssignment, 
+        lessonId: lesson.id
+      });
+      setAssignmentForm({
+        title: existingAssignment.title || "",
+        description: existingAssignment.description || "",
+        due_at: existingAssignment.due_at || "",
+        points: existingAssignment.points || 100,
+      });
+    } else {
+      console.log("Creating new assignment for lesson:", lesson.id);
+      // Set editingAssignment with lessonId, assignment as null
+      setEditingAssignment({ 
+        assignment: null, 
+        lessonId: lesson.id
+      });
       setAssignmentForm({
         title: "",
         description: "",
         due_at: "",
+        points: 100,
       });
-      setIsAssignmentModalOpen(true);
     }
+    setAssignmentModalOpen(true);
   };
 
   const saveAssignment = async () => {
-    if (!editingLesson) return;
+    console.log("=== SAVE ASSIGNMENT START ===");
+    console.log("Editing Assignment:", editingAssignment);
+    console.log("Assignment Form:", assignmentForm);
+    
     if (!assignmentForm.title.trim()) {
-      toast.error("Assignment title is required");
+      toast.error("Please enter an assignment title");
+      return;
+    }
+    
+    if (assignmentForm.points < 0) {
+      toast.error("Points cannot be negative");
+      return;
+    }
+    
+    try {
+      // Check if we're editing an existing assignment
+      if (editingAssignment?.assignment && editingAssignment.assignment.id) {
+        // UPDATE existing assignment
+        console.log("Updating assignment ID:", editingAssignment.assignment.id);
+        
+        await updateAssignment(editingAssignment.assignment.id, {
+          title: assignmentForm.title,
+          description: assignmentForm.description,
+          due_at: assignmentForm.due_at || null,
+          points: assignmentForm.points,
+        });
+        
+        toast.success("Assignment updated");
+        
+      } 
+      // Check if we're creating a new assignment
+      else if (editingAssignment?.lessonId) {
+        // CREATE new assignment
+        console.log("Creating new assignment for lesson ID:", editingAssignment.lessonId);
+        
+        // Format due date if provided
+        let dueAt = null;
+        if (assignmentForm.due_at) {
+          dueAt = new Date(assignmentForm.due_at).toISOString();
+        }
+        
+        const assignmentData = {
+          course_id: courseId,
+          title: assignmentForm.title,
+          description: assignmentForm.description,
+          due_at: dueAt,
+          points: assignmentForm.points,
+        };
+        
+        console.log("Sending assignment data:", assignmentData);
+        
+        await addAssignment(editingAssignment.lessonId, assignmentData);
+        
+        toast.success("Assignment added");
+      } 
+      else {
+        console.error("Invalid state - no assignment ID or lesson ID", editingAssignment);
+        toast.error("Cannot save assignment: Invalid state");
+        return;
+      }
+      
+      // Reload course data and close modal
+      await loadCourse();
+      setAssignmentModalOpen(false);
+      
+      // Reset form
+      setEditingAssignment(null);
+      setAssignmentForm({
+        title: "",
+        description: "",
+        due_at: "",
+        points: 100,
+      });
+      
+    } catch (error) {
+      console.error("ERROR in saveAssignment:", error);
+      toast.error(`Failed to save assignment: ${error.message || "Please try again"}`);
+    }
+  };
+
+  const handleDeleteAssignment = async (assignmentId: number) => {
+    console.log("=== HANDLE DELETE ASSIGNMENT ===");
+    console.log("Assignment ID to delete:", assignmentId);
+    
+    if (!assignmentId) {
+      console.error("No assignment ID provided");
+      toast.error("Cannot delete assignment: No ID provided");
+      return;
+    }
+    
+    // Use a confirm dialog that returns a Promise
+    const confirmed = window.confirm("Are you sure you want to delete this assignment? This action cannot be undone.");
+    
+    if (!confirmed) {
+      console.log("Deletion cancelled by user");
+      return;
+    }
+    
+    try {
+      console.log("Calling deleteAssignment API for ID:", assignmentId);
+      
+      // Call the imported deleteAssignment function from supabase
+      await deleteAssignment(assignmentId);
+      
+      console.log("Delete API successful");
+      toast.success("Assignment deleted successfully");
+      
+      // Close the modal first
+      setAssignmentModalOpen(false);
+      
+      // Clear the editing state
+      setEditingAssignment(null);
+      setAssignmentForm({
+        title: "",
+        description: "",
+        due_at: "",
+        points: 100,
+      });
+      
+      // Then reload the course data to refresh the UI
+      await loadCourse();
+      
+      console.log("Course reloaded after deletion");
+      
+    } catch (error) {
+      console.error("Error deleting assignment:", error);
+      toast.error(`Failed to delete assignment: ${error.message || "Please try again"}`);
+    }
+  };
+
+  // Course Offering (Course Class) CRUD
+  const openAddOfferingModal = () => {
+    setEditingOffering(null);
+    setOfferingForm({
+      name: "",
+      description: "",
+      instructor_id: null,
+      start_date: "",
+      end_date: "",
+      max_students: 30,
+      status: "upcoming",
+    });
+    setOfferingModalOpen(true);
+  };
+  
+  const openEditOfferingModal = (offering: CourseClassWithDetails) => {
+    setEditingOffering(offering);
+    setOfferingForm({
+      name: offering.name,
+      description: offering.description || "",
+      instructor_id: offering.instructor_id || null,
+      start_date: offering.start_date || "",
+      end_date: offering.end_date || "",
+      max_students: offering.max_students || 30,
+      status: offering.status as any,
+    });
+    setOfferingModalOpen(true);
+  };
+  
+  const saveOffering = async () => {
+    // Validate name
+    if (!offeringForm.name.trim()) {
+      toast.error("Please enter an offering name");
+      return;
+    }
+    
+    // Validate current user
+    if (!currentUserId) {
+      toast.error("Unable to identify current user. Please refresh and try again.");
+      return;
+    }
+    
+    try {
+      const offeringData = {
+        name: offeringForm.name.trim(),
+        description: offeringForm.description?.trim() || null,
+        instructor_id: currentUserId,  // Auto-set from logged-in user
+        start_date: offeringForm.start_date || null,
+        end_date: offeringForm.end_date || null,
+        max_students: offeringForm.max_students || null,
+        status: offeringForm.status,
+      };
+      
+      console.log("offeringData being sent:", offeringData);
+      
+      if (editingOffering) {
+        await updateCourseClass(editingOffering.id, offeringData);
+        toast.success("Offering updated successfully");
+      } else {
+        await addCourseClass(courseId, offeringData);
+        toast.success("Offering added successfully");
+      }
+      
+      await loadCourse();
+      setOfferingModalOpen(false);
+      
+      // Reset form
+      setOfferingForm({
+        name: "",
+        description: "",
+        instructor_id: null,
+        start_date: "",
+        end_date: "",
+        max_students: 30,
+        status: "upcoming",
+      });
+      
+    } catch (error: any) {
+      console.error("Error saving offering:", error);
+      toast.error(`Failed to save offering: ${error.message || "Please try again"}`);
+    }
+  };
+  
+  const deleteOffering = async (offeringId: number) => {
+    if (confirm("Are you sure you want to delete this offering? This will remove all enrollments and schedules.")) {
+      try {
+        await deleteCourseClass(offeringId);
+        await loadCourse();
+        toast.success("Offering deleted");
+      } catch (error) {
+        toast.error("Failed to delete offering");
+      }
+    }
+  };
+  
+  // Schedule CRUD
+  // Open Add Schedule Modal
+  const openAddScheduleModal = (offeringId: number) => {
+    if (!offeringId) {
+      toast.error("Invalid offering selected");
+      return;
+    }
+    setSelectedOfferingId(offeringId);
+    setScheduleForm({
+      day_of_week: 0,
+      start_time: "",
+      end_time: "",
+    });
+    setScheduleModalOpen(true);
+  };
+
+  // Add Schedule Function
+  const addSchedule = async () => {
+    if (!selectedOfferingId) {
+      toast.error("No offering selected");
       return;
     }
 
-    setSaving(true);
+    if (!scheduleForm.day_of_week && scheduleForm.day_of_week !== 0) {
+      toast.error("Please select a day of week");
+      return;
+    }
+    if (!scheduleForm.start_time) {
+      toast.error("Please enter start time");
+      return;
+    }
+    if (!scheduleForm.end_time) {
+      toast.error("Please enter end time");
+      return;
+    }
+
     try {
-      const supabase = getSupabaseBrowserClient();
+      await addClassSchedule(selectedOfferingId, {
+        day_of_week: scheduleForm.day_of_week,
+        start_time: scheduleForm.start_time,
+        end_time: scheduleForm.end_time,
+      });
       
-      const { data: existing } = await supabase
-        .from("assignments")
-        .select("id")
-        .eq("lesson_id", editingLesson.id)
-        .maybeSingle();
+      toast.success("Schedule added successfully");
+      setScheduleModalOpen(false);
+      setSelectedOfferingId(null);
+      setScheduleForm({
+        day_of_week: 0,
+        start_time: "",
+        end_time: "",
+      });
       
-      if (existing) {
-        const { error } = await supabase
-          .from("assignments")
-          .update({
-            title: assignmentForm.title,
-            description: assignmentForm.description,
-            due_at: assignmentForm.due_at || null,
-          })
-          .eq("id", existing.id);
+      // Reload course data to show the new schedule
+      await loadCourse();
+    } catch (error) {
+      console.error("Error adding schedule:", error);
+      toast.error("Failed to add schedule");
+    }
+  };
+
+  // Open Edit Schedule Modal
+  const openEditScheduleModal = (schedule: any, offeringId: number) => {
+    setEditingSchedule({
+      id: schedule.id,
+      offeringId: offeringId,
+      day_of_week: schedule.day_of_week,
+      start_time: schedule.start_time,
+      end_time: schedule.end_time,
+    });
+    setEditScheduleForm({
+      day_of_week: schedule.day_of_week,
+      start_time: schedule.start_time,
+      end_time: schedule.end_time,
+    });
+    setEditScheduleModalOpen(true);
+  };
+
+  // Update Schedule Function
+  const updateSchedule = async () => {
+    if (!editingSchedule) {
+      toast.error("No schedule selected");
+      return;
+    }
+
+    if (!editScheduleForm.day_of_week && editScheduleForm.day_of_week !== 0) {
+      toast.error("Please select a day of week");
+      return;
+    }
+    if (!editScheduleForm.start_time) {
+      toast.error("Please enter start time");
+      return;
+    }
+    if (!editScheduleForm.end_time) {
+      toast.error("Please enter end time");
+      return;
+    }
+
+    try {
+      await updateClassSchedule(editingSchedule.id, {
+        day_of_week: editScheduleForm.day_of_week,
+        start_time: editScheduleForm.start_time,
+        end_time: editScheduleForm.end_time,
+      });
+      
+      toast.success("Schedule updated successfully");
+      setEditScheduleModalOpen(false);
+      setEditingSchedule(null);
+      setEditScheduleForm({
+        day_of_week: 0,
+        start_time: "",
+        end_time: "",
+      });
+      
+      // Reload course data to show the updated schedule
+      await loadCourse();
+    } catch (error) {
+      console.error("Error updating schedule:", error);
+      toast.error("Failed to update schedule");
+    }
+  };
+
+  // Delete Schedule Function
+  const deleteSchedule = async (scheduleId: number, scheduleDay: string) => {
+    if (confirm(`Are you sure you want to delete the schedule for ${scheduleDay}? This action cannot be undone.`)) {
+      try {
+        await deleteClassSchedule(scheduleId);
+        toast.success("Schedule deleted successfully");
         
-        if (error) throw error;
-        toast.success("Assignment updated");
-      } else {
-        const { error } = await supabase
-          .from("assignments")
-          .insert({
-            title: assignmentForm.title,
-            description: assignmentForm.description,
-            due_at: assignmentForm.due_at || null,
-            course_id: courseId,
-            lesson_id: editingLesson.id,
-          });
-        
-        if (error) throw error;
-        toast.success("Assignment created");
+        // Reload course data to remove the schedule
+        await loadCourse();
+      } catch (error) {
+        console.error("Error deleting schedule:", error);
+        toast.error("Failed to delete schedule");
       }
-      
-      setIsAssignmentModalOpen(false);
-      await fetchCourseData();
-      
-    } catch (error: any) {
-      console.error("Error saving assignment:", error);
-      toast.error(error.message || "Failed to save assignment");
-    } finally {
-      setSaving(false);
     }
   };
 
-  const deleteAssignment = async (lessonId: number) => {
-    if (!confirm("Are you sure you want to remove this assignment?")) return;
-    
-    setSaving(true);
+  // Publish/Archive actions
+  const handlePublish = async () => {
     try {
-      const supabase = getSupabaseBrowserClient();
-      const { error } = await supabase
-        .from("assignments")
-        .delete()
-        .eq("lesson_id", lessonId);
-      
-      if (error) throw error;
-      
-      toast.success("Assignment removed");
-      setIsAssignmentModalOpen(false);
-      await fetchCourseData();
-      
-    } catch (error: any) {
-      console.error("Error deleting assignment:", error);
-      toast.error(error.message || "Failed to delete assignment");
-    } finally {
-      setSaving(false);
+      await publishCourse(courseId);
+      await loadCourse();
+      toast.success("Course published!");
+      setPublishConfirmOpen(false);
+    } catch (error) {
+      toast.error("Failed to publish course");
     }
   };
-
-  // Quiz question helpers
-  const addQuizQuestion = () => {
-    setLessonForm({
-      ...lessonForm,
-      quiz_questions: [
-        ...lessonForm.quiz_questions,
-        {
-          question: "",
-          type: "multiple_choice",
-          options: ["", "", "", ""],
-          correct_answer: "",
-        },
-      ],
-    });
+  
+  const handleUnpublish = async () => {
+    try {
+      await unpublishCourse(courseId);
+      await loadCourse();
+      toast.success("Course unpublished");
+    } catch (error) {
+      toast.error("Failed to unpublish course");
+    }
   };
-
-  const updateQuizQuestion = (index: number, updates: any) => {
-    const updatedQuestions = [...lessonForm.quiz_questions];
-    updatedQuestions[index] = { ...updatedQuestions[index], ...updates };
-    setLessonForm({ ...lessonForm, quiz_questions: updatedQuestions });
+  
+  const handleArchive = async () => {
+    if (confirm("Are you sure you want to archive this course?")) {
+      try {
+        await archiveCourse(courseId);
+        await loadCourse();
+        toast.success("Course archived");
+      } catch (error) {
+        toast.error("Failed to archive course");
+      }
+    }
   };
-
-  const removeQuizQuestion = (index: number) => {
-    setLessonForm({
-      ...lessonForm,
-      quiz_questions: lessonForm.quiz_questions.filter((_, i) => i !== index),
-    });
+  
+  const handleMoveToOrganization = async (orgId: number) => {
+    try {
+      await updateCourse(courseId, { organization_id: orgId });
+      await loadCourse();
+      setSelectedOrgId(orgId);
+      toast.success("Course moved to new organization");
+    } catch (error) {
+      toast.error("Failed to move course");
+    }
   };
-
-  const toggleModule = (moduleId: number) => {
-    setExpandedModules(prev =>
-      prev.includes(moduleId)
-        ? prev.filter(id => id !== moduleId)
-        : [...prev, moduleId]
-    );
-  };
-
-  const getContentTypeIcon = (type: string) => {
-    const ct = contentTypes.find(t => t.value === type);
-    if (!ct) return <FileText className="w-4 h-4" />;
-    const Icon = ct.icon;
-    return <Icon className="w-4 h-4" />;
-  };
-
-  const getTotalLessons = () => {
-    return modules.reduce((acc, m) => acc + m.classes.reduce((acc2, c) => acc2 + (c.lessons?.length || 0), 0), 0);
-  };
-
-  // UI only publish/unpublish
-  const handlePublishClick = () => {
-    setShowPublishModal(true);
-  };
-
-  const handlePublishConfirm = () => {
-    setCourse({ ...course!, status: "published" });
-    setShowPublishModal(false);
-    toast.success("Course status updated to Published (UI only)");
-  };
-
-  const handleUnpublishClick = () => {
-    setCourse({ ...course!, status: "draft" });
-    toast.success("Course status updated to Draft (UI only)");
-  };
-
+  
   if (loading) {
     return (
-      <div className="container mx-auto px-4 py-8 flex justify-center items-center min-h-[400px]">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500"></div>
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-purple-500" />
       </div>
     );
   }
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
-      {/* Saving overlay */}
-      {saving && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
-          <div className="bg-gray-900 rounded-lg p-4 flex items-center gap-3">
-            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-purple-500"></div>
-            <span className="text-white">Saving changes...</span>
-          </div>
-        </div>
-      )}
-
-      <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 -right-40 w-80 h-80 bg-purple-600 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob" />
-        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-blue-600 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob animation-delay-2000" />
-      </div>
-
-      <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between">
-            <div>
-              <Link
-                href="/courses"
-                className="inline-flex items-center text-gray-400 hover:text-white transition-colors mb-4"
-              >
-                <ArrowLeft className="w-4 h-4 mr-2" />
+  
+  if (!course) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 py-12 px-4">
+        <div className="max-w-4xl mx-auto">
+          <GlowCard>
+            <div className="text-center py-12">
+              <AlertCircle className="w-16 h-16 text-yellow-500 mx-auto mb-4" />
+              <h2 className="text-2xl font-bold text-white mb-2">Course Not Found</h2>
+              <p className="text-gray-400 mb-6">The course you're looking for doesn't exist or you don't have access.</p>
+              <GlowButton onClick={() => router.push("/courses")}>
                 Back to Courses
-              </Link>
-              <div className="flex items-center gap-3">
-                <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-purple-400 bg-clip-text text-transparent">
-                  {course?.title}
-                </h1>
-                {course?.status === "published" ? (
-                  <Badge className="bg-green-600/80">Published</Badge>
-                ) : (
-                  <Badge className="bg-yellow-600/80">Draft</Badge>
+              </GlowButton>
+            </div>
+          </GlowCard>
+        </div>
+      </div>
+    );
+  }
+  
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 py-8 px-4">
+      <div className="max-w-6xl mx-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-8 flex-wrap gap-4">
+          <div className="flex items-center gap-4">
+            <Link href="/courses">
+              <GlowButton variant="ghost" size="sm">
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                Back
+              </GlowButton>
+            </Link>
+            <div>
+              <h1 className="text-3xl font-bold text-white">{course.title}</h1>
+              <div className="flex items-center gap-2 mt-1">
+                <Badge className={
+                  course.status === "published" ? "bg-green-500/20 text-green-300" :
+                  course.status === "draft" ? "bg-yellow-500/20 text-yellow-300" :
+                  "bg-gray-500/20 text-gray-300"
+                }>
+                  {course.status?.toUpperCase()}
+                </Badge>
+                {organizations.length > 1 && (
+                  <Select value={selectedOrgId?.toString()} onValueChange={(v) => handleMoveToOrganization(parseInt(v))}>
+                    <SelectTrigger className="w-48 h-8 text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {organizations.map(org => (
+                        <SelectItem key={org.id} value={org.id.toString()}>
+                          {org.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 )}
               </div>
-              <p className="text-gray-400 mt-2">{course?.description}</p>
             </div>
-            
-            <div className="flex gap-3">
-              {course?.status === "published" ? (
-                <GlowButton variant="outline" onClick={handleUnpublishClick}>
-                  <Archive className="w-4 h-4 mr-2" />
-                  Unpublish
-                </GlowButton>
-              ) : (
-                <GlowButton variant="primary" onClick={handlePublishClick}>
-                  <Rocket className="w-4 h-4 mr-2" />
-                  Publish Course
-                </GlowButton>
-              )}
-            </div>
+          </div>
+          <div className="flex gap-3">
+            {course.status !== "published" && (
+              <GlowButton variant="primary" onClick={() => setPublishConfirmOpen(true)}>
+                <Rocket className="w-4 h-4 mr-2" />
+                Publish
+              </GlowButton>
+            )}
+            {course.status === "published" && (
+              <GlowButton variant="secondary" onClick={handleUnpublish}>
+                <Eye className="w-4 h-4 mr-2" />
+                Unpublish
+              </GlowButton>
+            )}
+            {course.status !== "archived" && (
+              <GlowButton variant="ghost" onClick={handleArchive}>
+                <Archive className="w-4 h-4 mr-2" />
+                Archive
+              </GlowButton>
+            )}
+            <GlowButton variant="outline" onClick={() => window.open(`/courses/${courseId}/preview`, "_blank")}>
+              <Eye className="w-4 h-4 mr-2" />
+              Preview
+            </GlowButton>
           </div>
         </div>
-
-        {/* Stats Bar */}
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-8">
-          <div className="bg-gray-800/30 rounded-lg p-4">
-            <div className="flex items-center gap-2 text-gray-400 mb-1">
-              <FolderOpen className="w-4 h-4" />
-              <span className="text-sm">Total Modules</span>
-            </div>
-            <p className="text-2xl font-bold text-white">{modules.length}</p>
-          </div>
-          <div className="bg-gray-800/30 rounded-lg p-4">
-            <div className="flex items-center gap-2 text-gray-400 mb-1">
-              <Layers className="w-4 h-4" />
-              <span className="text-sm">Total Classes</span>
-            </div>
-            <p className="text-2xl font-bold text-white">
-              {modules.reduce((acc, m) => acc + m.classes.length, 0)}
-            </p>
-          </div>
-          <div className="bg-gray-800/30 rounded-lg p-4">
-            <div className="flex items-center gap-2 text-gray-400 mb-1">
-              <Video className="w-4 h-4" />
-              <span className="text-sm">Total Lessons</span>
-            </div>
-            <p className="text-2xl font-bold text-white">{getTotalLessons()}</p>
-          </div>
-          <div className="bg-gray-800/30 rounded-lg p-4">
-            <div className="flex items-center gap-2 text-gray-400 mb-1">
-              <ClipboardList className="w-4 h-4" />
-              <span className="text-sm">Assignments</span>
-            </div>
-            <p className="text-2xl font-bold text-white">
-              {modules.reduce((acc, m) => acc + m.classes.reduce((acc2, c) => acc2 + (c.lessons?.filter(l => l.assignment).length || 0), 0), 0)}
-            </p>
-          </div>
-        </div>
-
-        {/* Main Content */}
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-          {/* Left Sidebar */}
-          <div className="lg:col-span-1">
-            <GlowCard>
-              <div className="p-5">
-                <h3 className="text-lg font-semibold text-white mb-4">Course Settings</h3>
-                <nav className="space-y-2">
-                  <button
-                    onClick={() => setActiveTab("curriculum")}
-                    className={`w-full text-left px-3 py-2 rounded-lg transition-all flex items-center gap-3 ${
-                      activeTab === "curriculum"
-                        ? "bg-purple-600/20 text-purple-400"
-                        : "text-gray-400 hover:bg-gray-800/50"
-                    }`}
-                  >
-                    <Layers className="w-4 h-4" />
-                    <span>Curriculum</span>
-                  </button>
-                  <button
-                    onClick={() => setActiveTab("settings")}
-                    className={`w-full text-left px-3 py-2 rounded-lg transition-all flex items-center gap-3 ${
-                      activeTab === "settings"
-                        ? "bg-purple-600/20 text-purple-400"
-                        : "text-gray-400 hover:bg-gray-800/50"
-                    }`}
-                  >
-                    <Settings className="w-4 h-4" />
-                    <span>Course Settings</span>
-                  </button>
-                  <button
-                    onClick={() => setActiveTab("analytics")}
-                    className={`w-full text-left px-3 py-2 rounded-lg transition-all flex items-center gap-3 ${
-                      activeTab === "analytics"
-                        ? "bg-purple-600/20 text-purple-400"
-                        : "text-gray-400 hover:bg-gray-800/50"
-                    }`}
-                  >
-                    <BarChart3 className="w-4 h-4" />
-                    <span>Analytics</span>
-                  </button>
-                </nav>
-              </div>
-            </GlowCard>
-          </div>
-
-          {/* Right Content Area */}
-          <div className="lg:col-span-3">
+        
+        {/* Main Tabs */}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+          <TabsList className="bg-slate-800/50 border border-slate-700 flex-wrap h-auto">
+            <TabsTrigger value="basic">Basic Info</TabsTrigger>
+            <TabsTrigger value="curriculum">Curriculum</TabsTrigger>
+            <TabsTrigger value="offerings">Offerings</TabsTrigger>
+          </TabsList>
+          
+          {/* Basic Info Tab - Using the shared component */}
+          <TabsContent value="basic">
             <GlowCard>
               <div className="p-6">
-                {/* Curriculum Tab */}
-                {activeTab === "curriculum" && (
-                  <div className="space-y-6">
-                    <div className="flex justify-between items-center">
-                      <div>
-                        <h2 className="text-xl font-semibold text-white">Course Curriculum</h2>
-                        <p className="text-sm text-gray-400 mt-1">
-                          Drag and drop modules, classes, and lessons to reorder them
-                        </p>
-                      </div>
-                      <GlowButton onClick={openAddModuleModal}>
-                        <Plus className="w-4 h-4 mr-2" />
-                        Add Module
-                      </GlowButton>
-                    </div>
-
-                    {/* Modules List with Drag and Drop */}
-                    {modules.length === 0 ? (
-                      <div className="text-center py-12 text-gray-500">
-                        <FolderOpen className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                        <p>No modules yet. Click "Add Module" to get started.</p>
-                      </div>
-                    ) : (
-                      <DndContext
-                        sensors={sensors}
-                        collisionDetection={closestCenter}
-                        onDragEnd={handleDragEndModules}
-                      >
-                        <SortableContext
-                          items={modules.map(m => m.id)}
-                          strategy={verticalListSortingStrategy}
-                        >
-                          <div className="space-y-4">
-                            {modules.map((module, moduleIdx) => (
-                              <SortableModuleItem
-                                key={module.id}
-                                module={module}
-                                index={moduleIdx}
-                                expandedModules={expandedModules}
-                                toggleModule={toggleModule}
-                                onEdit={openEditModuleModal}
-                                onDelete={deleteModule}
-                              >
-                                {/* Classes within Module */}
-                                {module.classes.length === 0 ? (
-                                  <div className="text-center py-6 text-gray-500">
-                                    <p>No classes yet</p>
-                                    <GlowButton
-                                      variant="outline"
-                                      size="sm"
-                                      className="mt-3"
-                                      onClick={() => openAddClassModal(module)}
-                                    >
-                                      <Plus className="w-3 h-3 mr-1" />
-                                      Add First Class
-                                    </GlowButton>
-                                  </div>
-                                ) : (
-                                  <DndContext
-                                    sensors={sensors}
-                                    collisionDetection={closestCenter}
-                                    onDragEnd={(event) => handleDragEndClasses(module.id, event)}
-                                  >
-                                    <SortableContext
-                                      items={module.classes.map(c => `${module.id}-class-${c.id}`)}
-                                      strategy={verticalListSortingStrategy}
-                                    >
-                                      <div className="space-y-3">
-                                        {module.classes.map((classItem, classIdx) => (
-                                          <SortableClassItem
-                                            key={`${module.id}-class-${classItem.id}`}
-                                            classItem={classItem}
-                                            index={classIdx}
-                                            moduleId={module.id}
-                                            onEdit={(c: Class) => openEditClassModal(c, module.id)}
-                                            onDelete={deleteClass}
-                                          >
-                                            {/* Lessons within Class */}
-                                            <div className="space-y-2 mt-3">
-                                              {(classItem.lessons || []).length === 0 ? (
-                                                <GlowButton
-                                                  variant="outline"
-                                                  size="sm"
-                                                  className="w-full"
-                                                  onClick={() => openAddLessonModal(classItem)}
-                                                >
-                                                  <Plus className="w-3 h-3 mr-1" />
-                                                  Add First Lesson
-                                                </GlowButton>
-                                              ) : (
-                                                <DndContext
-                                                  sensors={sensors}
-                                                  collisionDetection={closestCenter}
-                                                  onDragEnd={(event) => handleDragEndLessons(module.id, classItem.id, event)}
-                                                >
-                                                  <SortableContext
-                                                    items={classItem.lessons.map(l => `${module.id}-${classItem.id}-lesson-${l.id}`)}
-                                                    strategy={verticalListSortingStrategy}
-                                                  >
-                                                    <div className="space-y-2">
-                                                      {classItem.lessons.map((lesson, lessonIdx) => (
-                                                        <SortableLessonItem
-                                                          key={`${module.id}-${classItem.id}-lesson-${lesson.id}`}
-                                                          lesson={lesson}
-                                                          index={lessonIdx}
-                                                          classId={classItem.id}
-                                                          moduleId={module.id}
-                                                          onEdit={openEditLessonModal}
-                                                          onDelete={deleteLesson}
-                                                          onAssignment={openAssignmentModal}
-                                                          getContentTypeIcon={getContentTypeIcon}
-                                                        />
-                                                      ))}
-                                                      <GlowButton
-                                                        variant="outline"
-                                                        size="sm"
-                                                        className="w-full"
-                                                        onClick={() => openAddLessonModal(classItem)}
-                                                      >
-                                                        <Plus className="w-3 h-3 mr-1" />
-                                                        Add Lesson
-                                                      </GlowButton>
-                                                    </div>
-                                                  </SortableContext>
-                                                </DndContext>
-                                              )}
-                                            </div>
-                                          </SortableClassItem>
-                                        ))}
-                                        <GlowButton
-                                          variant="outline"
-                                          size="sm"
-                                          fullWidth
-                                          onClick={() => openAddClassModal(module)}
-                                        >
-                                          <Plus className="w-3 h-3 mr-1" />
-                                          Add Class
-                                        </GlowButton>
-                                      </div>
-                                    </SortableContext>
-                                  </DndContext>
-                                )}
-                              </SortableModuleItem>
-                            ))}
-                          </div>
-                        </SortableContext>
-                      </DndContext>
-                    )}
+                <CourseBasicForm 
+                  mode="edit"
+                  initialData={{
+                    id: course.id,
+                    title: course.title,
+                    description: course.description,
+                    level: course.level,
+                    category: course.category,
+                    visibility: course.visibility as any,
+                    thumbnail: course.thumbnail,
+                    learning_objectives: course.learning_objectives as string[] || [],
+                    prerequisites: course.prerequisites as string[] || [],
+                    tags: course.tags as string[] || [],
+                    organization_id: course.organization_id,
+                    organization_name: organizations.find(o => o.id === course.organization_id)?.name,
+                  }}
+                  onSuccess={loadCourse}
+                />
+              </div>
+            </GlowCard>
+          </TabsContent>
+          
+          {/* Curriculum Tab */}
+          <TabsContent value="curriculum">
+            <GlowCard>
+              <div className="p-6">
+                <div className="flex justify-between items-center mb-6">
+                  <div>
+                    <h3 className="text-lg font-semibold text-white">Course Curriculum</h3>
+                    <p className="text-sm text-gray-400">Drag to reorder modules, classes, and lessons</p>
                   </div>
-                )}
-
-                {/* Settings Tab */}
-                {activeTab === "settings" && (
-                  <div className="space-y-6">
-                    <h2 className="text-xl font-semibold text-white">Course Settings</h2>
+                  <GlowButton onClick={openAddModuleModal}>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Add Module
+                  </GlowButton>
+                </div>
+                
+                <DndContext
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  onDragEnd={handleDragEndModules}
+                >
+                  <SortableContext
+                    items={course.modules?.map(m => m.id) || []}
+                    strategy={verticalListSortingStrategy}
+                  >
                     <div className="space-y-4">
-                      <div>
-                        <Label className="text-white mb-2 block">Course Title</Label>
-                        <Input
-                          value={course?.title || ""}
-                          onChange={(e) => setCourse({ ...course!, title: e.target.value })}
-                          className="bg-gray-800/50 border-gray-700 text-white"
-                        />
-                      </div>
-                      <div>
-                        <Label className="text-white mb-2 block">Course Description</Label>
-                        <Textarea
-                          rows={4}
-                          value={course?.description || ""}
-                          onChange={(e) => setCourse({ ...course!, description: e.target.value })}
-                          className="bg-gray-800/50 border-gray-700 text-white"
-                        />
-                      </div>
-                      <div>
-                        <Label className="text-white mb-2 block">Visibility</Label>
-                        <Select
-                          value={course?.visibility || "public"}
-                          onValueChange={(value) => setCourse({ ...course!, visibility: value })}
+                      {course.modules?.map((module, moduleIndex) => (
+                        <SortableModuleItem
+                          key={module.id}
+                          module={module}
+                          index={moduleIndex}
+                          onEdit={openEditModuleModal}
+                          onDelete={() => promptDeleteModule(module.id, module.title)}
+                          onToggleExpand={toggleModule}
+                          isExpanded={expandedModules.has(module.id)}
                         >
-                          <SelectTrigger className="bg-gray-800/50 border-gray-700 text-white">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="public">Public - Anyone can view</SelectItem>
-                            <SelectItem value="org">Organization - Only org members</SelectItem>
-                            <SelectItem value="private">Private - Invite only</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
+                          <div className="space-y-3">
+                            <div className="flex justify-between items-center">
+                              <h4 className="text-sm font-medium text-gray-400">Classes</h4>
+                              <GlowButton
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => openAddClassModal(module.id)}
+                              >
+                                <Plus className="w-3 h-3 mr-1" />
+                                Add Class
+                              </GlowButton>
+                            </div>
+                            
+                            <DndContext
+                              sensors={sensors}
+                              collisionDetection={closestCenter}
+                              onDragEnd={handleDragEndClasses}
+                            >
+                              <SortableContext
+                                items={module.classes.map(c => c.id)}
+                                strategy={verticalListSortingStrategy}
+                              >
+                                <div className="space-y-2">
+                                  {module.classes.map((classItem, classIndex) => (
+                                    <SortableClassItem
+                                      key={classItem.id}
+                                      classItem={classItem}
+                                      index={classIndex}
+                                      moduleId={module.id}
+                                      onEdit={openEditClassModal}
+                                      onDelete={() => promptDeleteClass(classItem.id, module.id, classItem.title)}
+                                      onToggleExpand={toggleClass}
+                                      isExpanded={expandedClasses.has(classItem.id)}
+                                    >
+                                      <div className="space-y-2">
+                                        <div className="flex justify-between items-center">
+                                          <h5 className="text-sm font-medium text-gray-400">Lessons</h5>
+                                          <GlowButton
+                                            size="sm"
+                                            variant="secondary"
+                                            onClick={() => openAddLessonModal(classItem.id, module.id)}
+                                          >
+                                            <Plus className="w-3 h-3 mr-1" />
+                                            Add Lesson
+                                          </GlowButton>
+                                        </div>
+                                        
+                                        <DndContext
+                                          sensors={sensors}
+                                          collisionDetection={closestCenter}
+                                          onDragEnd={handleDragEndLessons}
+                                        >
+                                          <SortableContext
+                                            items={classItem.lessons.map(l => l.id)}
+                                            strategy={verticalListSortingStrategy}
+                                          >
+                                            <div className="space-y-2">
+                                              {classItem.lessons.map((lesson, lessonIndex) => (
+                                                <SortableLessonItem
+                                                  key={lesson.id}
+                                                  lesson={lesson}
+                                                  index={lessonIndex}
+                                                  classId={classItem.id}
+                                                  moduleId={module.id}
+                                                  onEdit={openEditLessonModal}
+                                                  onDelete={() => promptDeleteLesson(lesson.id, classItem.id, module.id, lesson.title)}
+                                                  onAddAssignment={openAssignmentModal}
+                                                />
+                                              ))}
+                                            </div>
+                                          </SortableContext>
+                                        </DndContext>
+                                        
+                                        {classItem.lessons.length === 0 && (
+                                          <div className="text-center py-4 text-gray-500 text-sm">
+                                            No lessons yet. Click "Add Lesson" to get started.
+                                          </div>
+                                        )}
+                                      </div>
+                                    </SortableClassItem>
+                                  ))}
+                                </div>
+                              </SortableContext>
+                            </DndContext>
+                            
+                            {module.classes.length === 0 && (
+                              <div className="text-center py-8 text-gray-500">
+                                No classes yet. Click "Add Class" to create your first class.
+                              </div>
+                            )}
+                          </div>
+                        </SortableModuleItem>
+                      ))}
                     </div>
-                  </div>
-                )}
-
-                {/* Analytics Tab */}
-                {activeTab === "analytics" && (
-                  <div className="space-y-6 text-center py-12">
-                    <BarChart3 className="w-16 h-16 text-gray-600 mx-auto mb-4" />
-                    <p className="text-gray-400">Analytics will appear once students enroll in your course</p>
+                  </SortableContext>
+                </DndContext>
+                
+                {course.modules?.length === 0 && (
+                  <div className="text-center py-12 text-gray-500">
+                    <FolderOpen className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                    <p>No modules yet. Click "Add Module" to start building your course.</p>
                   </div>
                 )}
               </div>
             </GlowCard>
-          </div>
-        </div>
-      </div>
+          </TabsContent>
+          
+          {/* Offerings Tab */}
+          {/* Offerings Tab - NOW CONSISTENT with Basic Info and Curriculum tabs */}
+          <TabsContent value="offerings">
+            <GlowCard>
+              <div className="p-6">
+                <div className="flex justify-between items-center mb-6">
+                  <div>
+                    <h3 className="text-lg font-semibold text-white">Course Offerings</h3>
+                    <p className="text-sm text-gray-400 mt-1">
+                      Manage different sessions/classes for this course
+                    </p>
+                  </div>
+                  <GlowButton onClick={openAddOfferingModal}>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Add Offering
+                  </GlowButton>
+                </div>
 
-      {/* Publish Confirmation Modal */}
-      <Dialog open={showPublishModal} onOpenChange={setShowPublishModal}>
-        <DialogContent className="bg-gray-900 border-gray-800 max-w-md">
+                {course?.course_classes && course.course_classes.length > 0 ? (
+                  <div className="space-y-4">
+                    {course.course_classes.map((offering) => (
+                      <div key={offering.id} className="border border-slate-700 rounded-lg p-5 bg-slate-800/20">
+                        {/* offering content - same as before, just remove GlowCard wrapper */}
+                        <div className="flex justify-between items-start">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-2">
+                              <h4 className="font-semibold text-white text-lg">{offering.name}</h4>
+                              <Badge className={`
+                                ${offering.status === 'upcoming' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' :
+                                  offering.status === 'ongoing' ? 'bg-green-500/20 text-green-400 border-green-500/30' :
+                                  offering.status === 'completed' ? 'bg-gray-500/20 text-gray-400 border-gray-500/30' :
+                                  'bg-red-500/20 text-red-400 border-red-500/30'}
+                              `}>
+                                {offering.status}
+                              </Badge>
+                            </div>
+                            {offering.description && (
+                              <p className="text-sm text-gray-400 mb-3">{offering.description}</p>
+                            )}
+                            <div className="flex flex-wrap gap-4 text-sm text-gray-400">
+                              {offering.start_date && (
+                                <div className="flex items-center gap-1">
+                                  <Calendar className="w-4 h-4" />
+                                  <span>Starts: {new Date(offering.start_date).toLocaleDateString()}</span>
+                                </div>
+                              )}
+                              {offering.end_date && (
+                                <div className="flex items-center gap-1">
+                                  <Calendar className="w-4 h-4" />
+                                  <span>Ends: {new Date(offering.end_date).toLocaleDateString()}</span>
+                                </div>
+                              )}
+                              {offering.max_students && (
+                                <div className="flex items-center gap-1">
+                                  <Users className="w-4 h-4" />
+                                  <span>Max: {offering.max_students} students</span>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Display Schedules */}
+                            {offering.schedules && offering.schedules.length > 0 && (
+                              <div className="mt-3">
+                                <div className="flex items-center gap-2 mb-3">
+                                  <Clock className="w-4 h-4 text-purple-400" />
+                                  <span className="text-sm font-medium text-gray-300">Schedule:</span>
+                                </div>
+                                <div className="flex flex-col gap-2">
+                                  {offering.schedules.map((schedule) => (
+                                    <div 
+                                      key={schedule.id} 
+                                      className="group flex items-center gap-2 transition-all duration-200"
+                                    >
+                                      <div className="flex-1 flex items-center justify-between bg-slate-800/30 rounded-lg px-3 py-2 border border-slate-700/50 group-hover:border-purple-500/30 group-hover:bg-slate-800/50 transition-all duration-200">
+                                        <div className="flex items-center gap-3">
+                                          <div className="w-2 h-2 rounded-full bg-purple-400/60 group-hover:bg-purple-400 transition-colors duration-200" />
+                                          <div className="flex items-center gap-2">
+                                            <span className="text-sm font-medium text-gray-200 min-w-[90px]">
+                                              {getDayName(schedule.day_of_week)}
+                                            </span>
+                                            <span className="text-sm text-gray-300">
+                                              {schedule.start_time} - {schedule.end_time}
+                                            </span>
+                                          </div>
+                                        </div>
+                                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all duration-200 translate-x-1 group-hover:translate-x-0">
+                                          <button
+                                            onClick={() => openEditScheduleModal(schedule, offering.id)}
+                                            className="p-1.5 rounded-md hover:bg-purple-500/20 transition-all duration-200"
+                                            title="Edit schedule"
+                                          >
+                                            <Edit className="w-3.5 h-3.5 text-gray-400 hover:text-purple-400 transition-colors" />
+                                          </button>
+                                          <button
+                                            onClick={() => deleteSchedule(schedule.id, getDayName(schedule.day_of_week))}
+                                            className="p-1.5 rounded-md hover:bg-red-500/20 transition-all duration-200"
+                                            title="Delete schedule"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5 text-gray-400 hover:text-red-400 transition-colors" />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex gap-2">
+                            <GlowButton
+                              size="sm"
+                              variant="outline"
+                              onClick={() => openAddScheduleModal(offering.id)}
+                            >
+                              <Clock className="w-4 h-4 mr-2" />
+                              Add Schedule
+                            </GlowButton>
+                            <GlowButton
+                              size="sm"
+                              variant="outline"
+                              onClick={() => router.push(`/courses/${courseId}/offerings/${offering.id}/students`)}
+                            >
+                              <Users className="w-4 h-4 mr-2" />
+                              Manage Students
+                            </GlowButton>
+                            <GlowButton
+                              size="sm"
+                              variant="outline"
+                              onClick={() => router.push(`/courses/${courseId}/offerings/${offering.id}/chat`)}
+                            >
+                              <MessageSquare className="w-4 h-4 mr-2" />
+                              Chat Room
+                            </GlowButton>
+                            <GlowButton
+                              size="sm"
+                              variant="outline"
+                              onClick={() => openEditOfferingModal(offering)}
+                            >
+                              <Edit className="w-4 h-4 mr-2" />
+                              Edit
+                            </GlowButton>
+                            <GlowButton
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                if (confirm(`Are you sure you want to delete "${offering.name}"?`)) {
+                                  deleteOffering(offering.id);
+                                }
+                              }}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </GlowButton>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-12">
+                    <Calendar className="w-12 h-12 text-gray-600 mx-auto mb-3" />
+                    <h4 className="text-lg font-semibold text-white mb-2">No Offerings Yet</h4>
+                    <p className="text-gray-400 mb-4">
+                      Create your first course offering to start enrolling students.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </GlowCard>
+          </TabsContent>
+        </Tabs>
+      </div>
+      
+      {/* Modals */}
+      
+      {/* Module Modal */}
+      <Dialog open={moduleModalOpen} onOpenChange={setModuleModalOpen}>
+        <DialogContent className="bg-slate-800 border-slate-700">
           <DialogHeader>
-            <DialogTitle className="text-white">Publish Course</DialogTitle>
+            <DialogTitle className="text-white">
+              {editingModule ? "Edit Module" : "Add Module"}
+            </DialogTitle>
           </DialogHeader>
-          <div className="py-4">
-            <div className="flex items-start gap-3 mb-4">
-              <AlertCircle className="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" />
+          <div className="space-y-4">
+            <div>
+              <Label>Module Title</Label>
+              <Input
+                value={moduleForm.title}
+                onChange={(e) => setModuleForm({ ...moduleForm, title: e.target.value })}
+                placeholder="e.g., Introduction to Programming"
+                className="mt-2"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <GlowButton variant="ghost" onClick={() => setModuleModalOpen(false)}>Cancel</GlowButton>
+            <GlowButton onClick={saveModule}>Save</GlowButton>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Class Modal */}
+      <Dialog open={classModalOpen} onOpenChange={setClassModalOpen}>
+        <DialogContent className="bg-slate-800 border-slate-700">
+          <DialogHeader>
+            <DialogTitle className="text-white">
+              {editingClass?.class.id ? "Edit Class" : "Add Class"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Class Title</Label>
+              <Input
+                value={classForm.title}
+                onChange={(e) => setClassForm({ ...classForm, title: e.target.value })}
+                placeholder="e.g., Getting Started"
+                className="mt-2"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <GlowButton variant="ghost" onClick={() => setClassModalOpen(false)}>Cancel</GlowButton>
+            <GlowButton onClick={saveClass}>Save</GlowButton>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Lesson Modal - Complete replacement */}
+      <Dialog open={lessonModalOpen} onOpenChange={setLessonModalOpen}>
+        <DialogContent className="bg-slate-800 border-slate-700 max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-white">
+              {editingLesson?.lesson.id ? "Edit Lesson" : "Add Lesson"}
+            </DialogTitle>
+          </DialogHeader>
+          
+          <div className="space-y-6">
+            {/* Basic Info Section */}
+            <div className="space-y-4">
               <div>
-                <p className="text-gray-300">
-                  Are you sure you want to publish this course?
-                </p>
-                <p className="text-sm text-gray-500 mt-2">
-                  Once published, students will be able to see and enroll in this course.
-                  You can still unpublish it later if needed.
-                </p>
+                <Label className="text-base font-semibold">Lesson Title</Label>
+                <Input
+                  value={lessonForm.title}
+                  onChange={(e) => setLessonForm({ ...lessonForm, title: e.target.value })}
+                  placeholder="Enter lesson title"
+                  className="mt-2"
+                />
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>Content Type</Label>
+                  <Select
+                    value={lessonForm.content_type}
+                    onValueChange={(value: any) => {
+                      setLessonForm({ 
+                        ...lessonForm, 
+                        content_type: value,
+                        content_url: "",
+                        content_json: null,
+                        notes: "",
+                      });
+                    }}
+                  >
+                    <SelectTrigger className="mt-2">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="video">
+                        <div className="flex items-center gap-2">
+                          <Video className="w-4 h-4" />
+                          <span>Video Lesson</span>
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="text">
+                        <div className="flex items-center gap-2">
+                          <FileText className="w-4 h-4" />
+                          <span>Text Lesson</span>
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="quiz">
+                        <div className="flex items-center gap-2">
+                          <FileQuestion className="w-4 h-4" />
+                          <span>Quiz / Assessment</span>
+                        </div>
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                <div>
+                  <Label>Estimated Duration (seconds)</Label>
+                  <Input
+                    type="number"
+                    value={lessonForm.duration_seconds}
+                    onChange={(e) => setLessonForm({ ...lessonForm, duration_seconds: parseInt(e.target.value) || 0 })}
+                    placeholder="e.g., 600 for 10 minutes"
+                    className="mt-2"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">
+                    Help students know how long this lesson takes
+                  </p>
+                </div>
+              </div>
+              
+              <div className="flex items-center gap-3">
+                <Switch
+                  checked={lessonForm.is_free_preview}
+                  onCheckedChange={(checked) => setLessonForm({ ...lessonForm, is_free_preview: checked })}
+                />
+                <Label>Free Preview (available to non-enrolled users)</Label>
               </div>
             </div>
-            <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3">
-              <p className="text-sm text-yellow-400">
-                Note: This is a UI-only preview. Database updates will be implemented later.
+
+            {/* VIDEO LESSON CONTENT */}
+            {lessonForm.content_type === "video" && (
+              <div className="space-y-6 border-t border-slate-700 pt-4">
+                <div className="space-y-4">
+                  <div>
+                    <Label className="text-base font-semibold">Video Source</Label>
+                    <Tabs defaultValue="url" className="mt-2">
+                      <TabsList className="bg-slate-800/50">
+                        <TabsTrigger value="url">Video URL</TabsTrigger>
+                        <TabsTrigger value="upload">Upload Video</TabsTrigger>
+                      </TabsList>
+                      <TabsContent value="url" className="mt-3">
+                        <Input
+                          value={lessonForm.content_url}
+                          onChange={(e) => setLessonForm({ ...lessonForm, content_url: e.target.value })}
+                          placeholder="https://www.youtube.com/watch?v=... or https://vimeo.com/... or direct MP4 URL"
+                          className="font-mono text-sm"
+                        />
+                        <p className="text-xs text-gray-400 mt-1">
+                          Supported: YouTube, Vimeo, or direct video file URLs
+                        </p>
+                      </TabsContent>
+                      <TabsContent value="upload" className="mt-3">
+                        <FileUpload
+                          bucket="course-videos"
+                          folder={`courses/${courseId}/videos`}
+                          accept="video/mp4,video/webm,video/quicktime"
+                          maxFiles={1}
+                          maxSizeMB={500}
+                          onUploadComplete={(files) => {
+                            if (files[0]) {
+                              setLessonForm({ ...lessonForm, content_url: files[0].url });
+                            }
+                          }}
+                        />
+                      </TabsContent>
+                    </Tabs>
+                  </div>
+                  
+                  {/* Video Preview */}
+                  {lessonForm.content_url && (
+                    <div className="bg-slate-900 rounded-lg overflow-hidden">
+                      <div className="aspect-video bg-black flex items-center justify-center">
+                        {lessonForm.content_url.includes("youtube.com") || lessonForm.content_url.includes("youtu.be") ? (
+                          (() => {
+                            const videoId = lessonForm.content_url.split("v=")[1]?.split("&")[0] || 
+                                            lessonForm.content_url.split("youtu.be/")[1]?.split("?")[0];
+                            return videoId ? (
+                              <iframe
+                                src={`https://www.youtube.com/embed/${videoId}`}
+                                className="w-full h-full"
+                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                allowFullScreen
+                                title="Video preview"
+                              />
+                            ) : (
+                              <div className="text-gray-400">Unable to preview video</div>
+                            );
+                          })()
+                        ) : (
+                          <video
+                            src={lessonForm.content_url}
+                            controls
+                            className="max-w-full max-h-full"
+                          />
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                
+                {/* Lesson Notes - Rich Text Editor for Video Lessons */}
+                <div className="space-y-2">
+                  <Label className="text-base font-semibold">Lesson Notes / Transcript</Label>
+                  <p className="text-xs text-gray-400 mb-2">
+                    Add notes, key takeaways, or a transcript for students to reference
+                  </p>
+                  <RichTextEditor
+                    value={lessonForm.notes || ""}
+                    onChange={(html) => setLessonForm({ ...lessonForm, notes: html })}
+                    placeholder="Add lesson notes, key points, or transcript here..."
+                  />
+                </div>
+
+                {/* Additional Resources (add this) */}
+                <div className="space-y-4 border-t border-slate-700 pt-4">
+                  <Label className="text-base font-semibold">Additional Resources</Label>
+                  <p className="text-xs text-gray-400 mb-3">
+                    Upload supplementary materials for students (PDFs, presentations, worksheets, etc.)
+                  </p>
+                  <FileUpload
+                    bucket="course-resources"
+                    folder={`courses/${courseId}/lessons/${editingLesson?.lesson.id || 'new'}`}
+                    accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.zip,.mp3,.jpg,.png"
+                    maxFiles={10}
+                    maxSizeMB={50}
+                    existingFiles={lessonForm.resources}
+                    onUploadComplete={(files) => setLessonForm({ ...lessonForm, resources: files })}
+                  />
+                </div>
+
+              </div>
+            )}
+            
+            {/* TEXT LESSON CONTENT */}
+            {lessonForm.content_type === "text" && (
+              <div className="space-y-4 border-t border-slate-700 pt-4">
+                <div>
+                  <Label className="text-base font-semibold">Lesson Content</Label>
+                  <p className="text-xs text-gray-400 mb-2">
+                    Write your lesson content using the rich text editor. You can format text, add images, links, and more.
+                  </p>
+                  <div className="mt-2">
+                    <RichTextEditor
+                      value={lessonForm.content_json || ""}
+                      onChange={(html) => setLessonForm({ ...lessonForm, content_json: html })}
+                      placeholder="Write your lesson content here..."
+                    />
+                  </div>
+                </div>
+
+                {/* ADD THIS - Additional Resources for Text Lessons */}
+                <div className="space-y-4 border-t border-slate-700 pt-4">
+                  <Label className="text-base font-semibold">Additional Resources</Label>
+                  <p className="text-xs text-gray-400 mb-3">
+                    Upload supplementary materials for students (PDFs, presentations, worksheets, etc.)
+                  </p>
+                  <FileUpload
+                    bucket="course-resources"
+                    folder={`courses/${courseId}/lessons/${editingLesson?.lesson.id || 'new'}`}
+                    accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.zip,.mp3,.jpg,.png"
+                    maxFiles={10}
+                    maxSizeMB={50}
+                    existingFiles={lessonForm.resources}
+                    onUploadComplete={(files) => setLessonForm({ ...lessonForm, resources: files })}
+                  />
+                </div>
+              </div>
+            )}
+            
+            {/* QUIZ LESSON CONTENT - REPLACE THE ENTIRE SECTION */}
+            {lessonForm.content_type === "quiz" && (
+              <div className="space-y-4 border-t border-slate-700 pt-4">
+                <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
+                  <h4 className="text-blue-400 font-semibold mb-2">Quiz Configuration</h4>
+                  <p className="text-sm text-gray-300">
+                    Create quizzes to assess student understanding. You can add multiple choice questions, 
+                    single choice, and true/false questions. Quiz results will be tracked in student progress.
+                  </p>
+                </div>
+                
+                {/* Quiz Builder UI with fixes */}
+                {(() => {
+                  const quizData = lessonForm.content_json || { questions: [], passing_score: 70, time_limit_minutes: null };
+                  const questions = quizData.questions || [];
+                  
+                  const addQuestion = () => {
+                    const newQuestions = [...questions, {
+                      id: Date.now().toString(),
+                      text: "",
+                      type: "single_choice",
+                      options: ["", ""],
+                      correct_answer: "",
+                      points: 10
+                    }];
+                    setLessonForm({ 
+                      ...lessonForm, 
+                      content_json: { ...quizData, questions: newQuestions }
+                    });
+                  };
+                  
+                  const updateQuestion = (index: number, field: string, value: any) => {
+                    const updatedQuestions = [...questions];
+                    updatedQuestions[index] = { ...updatedQuestions[index], [field]: value };
+                    // Reset correct_answer when changing type to avoid mismatches
+                    if (field === 'type') {
+                      updatedQuestions[index].correct_answer = "";
+                      if (value === 'true_false') {
+                        updatedQuestions[index].options = [];
+                      } else if (value === 'multiple_choice' && (!updatedQuestions[index].options || updatedQuestions[index].options.length < 2)) {
+                        updatedQuestions[index].options = ["", ""];
+                      } else if (value === 'single_choice' && (!updatedQuestions[index].options || updatedQuestions[index].options.length < 2)) {
+                        updatedQuestions[index].options = ["", ""];
+                      }
+                    }
+                    setLessonForm({ 
+                      ...lessonForm, 
+                      content_json: { ...quizData, questions: updatedQuestions }
+                    });
+                  };
+                  
+                  const deleteQuestion = (index: number) => {
+                    const updatedQuestions = questions.filter((_: any, i: number) => i !== index);
+                    setLessonForm({ 
+                      ...lessonForm, 
+                      content_json: { ...quizData, questions: updatedQuestions }
+                    });
+                  };
+                  
+                  const updateOption = (questionIndex: number, optionIndex: number, value: string) => {
+                    const updatedQuestions = [...questions];
+                    const options = [...(updatedQuestions[questionIndex].options || [])];
+                    options[optionIndex] = value;
+                    updatedQuestions[questionIndex].options = options;
+                    setLessonForm({ 
+                      ...lessonForm, 
+                      content_json: { ...quizData, questions: updatedQuestions }
+                    });
+                  };
+                  
+                  const addOption = (questionIndex: number) => {
+                    const updatedQuestions = [...questions];
+                    const options = [...(updatedQuestions[questionIndex].options || [])];
+                    options.push("");
+                    updatedQuestions[questionIndex].options = options;
+                    setLessonForm({ 
+                      ...lessonForm, 
+                      content_json: { ...quizData, questions: updatedQuestions }
+                    });
+                  };
+                  
+                  const deleteOption = (questionIndex: number, optionIndex: number) => {
+                    const updatedQuestions = [...questions];
+                    const options = [...(updatedQuestions[questionIndex].options || [])];
+                    options.splice(optionIndex, 1);
+                    updatedQuestions[questionIndex].options = options;
+                    // If the deleted option was the correct answer, clear it
+                    if (updatedQuestions[questionIndex].correct_answer === options[optionIndex]) {
+                      updatedQuestions[questionIndex].correct_answer = "";
+                    }
+                    setLessonForm({ 
+                      ...lessonForm, 
+                      content_json: { ...quizData, questions: updatedQuestions }
+                    });
+                  };
+                  
+                  const handleCorrectAnswerChange = (questionIndex: number, value: string | string[]) => {
+                    const updatedQuestions = [...questions];
+                    updatedQuestions[questionIndex].correct_answer = value;
+                    setLessonForm({ 
+                      ...lessonForm, 
+                      content_json: { ...quizData, questions: updatedQuestions }
+                    });
+                  };
+                  
+                  return (
+                    <div className="space-y-4">
+                      {/* Quiz Settings */}
+                      <div className="grid grid-cols-2 gap-4 p-4 bg-slate-800/30 rounded-lg">
+                        <div>
+                          <Label>Passing Score (%)</Label>
+                          <Input
+                            type="number"
+                            value={quizData.passing_score || 70}
+                            onChange={(e) => setLessonForm({ 
+                              ...lessonForm, 
+                              content_json: { ...quizData, passing_score: parseInt(e.target.value) || 70 }
+                            })}
+                            className="mt-1"
+                            min="0"
+                            max="100"
+                          />
+                        </div>
+                        <div>
+                          <Label>Time Limit (minutes)</Label>
+                          <Input
+                            type="number"
+                            value={quizData.time_limit_minutes || ""}
+                            onChange={(e) => setLessonForm({ 
+                              ...lessonForm, 
+                              content_json: { ...quizData, time_limit_minutes: e.target.value ? parseInt(e.target.value) : null }
+                            })}
+                            className="mt-1"
+                            placeholder="No limit"
+                            min="1"
+                          />
+                        </div>
+                      </div>
+                      
+                      {/* Questions List */}
+                      <div className="space-y-4">
+                        <div className="flex justify-between items-center">
+                          <Label className="text-base font-semibold">Questions</Label>
+                          <GlowButton size="sm" onClick={addQuestion}>
+                            <Plus className="w-3 h-3 mr-1" />
+                            Add Question
+                          </GlowButton>
+                        </div>
+                        
+                        {questions.length === 0 && (
+                          <div className="text-center py-8 text-gray-400 border border-dashed border-slate-700 rounded-lg">
+                            <FileQuestion className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                            <p>No questions yet. Click "Add Question" to get started.</p>
+                          </div>
+                        )}
+                        
+                        {questions.map((q: any, idx: number) => (
+                          <div key={q.id} className="border border-slate-700 rounded-lg p-4 bg-slate-800/20">
+                            <div className="flex justify-between items-start mb-3">
+                              <h4 className="text-white font-medium">Question {idx + 1}</h4>
+                              <button
+                                onClick={() => deleteQuestion(idx)}
+                                className="text-red-400 hover:text-red-300"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                            
+                            <div className="space-y-3">
+                              <div>
+                                <Label>Question Text</Label>
+                                <Input
+                                  value={q.text}
+                                  onChange={(e) => updateQuestion(idx, "text", e.target.value)}
+                                  placeholder="Enter your question here..."
+                                  className="mt-1"
+                                />
+                              </div>
+                              
+                              <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                  <Label>Question Type</Label>
+                                  <Select
+                                    value={q.type}
+                                    onValueChange={(value) => updateQuestion(idx, "type", value)}
+                                  >
+                                    <SelectTrigger>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="single_choice">
+                                        <div className="flex items-center gap-2">
+                                          <div className="w-4 h-4 rounded-full border border-gray-400" />
+                                          <span>Single Choice (Radio)</span>
+                                        </div>
+                                      </SelectItem>
+                                      <SelectItem value="multiple_choice">
+                                        <div className="flex items-center gap-2">
+                                          <div className="w-4 h-4 border border-gray-400 rounded" />
+                                          <span>Multiple Choice (Checkbox)</span>
+                                        </div>
+                                      </SelectItem>
+                                      <SelectItem value="true_false">
+                                        <div className="flex items-center gap-2">
+                                          <span>T / F</span>
+                                          <span>True / False</span>
+                                        </div>
+                                      </SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div>
+                                  <Label>Points</Label>
+                                  <Input
+                                    type="number"
+                                    value={q.points || 10}
+                                    onChange={(e) => updateQuestion(idx, "points", parseInt(e.target.value) || 0)}
+                                    className="mt-1"
+                                    min="1"
+                                  />
+                                </div>
+                              </div>
+                              
+                              {/* Options for single choice */}
+                              {q.type === "single_choice" && (
+                                <div className="space-y-2">
+                                  <Label>Options (Select one)</Label>
+                                  {q.options && q.options.map((opt: string, optIdx: number) => (
+                                    <div key={optIdx} className="flex gap-2 items-center">
+                                      <input
+                                        type="radio"
+                                        name={`question_${idx}`}
+                                        checked={q.correct_answer === opt}
+                                        onChange={() => handleCorrectAnswerChange(idx, opt)}
+                                        className="w-4 h-4"
+                                      />
+                                      <Input
+                                        value={opt}
+                                        onChange={(e) => updateOption(idx, optIdx, e.target.value)}
+                                        placeholder={`Option ${optIdx + 1}`}
+                                        className="flex-1"
+                                      />
+                                      <button
+                                        onClick={() => deleteOption(idx, optIdx)}
+                                        className="p-1 rounded hover:bg-red-500/20"
+                                        disabled={q.options.length <= 2}
+                                      >
+                                        <Trash2 className="w-3 h-3 text-gray-400 hover:text-red-400" />
+                                      </button>
+                                    </div>
+                                  ))}
+                                  <button
+                                    onClick={() => addOption(idx)}
+                                    className="text-xs text-purple-400 hover:text-purple-300"
+                                  >
+                                    + Add Option
+                                  </button>
+                                </div>
+                              )}
+                              
+                              {/* Options for multiple choice */}
+                              {q.type === "multiple_choice" && (
+                                <div className="space-y-2">
+                                  <Label>Options (Select multiple - store as comma-separated)</Label>
+                                  <p className="text-xs text-gray-400 mb-1">
+                                    For multiple correct answers, separate with commas (e.g., "opt1,opt2")
+                                  </p>
+                                  {q.options && q.options.map((opt: string, optIdx: number) => (
+                                    <div key={optIdx} className="flex gap-2 items-center">
+                                      <input
+                                        type="checkbox"
+                                        className="w-4 h-4"
+                                        checked={q.correct_answer?.split(",").includes(opt)}
+                                        onChange={(e) => {
+                                          let newCorrect = q.correct_answer ? q.correct_answer.split(",") : [];
+                                          if (e.target.checked) {
+                                            newCorrect.push(opt);
+                                          } else {
+                                            newCorrect = newCorrect.filter((c: string) => c !== opt);
+                                          }
+                                          handleCorrectAnswerChange(idx, newCorrect.join(","));
+                                        }}
+                                      />
+                                      <Input
+                                        value={opt}
+                                        onChange={(e) => updateOption(idx, optIdx, e.target.value)}
+                                        placeholder={`Option ${optIdx + 1}`}
+                                        className="flex-1"
+                                      />
+                                      <button
+                                        onClick={() => deleteOption(idx, optIdx)}
+                                        className="p-1 rounded hover:bg-red-500/20"
+                                        disabled={q.options.length <= 2}
+                                      >
+                                        <Trash2 className="w-3 h-3 text-gray-400 hover:text-red-400" />
+                                      </button>
+                                    </div>
+                                  ))}
+                                  <button
+                                    onClick={() => addOption(idx)}
+                                    className="text-xs text-purple-400 hover:text-purple-300"
+                                  >
+                                    + Add Option
+                                  </button>
+                                  {q.correct_answer && q.correct_answer.split(",").filter((c: string) => c).length > 1 && (
+                                    <p className="text-xs text-green-400 mt-1">
+                                      ✓ Multiple correct answers selected
+                                    </p>
+                                  )}
+                                </div>
+                              )}
+                              
+                              {/* True/False options */}
+                              {q.type === "true_false" && (
+                                <div className="space-y-2">
+                                  <Label>Correct Answer</Label>
+                                  <div className="flex gap-4">
+                                    <label className="flex items-center gap-2">
+                                      <input
+                                        type="radio"
+                                        name={`tf_${idx}`}
+                                        checked={q.correct_answer === "true"}
+                                        onChange={() => handleCorrectAnswerChange(idx, "true")}
+                                        className="w-4 h-4"
+                                      />
+                                      True
+                                    </label>
+                                    <label className="flex items-center gap-2">
+                                      <input
+                                        type="radio"
+                                        name={`tf_${idx}`}
+                                        checked={q.correct_answer === "false"}
+                                        onChange={() => handleCorrectAnswerChange(idx, "false")}
+                                        className="w-4 h-4"
+                                      />
+                                      False
+                                    </label>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Additional Resources for Quiz Lessons */}
+                <div className="space-y-4 border-t border-slate-700 pt-4">
+                  <Label className="text-base font-semibold">Additional Resources</Label>
+                  <p className="text-xs text-gray-400 mb-3">
+                    Upload supplementary materials for students (reference sheets, study guides, etc.)
+                  </p>
+                  <FileUpload
+                    bucket="course-resources"
+                    folder={`courses/${courseId}/lessons/${editingLesson?.lesson.id || 'new'}`}
+                    accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.zip,.mp3,.jpg,.png"
+                    maxFiles={10}
+                    maxSizeMB={50}
+                    existingFiles={lessonForm.resources}
+                    onUploadComplete={(files) => setLessonForm({ ...lessonForm, resources: files })}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+          
+          <DialogFooter className="mt-6">
+            <GlowButton variant="ghost" onClick={() => setLessonModalOpen(false)}>
+              Cancel
+            </GlowButton>
+            <GlowButton onClick={saveLesson}>
+              {editingLesson?.lesson.id ? "Save Changes" : "Create Lesson"}
+            </GlowButton>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+            
+      {/* Assignment Modal */}
+      {/* Assignment Modal - Update the description field */}
+      <Dialog open={assignmentModalOpen} onOpenChange={(open) => {
+        if (!open) {
+          setEditingAssignment(null);
+          setAssignmentForm({
+            title: "",
+            description: "",
+            due_at: "",
+            points: 100,
+          });
+        }
+        setAssignmentModalOpen(open);
+      }}>
+        <DialogContent className="bg-slate-800 border-slate-700 max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-white">
+              {(editingAssignment && editingAssignment.assignment && editingAssignment.assignment.id) ? "Edit Assignment" : "Add Assignment"}
+            </DialogTitle>
+            <DialogDescription>
+              {editingAssignment?.assignment?.id 
+                ? "Edit the assignment details below" 
+                : "Create a new assignment for this lesson"}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Assignment Title</Label>
+              <Input
+                value={assignmentForm.title}
+                onChange={(e) => setAssignmentForm({ ...assignmentForm, title: e.target.value })}
+                placeholder="Assignment title"
+                className="mt-2"
+              />
+            </div>
+            
+            {/* REPLACE the existing description Textarea with this */}
+            <div>
+              <Label>Description / Instructions</Label>
+              <p className="text-xs text-gray-400 mb-2">
+                Provide detailed instructions for students. You can format text, add links, images, etc.
               </p>
+              <div className="mt-2">
+                <RichTextEditor
+                  value={assignmentForm.description}
+                  onChange={(html) => setAssignmentForm({ ...assignmentForm, description: html })}
+                  placeholder="Describe the assignment, provide instructions, rubric, etc..."
+                />
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label>Points</Label>
+                <Input
+                  type="number"
+                  value={assignmentForm.points}
+                  onChange={(e) => setAssignmentForm({ ...assignmentForm, points: parseInt(e.target.value) || 0 })}
+                  className="mt-2"
+                />
+              </div>
+              
+              <div>
+                <Label>Due Date</Label>
+                <Input
+                  type="datetime-local"
+                  value={assignmentForm.due_at}
+                  onChange={(e) => setAssignmentForm({ ...assignmentForm, due_at: e.target.value })}
+                  className="mt-2"
+                />
+              </div>
             </div>
           </div>
           <DialogFooter>
-            <GlowButton variant="outline" onClick={() => setShowPublishModal(false)}>
-              Cancel
-            </GlowButton>
-            <GlowButton variant="primary" onClick={handlePublishConfirm}>
-              <Rocket className="w-4 h-4 mr-2" />
-              Publish Course
-            </GlowButton>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Add/Edit Module Modal */}
-      <Dialog open={isModuleModalOpen} onOpenChange={setIsModuleModalOpen}>
-        <DialogContent className="bg-gray-900 border-gray-800">
-          <DialogHeader>
-            <DialogTitle className="text-white">
-              {editingModule ? "Edit Module" : "Add New Module"}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div>
-              <Label className="text-white mb-2 block">Module Title</Label>
-              <Input
-                placeholder="e.g., Introduction, Core Concepts"
-                value={moduleTitle}
-                onChange={(e) => setModuleTitle(e.target.value)}
-                className="bg-gray-800/50 border-gray-700 text-white"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <GlowButton variant="outline" onClick={() => setIsModuleModalOpen(false)}>
-              Cancel
-            </GlowButton>
-            <GlowButton onClick={saveModule} isLoading={saving}>
-              {editingModule ? "Save Changes" : "Create Module"}
-            </GlowButton>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Add/Edit Class Modal */}
-      <Dialog open={isClassModalOpen} onOpenChange={setIsClassModalOpen}>
-        <DialogContent className="bg-gray-900 border-gray-800">
-          <DialogHeader>
-            <DialogTitle className="text-white">
-              {editingClass ? "Edit Class" : "Add New Class"}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div>
-              <Label className="text-white mb-2 block">Class Title</Label>
-              <Input
-                placeholder="e.g., Getting Started, Setup"
-                value={classTitle}
-                onChange={(e) => setClassTitle(e.target.value)}
-                className="bg-gray-800/50 border-gray-700 text-white"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <GlowButton variant="outline" onClick={() => setIsClassModalOpen(false)}>
-              Cancel
-            </GlowButton>
-            <GlowButton onClick={saveClass} isLoading={saving}>
-              {editingClass ? "Save Changes" : "Create Class"}
-            </GlowButton>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Add/Edit Lesson Modal */}
-      <Dialog open={isLessonModalOpen} onOpenChange={setIsLessonModalOpen}>
-        <DialogContent className="bg-gray-900 border-gray-800 max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="text-white">
-              {editingLesson ? "Edit Lesson" : "Add New Lesson"}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-6 py-4">
-            <div>
-              <Label className="text-white mb-2 block">Lesson Title *</Label>
-              <Input
-                placeholder="e.g., Introduction to React"
-                value={lessonForm.title}
-                onChange={(e) => setLessonForm({ ...lessonForm, title: e.target.value })}
-                className="bg-gray-800/50 border-gray-700 text-white"
-              />
-            </div>
-
-            <div>
-              <Label className="text-white mb-2 block">Content Type</Label>
-              <Select
-                value={lessonForm.content_type}
-                onValueChange={(value) => setLessonForm({ ...lessonForm, content_type: value })}
+            {(editingAssignment && editingAssignment.assignment && editingAssignment.assignment.id) && (
+              <GlowButton
+                variant="ghost"
+                className="text-red-400"
+                onClick={async () => {
+                  if (editingAssignment && editingAssignment.assignment && editingAssignment.assignment.id) {
+                    const btn = document.activeElement as HTMLButtonElement;
+                    if (btn) btn.disabled = true;
+                    await handleDeleteAssignment(editingAssignment.assignment.id);
+                    if (btn) btn.disabled = false;
+                  }
+                }}
               >
-                <SelectTrigger className="bg-gray-800/50 border-gray-700 text-white">
-                  <SelectValue />
+                Delete
+              </GlowButton>
+            )}
+            <GlowButton variant="ghost" onClick={() => {
+              setAssignmentModalOpen(false);
+              setEditingAssignment(null);
+              setAssignmentForm({
+                title: "",
+                description: "",
+                due_at: "",
+                points: 100,
+              });
+            }}>Cancel</GlowButton>
+            <GlowButton onClick={saveAssignment}>Save</GlowButton>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Offering Modal */}
+      <Dialog open={offeringModalOpen} onOpenChange={setOfferingModalOpen}>
+        <DialogContent className="bg-slate-800 border-slate-700 max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-white">
+              {editingOffering ? "Edit Offering" : "Add Offering"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+            <div>
+              <Label>Offering Name *</Label>
+              <Input
+                value={offeringForm.name}
+                onChange={(e) => setOfferingForm({ ...offeringForm, name: e.target.value })}
+                placeholder="e.g., Spring 2025 Cohort"
+                className="mt-2"
+              />
+            </div>
+            
+            <div>
+              <Label>Description</Label>
+              <Textarea
+                value={offeringForm.description}
+                onChange={(e) => setOfferingForm({ ...offeringForm, description: e.target.value })}
+                placeholder="Describe this offering"
+                rows={2}
+                className="mt-2"
+              />
+            </div>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label>Start Date</Label>
+                <Input
+                  type="date"
+                  value={offeringForm.start_date}
+                  onChange={(e) => setOfferingForm({ ...offeringForm, start_date: e.target.value })}
+                  className="mt-2"
+                />
+              </div>
+              <div>
+                <Label>End Date</Label>
+                <Input
+                  type="date"
+                  value={offeringForm.end_date}
+                  onChange={(e) => setOfferingForm({ ...offeringForm, end_date: e.target.value })}
+                  className="mt-2"
+                />
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label>Max Students</Label>
+                <Input
+                  type="number"
+                  value={offeringForm.max_students}
+                  onChange={(e) => setOfferingForm({ ...offeringForm, max_students: parseInt(e.target.value) || 0 })}
+                  className="mt-2"
+                />
+              </div>
+              <div>
+                <Label>Status</Label>
+                <Select
+                  value={offeringForm.status}
+                  onValueChange={(value: any) => setOfferingForm({ ...offeringForm, status: value })}
+                >
+                  <SelectTrigger className="mt-2">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="upcoming">Upcoming</SelectItem>
+                    <SelectItem value="ongoing">Ongoing</SelectItem>
+                    <SelectItem value="completed">Completed</SelectItem>
+                    <SelectItem value="cancelled">Cancelled</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <GlowButton variant="ghost" onClick={() => setOfferingModalOpen(false)}>Cancel</GlowButton>
+            <GlowButton onClick={saveOffering}>Save</GlowButton>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Schedule Modal */}
+      <Dialog open={scheduleModalOpen} onOpenChange={setScheduleModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add Schedule</DialogTitle>
+            <DialogDescription>
+              Add a new schedule time for this offering.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Day of Week</Label>
+              <Select
+                value={scheduleForm.day_of_week.toString()}
+                onValueChange={(value) => setScheduleForm(prev => ({ ...prev, day_of_week: parseInt(value) }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select day" />
                 </SelectTrigger>
                 <SelectContent>
-                  {contentTypes.map((type) => (
-                    <SelectItem key={type.value} value={type.value}>
-                      <div className="flex items-center gap-2">
-                        {getContentTypeIcon(type.value)}
-                        {type.label}
-                      </div>
+                  <SelectItem value="0">Sunday</SelectItem>
+                  <SelectItem value="1">Monday</SelectItem>
+                  <SelectItem value="2">Tuesday</SelectItem>
+                  <SelectItem value="3">Wednesday</SelectItem>
+                  <SelectItem value="4">Thursday</SelectItem>
+                  <SelectItem value="5">Friday</SelectItem>
+                  <SelectItem value="6">Saturday</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Start Time</Label>
+              <Input
+                type="time"
+                value={scheduleForm.start_time}
+                onChange={(e) => setScheduleForm(prev => ({ ...prev, start_time: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>End Time</Label>
+              <Input
+                type="time"
+                value={scheduleForm.end_time}
+                onChange={(e) => setScheduleForm(prev => ({ ...prev, end_time: e.target.value }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <GlowButton variant="outline" onClick={() => {
+              setScheduleModalOpen(false);
+              setSelectedOfferingId(null);
+              setScheduleForm({
+                day_of_week: 0,
+                start_time: "",
+                end_time: "",
+              });
+            }}>
+              Cancel
+            </GlowButton>
+            <GlowButton onClick={addSchedule}>
+              Add Schedule
+            </GlowButton>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Schedule Modal */}
+      <Dialog open={editScheduleModalOpen} onOpenChange={setEditScheduleModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Schedule</DialogTitle>
+            <DialogDescription>
+              Update the schedule time for this offering.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Day of Week</Label>
+              <Select
+                value={editScheduleForm.day_of_week.toString()}
+                onValueChange={(value) => setEditScheduleForm(prev => ({ ...prev, day_of_week: parseInt(value) }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select day" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="0">Sunday</SelectItem>
+                  <SelectItem value="1">Monday</SelectItem>
+                  <SelectItem value="2">Tuesday</SelectItem>
+                  <SelectItem value="3">Wednesday</SelectItem>
+                  <SelectItem value="4">Thursday</SelectItem>
+                  <SelectItem value="5">Friday</SelectItem>
+                  <SelectItem value="6">Saturday</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Start Time</Label>
+              <Input
+                type="time"
+                value={editScheduleForm.start_time}
+                onChange={(e) => setEditScheduleForm(prev => ({ ...prev, start_time: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>End Time</Label>
+              <Input
+                type="time"
+                value={editScheduleForm.end_time}
+                onChange={(e) => setEditScheduleForm(prev => ({ ...prev, end_time: e.target.value }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <GlowButton variant="outline" onClick={() => {
+              setEditScheduleModalOpen(false);
+              setEditingSchedule(null);
+              setEditScheduleForm({
+                day_of_week: 0,
+                start_time: "",
+                end_time: "",
+              });
+            }}>
+              Cancel
+            </GlowButton>
+            <GlowButton onClick={updateSchedule}>
+              Update Schedule
+            </GlowButton>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Transfer Modal */}
+      {showTransferModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <GlowCard className="max-w-md w-full p-6">
+            <h2 className="text-xl font-bold text-white mb-4">Transfer Course</h2>
+            <p className="text-gray-400 mb-4">
+              Select the organization you want to transfer this course to.
+            </p>
+            
+            <div className="mb-6">
+              <Label>Target Organization</Label>
+              <Select value={selectedTargetOrg?.toString() || ""} onValueChange={(v) => setSelectedTargetOrg(parseInt(v))}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Select organization" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableOrganizations.map(org => (
+                    <SelectItem key={org.id} value={org.id.toString()}>
+                      {org.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
+            
+            <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 mb-6">
+              <p className="text-xs text-yellow-300">
+                ⚠️ Transferring a course will move it to another organization. 
+                Students from the original organization will lose access unless they are also members of the new organization.
+              </p>
+            </div>
+            
+            <div className="flex gap-3 justify-end">
+              <GlowButton variant="outline" onClick={() => setShowTransferModal(false)}>
+                Cancel
+              </GlowButton>
+              <GlowButton onClick={handleTransferCourse} isLoading={isTransferring}>
+                Confirm Transfer
+              </GlowButton>
+            </div>
+          </GlowCard>
+        </div>
+      )}
 
-            {lessonForm.content_type === "video" && (
-              <>
-                <div>
-                  <Label className="text-white mb-2 block">Video URL</Label>
-                  <Input
-                    placeholder="https://www.youtube.com/watch?v=..."
-                    value={lessonForm.video_url}
-                    onChange={(e) => setLessonForm({ ...lessonForm, video_url: e.target.value })}
-                    className="bg-gray-800/50 border-gray-700 text-white"
-                  />
-                </div>
-                <div>
-                  <Label className="text-white mb-2 block">Lesson Notes</Label>
-                  <RichTextEditor
-                    value={lessonForm.video_notes}
-                    onChange={(value) => setLessonForm({ ...lessonForm, video_notes: value })}
-                    placeholder="Add supplementary notes here..."
-                  />
-                </div>
-              </>
-            )}
-
-            {lessonForm.content_type === "text" && (
-              <div>
-                <Label className="text-white mb-2 block">Lesson Content</Label>
-                <RichTextEditor
-                  value={lessonForm.text_content}
-                  onChange={(value) => setLessonForm({ ...lessonForm, text_content: value })}
-                  placeholder="Write your lesson content here..."
-                />
-              </div>
-            )}
-
-            {lessonForm.content_type === "quiz" && (
-              <div>
-                <div className="flex justify-between items-center mb-4">
-                  <Label className="text-white">Quiz Questions</Label>
-                  <GlowButton size="sm" variant="outline" onClick={addQuizQuestion}>
-                    <Plus className="w-3 h-3 mr-1" />
-                    Add Question
-                  </GlowButton>
-                </div>
-                
-                {lessonForm.quiz_questions.length === 0 && (
-                  <div className="text-center py-8 text-gray-500 bg-gray-800/30 rounded-lg">
-                    <FileQuestion className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                    <p>No questions yet. Click "Add Question" to get started.</p>
-                  </div>
-                )}
-
-                {lessonForm.quiz_questions.map((question, qIndex) => (
-                  <div key={qIndex} className="bg-gray-800/30 rounded-lg p-4 mb-4">
-                    <div className="flex justify-between items-start mb-3">
-                      <h4 className="text-white font-medium">Question {qIndex + 1}</h4>
-                      <button
-                        onClick={() => removeQuizQuestion(qIndex)}
-                        className="text-red-400 hover:text-red-300"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                    
-                    <div className="space-y-3">
-                      <Input
-                        placeholder="Question text"
-                        value={question.question}
-                        onChange={(e) => updateQuizQuestion(qIndex, { question: e.target.value })}
-                        className="bg-gray-800/50 border-gray-700 text-white"
-                      />
-                      
-                      <Select
-                        value={question.type}
-                        onValueChange={(value: any) => updateQuizQuestion(qIndex, { type: value })}
-                      >
-                        <SelectTrigger className="bg-gray-800/50 border-gray-700 text-white">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="multiple_choice">Multiple Choice</SelectItem>
-                          <SelectItem value="true_false">True/False</SelectItem>
-                          <SelectItem value="short_answer">Short Answer</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      
-                      {question.type === "multiple_choice" && (
-                        <div className="space-y-2">
-                          <Label className="text-gray-400 text-sm">Answer Options</Label>
-                          {question.options?.map((option, oIndex) => (
-                            <Input
-                              key={oIndex}
-                              placeholder={`Option ${oIndex + 1}`}
-                              value={option}
-                              onChange={(e) => {
-                                const newOptions = [...(question.options || [])];
-                                newOptions[oIndex] = e.target.value;
-                                updateQuizQuestion(qIndex, { options: newOptions });
-                              }}
-                              className="bg-gray-800/50 border-gray-700 text-white"
-                            />
-                          ))}
-                        </div>
-                      )}
-                      
-                      <div>
-                        <Label className="text-gray-400 text-sm">Correct Answer</Label>
-                        {question.type === "multiple_choice" && (
-                          <Select
-                            value={question.correct_answer as string || "placeholder"}
-                            onValueChange={(value) => {
-                              if (value !== "placeholder") {
-                                updateQuizQuestion(qIndex, { correct_answer: value });
-                              }
-                            }}
-                          >
-                            <SelectTrigger className="bg-gray-800/50 border-gray-700 text-white">
-                              <SelectValue placeholder="Select correct answer" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="placeholder" disabled className="hidden">
-                                Select correct answer
-                              </SelectItem>
-                              {question.options?.map((option, oIndex) => (
-                                <SelectItem key={oIndex} value={option || `option_${oIndex}`}>
-                                  {option || `Option ${oIndex + 1}`}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        )}
-                        
-                        {question.type === "true_false" && (
-                          <Select
-                            value={question.correct_answer as string || "placeholder"}
-                            onValueChange={(value) => {
-                              if (value !== "placeholder") {
-                                updateQuizQuestion(qIndex, { correct_answer: value });
-                              }
-                            }}
-                          >
-                            <SelectTrigger className="bg-gray-800/50 border-gray-700 text-white">
-                              <SelectValue placeholder="Select correct answer" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="placeholder" disabled className="hidden">
-                                Select correct answer
-                              </SelectItem>
-                              <SelectItem value="true">True</SelectItem>
-                              <SelectItem value="false">False</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        )}
-                        
-                        {question.type === "short_answer" && (
-                          <Input
-                            placeholder="Correct answer"
-                            value={question.correct_answer as string || ""}
-                            onChange={(e) => updateQuizQuestion(qIndex, { correct_answer: e.target.value })}
-                            className="bg-gray-800/50 border-gray-700 text-white"
-                          />
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+      {/* Delete Module Confirmation Modal */}
+      <Dialog open={deleteModuleModalOpen} onOpenChange={setDeleteModuleModalOpen}>
+        <DialogContent className="bg-slate-800 border-slate-700 max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-white text-xl">Delete Module?</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-gray-300">
+              Are you sure you want to delete <span className="font-semibold text-white">{moduleToDelete?.title}</span>?
+            </p>
+            <p className="text-sm text-red-400">
+              ⚠️ This will also delete all classes, lessons, and assignments inside this module. This action cannot be undone.
+            </p>
           </div>
-          <DialogFooter>
-            <GlowButton variant="outline" onClick={() => setIsLessonModalOpen(false)}>
+          <DialogFooter className="gap-3">
+            <GlowButton variant="ghost" onClick={() => setDeleteModuleModalOpen(false)}>
               Cancel
             </GlowButton>
-            <GlowButton onClick={saveLesson} isLoading={saving}>
-              {editingLesson ? "Save Changes" : "Create Lesson"}
+            <GlowButton variant="primary" onClick={confirmDeleteModule} className="bg-red-600 hover:bg-red-700">
+              <Trash2 className="w-4 h-4 mr-2" />
+              Delete Module
             </GlowButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Assignment Modal */}
-      <Dialog open={isAssignmentModalOpen} onOpenChange={setIsAssignmentModalOpen}>
-        <DialogContent className="bg-gray-900 border-gray-800 max-w-2xl">
+      {/* Delete Class Confirmation Modal */}
+      <Dialog open={deleteClassModalOpen} onOpenChange={setDeleteClassModalOpen}>
+        <DialogContent className="bg-slate-800 border-slate-700 max-w-md">
           <DialogHeader>
-            <DialogTitle className="text-white">Assignment</DialogTitle>
+            <DialogTitle className="text-white text-xl">Delete Class?</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div>
-              <Label className="text-white mb-2 block">Assignment Title *</Label>
-              <Input
-                placeholder="e.g., Component Exercise"
-                value={assignmentForm.title}
-                onChange={(e) => setAssignmentForm({ ...assignmentForm, title: e.target.value })}
-                className="bg-gray-800/50 border-gray-700 text-white"
-              />
-            </div>
-            <div>
-              <Label className="text-white mb-2 block">Description</Label>
-              <RichTextEditor
-                value={assignmentForm.description}
-                onChange={(value) => setAssignmentForm({ ...assignmentForm, description: value })}
-                placeholder="Describe the assignment requirements..."
-              />
-            </div>
-            <div>
-              <Label className="text-white mb-2 block">Due Date</Label>
-              <Input
-                type="datetime-local"
-                value={assignmentForm.due_at}
-                onChange={(e) => setAssignmentForm({ ...assignmentForm, due_at: e.target.value })}
-                className="bg-gray-800/50 border-gray-700 text-white"
-              />
+          <div className="space-y-4">
+            <p className="text-gray-300">
+              Are you sure you want to delete <span className="font-semibold text-white">{classToDelete?.title}</span>?
+            </p>
+            <p className="text-sm text-red-400">
+              ⚠️ This will also delete all lessons and assignments inside this class. This action cannot be undone.
+            </p>
+          </div>
+          <DialogFooter className="gap-3">
+            <GlowButton variant="ghost" onClick={() => setDeleteClassModalOpen(false)}>
+              Cancel
+            </GlowButton>
+            <GlowButton variant="primary" onClick={confirmDeleteClass} className="bg-red-600 hover:bg-red-700">
+              <Trash2 className="w-4 h-4 mr-2" />
+              Delete Class
+            </GlowButton>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Lesson Confirmation Modal */}
+      <Dialog open={deleteLessonModalOpen} onOpenChange={setDeleteLessonModalOpen}>
+        <DialogContent className="bg-slate-800 border-slate-700 max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-white text-xl">Delete Lesson?</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-gray-300">
+              Are you sure you want to delete <span className="font-semibold text-white">{lessonToDelete?.title}</span>?
+            </p>
+            <p className="text-sm text-red-400">
+              ⚠️ This will also delete any assignments attached to this lesson. This action cannot be undone.
+            </p>
+          </div>
+          <DialogFooter className="gap-3">
+            <GlowButton variant="ghost" onClick={() => setDeleteLessonModalOpen(false)}>
+              Cancel
+            </GlowButton>
+            <GlowButton variant="primary" onClick={confirmDeleteLesson} className="bg-red-600 hover:bg-red-700">
+              <Trash2 className="w-4 h-4 mr-2" />
+              Delete Lesson
+            </GlowButton>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+            
+      {/* Publish Confirmation */}
+      <Dialog open={publishConfirmOpen} onOpenChange={setPublishConfirmOpen}>
+        <DialogContent className="bg-slate-800 border-slate-700">
+          <DialogHeader>
+            <DialogTitle className="text-white">Publish Course</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-gray-300">
+              Publishing will make this course available to students.
+            </p>
+            
+            <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3">
+              <div className="flex items-start gap-2">
+                <HelpCircle className="w-4 h-4 text-yellow-400 mt-0.5" />
+                <p className="text-sm text-gray-300">
+                  Once published, students can enroll. You can unpublish anytime from the settings tab.
+                </p>
+              </div>
             </div>
           </div>
           <DialogFooter>
-            {editingLesson && (
-              <GlowButton
-                variant="outline"
-                onClick={() => deleteAssignment(editingLesson.id)}
-                className="mr-auto text-red-400 hover:text-red-300"
-              >
-                <Trash2 className="w-4 h-4 mr-2" />
-                Remove Assignment
-              </GlowButton>
-            )}
-            <GlowButton variant="outline" onClick={() => setIsAssignmentModalOpen(false)}>
-              Cancel
-            </GlowButton>
-            <GlowButton onClick={saveAssignment} isLoading={saving}>
-              Save Assignment
-            </GlowButton>
+            <GlowButton variant="ghost" onClick={() => setPublishConfirmOpen(false)}>Cancel</GlowButton>
+            <GlowButton variant="primary" onClick={handlePublish}>Publish Course</GlowButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>

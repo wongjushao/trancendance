@@ -61,6 +61,15 @@ import {
 import { useRole } from "@/components/providers/RoleProvider";
 import { toast } from "sonner";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
+import { Database } from "@/types/supabase";
+
+type ClassMember = Database['public']['Tables']['class_members']['Row'];
+type Profile = Database['public']['Tables']['profiles']['Row'];
+type LessonProgress = Database['public']['Tables']['lesson_progress']['Row'];
+type Assignment = Database['public']['Tables']['assignments']['Row'];
+type Submission = Database['public']['Tables']['submissions']['Row'];
+type CourseClass = Database['public']['Tables']['course_classes']['Row'];
+type Course = Database['public']['Tables']['courses']['Row'];
 
 interface Student {
   id: string;
@@ -97,10 +106,9 @@ interface StudentStats {
   completion_rate: number;
 }
 
-interface InviteStudentData {
+interface EnrollStudentData {
   email: string;
-  message?: string;
-  send_email: boolean;
+  offeringId: number;
 }
 
 export default function CourseStudentsPage() {
@@ -117,18 +125,19 @@ export default function CourseStudentsPage() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>("all");
-  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [showEnrollModal, setShowEnrollModal] = useState(false);
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
-  const [inviteData, setInviteData] = useState<InviteStudentData>({
+  const [enrollData, setEnrollData] = useState<EnrollStudentData>({
     email: "",
-    message: "",
-    send_email: true,
+    offeringId: 0,
   });
-  const [inviting, setInviting] = useState(false);
+  const [enrolling, setEnrolling] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
   const [showBulkActions, setShowBulkActions] = useState(false);
+  const [courseOfferings, setCourseOfferings] = useState<CourseClass[]>([]);
+  const [loadingOfferings, setLoadingOfferings] = useState(false);
 
   useEffect(() => {
     if (!isTeacher && !isAdmin) {
@@ -138,154 +147,499 @@ export default function CourseStudentsPage() {
     }
     fetchCourseData();
     fetchStudents();
+    fetchCourseOfferings();
   }, [courseId]);
 
+  const fetchCourseOfferings = async () => {
+    const supabase = getSupabaseBrowserClient();
+    setLoadingOfferings(true);
+    
+    try {
+      const { data, error } = await supabase
+        .from('course_classes')
+        .select('id, name, status, max_students, start_date, end_date')
+        .eq('course_id', parseInt(courseId))
+        .in('status', ['upcoming', 'ongoing'])
+        .order('start_date', { ascending: true });
+      
+      if (error) throw error;
+      setCourseOfferings(data || []);
+      
+      // Auto-select first offering if available
+      if (data && data.length > 0 && enrollData.offeringId === 0) {
+        setEnrollData(prev => ({ ...prev, offeringId: data[0].id }));
+      }
+    } catch (error) {
+      console.error('Error fetching course offerings:', error);
+    } finally {
+      setLoadingOfferings(false);
+    }
+  };
+
   const fetchCourseData = async () => {
-    // Mock data - replace with actual API call
-    await new Promise(resolve => setTimeout(resolve, 500));
-    setCourse({
-      id: parseInt(courseId),
-      title: "Advanced React Development",
-      description: "Master React with advanced concepts and best practices",
-      instructor: "Dr. Sarah Johnson",
-      total_students: 45,
-      total_lessons: 24,
-      average_progress: 68,
-      completion_rate: 72,
-    });
+    const supabase = getSupabaseBrowserClient();
+    
+    try {
+      // Get course details
+      const { data: courseData, error: courseError } = await supabase
+        .from('courses')
+        .select(`
+          id,
+          title,
+          description,
+          created_by,
+          profiles:created_by (
+            first_name,
+            last_name
+          )
+        `)
+        .eq('id', parseInt(courseId))
+        .single();
+
+      if (courseError) throw courseError;
+
+      // Get instructor name
+      const instructorName = courseData.profiles 
+        ? `${courseData.profiles.first_name || ''} ${courseData.profiles.last_name || ''}`.trim() || 'Unknown Instructor'
+        : 'Unknown Instructor';
+
+      // Get course classes for this course
+      const { data: courseClasses, error: classesError } = await supabase
+        .from('course_classes')
+        .select('id')
+        .eq('course_id', parseInt(courseId));
+
+      if (classesError) throw classesError;
+
+      const courseClassIds = courseClasses?.map(cc => cc.id) || [];
+
+      // Get total lessons count
+      let totalLessons = 0;
+      const { data: modules, error: modulesError } = await supabase
+        .from('modules')
+        .select(`
+          id,
+          classes (
+            id,
+            lessons (id)
+          )
+        `)
+        .eq('course_id', parseInt(courseId));
+
+      if (!modulesError && modules) {
+        for (const module of modules) {
+          if (module.classes) {
+            for (const classItem of module.classes) {
+              if (classItem.lessons) {
+                totalLessons += classItem.lessons.length;
+              }
+            }
+          }
+        }
+      }
+
+      // Get total students count
+      let totalStudents = 0;
+      if (courseClassIds.length > 0) {
+        const { count, error: countError } = await supabase
+          .from('class_members')
+          .select('*', { count: 'exact', head: true })
+          .in('course_class_id', courseClassIds);
+
+        if (!countError) {
+          totalStudents = count || 0;
+        }
+      }
+
+      setCourse({
+        id: parseInt(courseId),
+        title: courseData.title,
+        description: courseData.description || '',
+        instructor: instructorName,
+        total_students: totalStudents,
+        total_lessons: totalLessons,
+        average_progress: 0,
+        completion_rate: 0,
+      });
+    } catch (error) {
+      console.error('Error fetching course data:', error);
+      toast.error('Failed to load course data');
+    }
   };
 
   const fetchStudents = async () => {
-    // Mock data - replace with actual API call
-    await new Promise(resolve => setTimeout(resolve, 800));
-    
-    const mockStudents: Student[] = [
-      {
-        id: "user1",
-        name: "Alice Johnson",
-        email: "alice@example.com",
-        enrolled_at: "2026-04-01T10:00:00",
-        progress: 85,
-        completed_lessons: 20,
-        total_lessons: 24,
-        average_grade: 92,
-        last_active: "2026-05-14T15:30:00",
-        status: "active",
-        assignments_completed: 8,
-        assignments_total: 10,
-      },
-      {
-        id: "user2",
-        name: "Bob Smith",
-        email: "bob@example.com",
-        enrolled_at: "2026-04-03T14:20:00",
-        progress: 62,
-        completed_lessons: 15,
-        total_lessons: 24,
-        average_grade: 78,
-        last_active: "2026-05-13T09:15:00",
-        status: "active",
-        assignments_completed: 5,
-        assignments_total: 10,
-      },
-      {
-        id: "user3",
-        name: "Carol Davis",
-        email: "carol@example.com",
-        enrolled_at: "2026-04-05T11:45:00",
-        progress: 95,
-        completed_lessons: 23,
-        total_lessons: 24,
-        average_grade: 96,
-        last_active: "2026-05-14T18:20:00",
-        status: "active",
-        assignments_completed: 9,
-        assignments_total: 10,
-      },
-      {
-        id: "user4",
-        name: "David Wilson",
-        email: "david@example.com",
-        enrolled_at: "2026-04-10T09:30:00",
-        progress: 25,
-        completed_lessons: 6,
-        total_lessons: 24,
-        average_grade: 65,
-        last_active: "2026-05-10T14:00:00",
-        status: "inactive",
-        assignments_completed: 2,
-        assignments_total: 10,
-      },
-      {
-        id: "user5",
-        name: "Emma Brown",
-        email: "emma@example.com",
-        enrolled_at: "2026-04-12T13:15:00",
-        progress: 45,
-        completed_lessons: 11,
-        total_lessons: 24,
-        average_grade: 82,
-        last_active: "2026-05-12T11:30:00",
-        status: "active",
-        assignments_completed: 4,
-        assignments_total: 10,
-      },
-    ];
-    
-    setStudents(mockStudents);
-    
-    // Calculate stats
-    const activeStudents = mockStudents.filter(s => s.status === "active").length;
-    const avgProgress = mockStudents.reduce((sum, s) => sum + s.progress, 0) / mockStudents.length;
-    const avgGrade = mockStudents.reduce((sum, s) => sum + s.average_grade, 0) / mockStudents.length;
-    const completionRate = (mockStudents.filter(s => s.progress >= 80).length / mockStudents.length) * 100;
-    
-    setStats({
-      total_students: mockStudents.length,
-      active_students: activeStudents,
-      average_progress: Math.round(avgProgress),
-      average_grade: Math.round(avgGrade),
-      completion_rate: Math.round(completionRate),
-    });
-    
-    setLoading(false);
+    const supabase = getSupabaseBrowserClient();
+    setLoading(true);
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      const { data: courseClasses, error: classesError } = await supabase
+        .from('course_classes')
+        .select('id')
+        .eq('course_id', parseInt(courseId));
+
+      if (classesError) throw classesError;
+
+      const courseClassIds = courseClasses?.map(cc => cc.id) || [];
+
+      if (courseClassIds.length === 0) {
+        setStudents([]);
+        setStats({
+          total_students: 0,
+          active_students: 0,
+          average_progress: 0,
+          average_grade: 0,
+          completion_rate: 0,
+        });
+        setLoading(false);
+        return;
+      }
+
+      // FIX: Remove 'email' from the select - it doesn't exist in profiles
+      const { data: classMembers, error: membersError } = await supabase
+        .from('class_members')
+        .select(`
+          id,
+          user_id,
+          enrolled_at,
+          role,
+          profiles:user_id (
+            id,
+            first_name,
+            last_name,
+            username,
+            avatar_url
+          )
+        `)
+        .in('course_class_id', courseClassIds)
+        .eq('role', 'student');
+
+      if (membersError) throw membersError;
+
+      if (!classMembers || classMembers.length === 0) {
+        setStudents([]);
+        setStats({
+          total_students: 0,
+          active_students: 0,
+          average_progress: 0,
+          average_grade: 0,
+          completion_rate: 0,
+        });
+        setLoading(false);
+        return;
+      }
+
+      // Get all lessons for this course
+      const { data: modules, error: modulesError } = await supabase
+        .from('modules')
+        .select(`
+          id,
+          classes (
+            id,
+            lessons (id)
+          )
+        `)
+        .eq('course_id', parseInt(courseId));
+
+      let totalLessons = 0;
+      const lessonIds: number[] = [];
+      
+      if (!modulesError && modules) {
+        for (const module of modules) {
+          if (module.classes) {
+            for (const classItem of module.classes) {
+              if (classItem.lessons) {
+                for (const lesson of classItem.lessons) {
+                  totalLessons++;
+                  lessonIds.push(lesson.id);
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Get all assignments for this course
+      const { data: assignments, error: assignmentsError } = await supabase
+        .from('assignments')
+        .select('id, points')
+        .eq('course_id', parseInt(courseId));
+
+      const assignmentIds = assignments?.map(a => a.id) || [];
+
+      // Get all submissions for these assignments
+      const { data: submissions, error: submissionsError } = await supabase
+        .from('submissions')
+        .select('assignment_id, user_id, grade')
+        .in('assignment_id', assignmentIds);
+
+      const submissionsByUser: Record<string, { grade: number; assignment_id: number }[]> = {};
+      if (submissions && !submissionsError) {
+        for (const sub of submissions) {
+          if (!submissionsByUser[sub.user_id]) {
+            submissionsByUser[sub.user_id] = [];
+          }
+          submissionsByUser[sub.user_id].push({
+            grade: sub.grade || 0,
+            assignment_id: sub.assignment_id,
+          });
+        }
+      }
+
+      // Get lesson progress for all students
+      const userIds = classMembers.map(cm => cm.user_id);
+      const { data: lessonProgress, error: progressError } = await supabase
+        .from('lesson_progress')
+        .select('user_id, lesson_id, status')
+        .in('user_id', userIds)
+        .in('lesson_id', lessonIds);
+
+      const progressByUser: Record<string, { completed: number; total: number }> = {};
+      for (const userId of userIds) {
+        progressByUser[userId] = { completed: 0, total: totalLessons };
+      }
+
+      if (lessonProgress && !progressError) {
+        for (const prog of lessonProgress) {
+          if (prog.status === 'completed') {
+            progressByUser[prog.user_id].completed++;
+          }
+        }
+      }
+
+      // Build student list - FIX: Use username instead of email
+      const studentList: Student[] = classMembers.map(cm => {
+        const profile = cm.profiles as unknown as Profile;
+        const progress = progressByUser[cm.user_id] || { completed: 0, total: totalLessons };
+        const progressPercent = progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0;
+        
+        const userSubmissions = submissionsByUser[cm.user_id] || [];
+        const avgGrade = userSubmissions.length > 0
+          ? Math.round(userSubmissions.reduce((sum, s) => sum + s.grade, 0) / userSubmissions.length)
+          : 0;
+
+        // Use username or build name from first_name/last_name
+        const displayName = profile?.first_name 
+          ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() 
+          : profile?.username || 'Unknown';
+
+        return {
+          id: cm.user_id,
+          name: displayName,
+          email: profile?.username || '', // Use username as email fallback
+          avatar: profile?.avatar_url || undefined,
+          enrolled_at: cm.enrolled_at,
+          progress: progressPercent,
+          completed_lessons: progress.completed,
+          total_lessons: progress.total,
+          average_grade: avgGrade,
+          last_active: cm.enrolled_at,
+          status: "active",
+          assignments_completed: userSubmissions.length,
+          assignments_total: assignmentIds.length,
+        };
+      });
+
+      studentList.sort((a, b) => new Date(b.enrolled_at).getTime() - new Date(a.enrolled_at).getTime());
+
+      setStudents(studentList);
+
+      const activeStudents = studentList.filter(s => s.status === "active").length;
+      const avgProgress = studentList.length > 0 
+        ? Math.round(studentList.reduce((sum, s) => sum + s.progress, 0) / studentList.length)
+        : 0;
+      const avgGrade = studentList.length > 0
+        ? Math.round(studentList.reduce((sum, s) => sum + s.average_grade, 0) / studentList.length)
+        : 0;
+      const completionRate = studentList.length > 0
+        ? Math.round((studentList.filter(s => s.progress >= 80).length / studentList.length) * 100)
+        : 0;
+
+      setStats({
+        total_students: studentList.length,
+        active_students: activeStudents,
+        average_progress: avgProgress,
+        average_grade: avgGrade,
+        completion_rate: completionRate,
+      });
+
+      setCourse(prev => prev ? {
+        ...prev,
+        total_students: studentList.length,
+        average_progress: avgProgress,
+        completion_rate: completionRate,
+      } : null);
+
+    } catch (error) {
+      console.error('Error fetching students:', error);
+      toast.error('Failed to load students');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleInviteStudent = async () => {
-    if (!inviteData.email) {
-      toast.error("Please enter an email address");
+  const handleEnrollStudent = async () => {
+    if (!enrollData.email) {
+      toast.error("Please enter a username or email");
       return;
     }
 
-    setInviting(true);
-    
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    toast.success(`Invitation sent to ${inviteData.email}`);
-    setShowInviteModal(false);
-    setInviteData({ email: "", message: "", send_email: true });
-    setInviting(false);
-    
-    // Refresh student list
-    await fetchStudents();
+    if (!enrollData.offeringId) {
+      toast.error("Please select a course offering");
+      return;
+    }
+
+    setEnrolling(true);
+    const supabase = getSupabaseBrowserClient();
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      // Check if course offering exists and has capacity
+      const { data: offering, error: offeringError } = await supabase
+        .from('course_classes')
+        .select('id, max_students')
+        .eq('id', enrollData.offeringId)
+        .single();
+
+      if (offeringError || !offering) {
+        toast.error('Selected course offering not found');
+        setEnrolling(false);
+        return;
+      }
+
+      // Check capacity if max_students is set
+      if (offering.max_students) {
+        const { count, error: countError } = await supabase
+          .from('class_members')
+          .select('id', { count: 'exact', head: true })
+          .eq('course_class_id', offering.id);
+
+        if (countError) throw countError;
+
+        if (count && count >= offering.max_students) {
+          toast.error(`This course offering has reached its maximum capacity (${offering.max_students} students)`);
+          setEnrolling(false);
+          return;
+        }
+      }
+
+      // Search by username OR try as email (for backward compatibility)
+      let existingUser = null;
+      
+      // First, try to find by username
+      const { data: userByUsername, error: usernameError } = await supabase
+        .from('profiles')
+        .select('id, username, first_name, last_name')
+        .eq('username', enrollData.email)  // Using 'username' column
+        .maybeSingle();
+      
+      if (!usernameError && userByUsername) {
+        existingUser = userByUsername;
+      } else {
+        // If not found by username, try to find by email using a custom function
+        // Since email isn't in profiles, we need to check auth.users
+        // For now, just show error
+        toast.error(`User "${enrollData.email}" not found. Please use their username.`);
+        setEnrolling(false);
+        return;
+      }
+      
+      if (!existingUser) {
+        toast.error(`User with username "${enrollData.email}" does not exist. They need to register first.`);
+        setEnrolling(false);
+        return;
+      }
+
+      // Check if already enrolled in this offering
+      const { data: existingEnrollment, error: enrollmentCheckError } = await supabase
+        .from('class_members')
+        .select('id')
+        .eq('course_class_id', offering.id)
+        .eq('user_id', existingUser.id)
+        .maybeSingle();
+
+      if (enrollmentCheckError) throw enrollmentCheckError;
+
+      if (existingEnrollment) {
+        toast.error('This student is already enrolled in this course offering');
+        setEnrolling(false);
+        return;
+      }
+
+      // Enroll the user
+      const { error: enrollError } = await supabase
+        .from('class_members')
+        .insert({
+          course_class_id: offering.id,
+          user_id: existingUser.id,
+          role: 'student',
+          enrolled_at: new Date().toISOString(),
+        });
+
+      if (enrollError) throw enrollError;
+
+      const studentName = existingUser.first_name 
+        ? `${existingUser.first_name || ''} ${existingUser.last_name || ''}`.trim() 
+        : existingUser.username;
+      
+      toast.success(`${studentName} has been enrolled in the course!`);
+
+      // Refresh student list
+      await fetchStudents();
+      setShowEnrollModal(false);
+      setEnrollData({ email: "", offeringId: courseOfferings[0]?.id || 0 });
+
+    } catch (error) {
+      console.error('Error enrolling student:', error);
+      toast.error('Failed to enroll student. Please try again.');
+    } finally {
+      setEnrolling(false);
+    }
   };
 
   const handleRemoveStudent = async () => {
     if (!selectedStudent) return;
     
     setRemoving(true);
-    
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    toast.success(`${selectedStudent.name} has been removed from the course`);
-    setShowRemoveConfirm(false);
-    setSelectedStudent(null);
-    setRemoving(false);
-    
-    // Refresh student list
-    await fetchStudents();
+    const supabase = getSupabaseBrowserClient();
+
+    try {
+      // Get course classes for this course
+      const { data: courseClasses, error: classesError } = await supabase
+        .from('course_classes')
+        .select('id')
+        .eq('course_id', parseInt(courseId));
+
+      if (classesError) throw classesError;
+
+      const courseClassIds = courseClasses?.map(cc => cc.id) || [];
+
+      // Delete class members records
+      const { error: deleteError } = await supabase
+        .from('class_members')
+        .delete()
+        .in('course_class_id', courseClassIds)
+        .eq('user_id', selectedStudent.id);
+
+      if (deleteError) throw deleteError;
+
+      toast.success(`${selectedStudent.name} has been removed from the course`);
+      setShowRemoveConfirm(false);
+      setSelectedStudent(null);
+      
+      // Refresh student list
+      await fetchStudents();
+      
+    } catch (error) {
+      console.error('Error removing student:', error);
+      toast.error('Failed to remove student');
+    } finally {
+      setRemoving(false);
+    }
   };
 
   const handleBulkRemove = async () => {
@@ -295,19 +649,44 @@ export default function CourseStudentsPage() {
       return;
     }
     
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    toast.success(`${selectedStudents.length} students have been removed`);
-    setSelectedStudents([]);
-    setShowBulkActions(false);
-    
-    // Refresh student list
-    await fetchStudents();
+    const supabase = getSupabaseBrowserClient();
+
+    try {
+      // Get course classes for this course
+      const { data: courseClasses, error: classesError } = await supabase
+        .from('course_classes')
+        .select('id')
+        .eq('course_id', parseInt(courseId));
+
+      if (classesError) throw classesError;
+
+      const courseClassIds = courseClasses?.map(cc => cc.id) || [];
+
+      // Delete class members records for all selected students
+      const { error: deleteError } = await supabase
+        .from('class_members')
+        .delete()
+        .in('course_class_id', courseClassIds)
+        .in('user_id', selectedStudents);
+
+      if (deleteError) throw deleteError;
+
+      toast.success(`${selectedStudents.length} students have been removed`);
+      setSelectedStudents([]);
+      setShowBulkActions(false);
+      
+      // Refresh student list
+      await fetchStudents();
+      
+    } catch (error) {
+      console.error('Error bulk removing students:', error);
+      toast.error('Failed to remove students');
+    }
   };
 
   const handleSendReminder = async (student: Student) => {
-    toast.success(`Reminder sent to ${student.name}`);
+    // This would integrate with a real email service in production
+    toast.info(`Reminder functionality would send an email to ${student.email}. This requires email service integration.`);
   };
 
   const handleMessageStudent = async (student: Student) => {
@@ -390,13 +769,9 @@ export default function CourseStudentsPage() {
             </p>
           </div>
           <div className="flex gap-3">
-            <GlowButton onClick={() => setShowInviteModal(true)}>
+            <GlowButton onClick={() => setShowEnrollModal(true)}>
               <UserPlus className="w-4 h-4 mr-2" />
-              Invite Students
-            </GlowButton>
-            <GlowButton variant="outline">
-              <Download className="w-4 h-4 mr-2" />
-              Export List
+              Enroll Student
             </GlowButton>
           </div>
         </div>
@@ -519,9 +894,9 @@ export default function CourseStudentsPage() {
                   : "No students are enrolled in this course yet"}
               </p>
               {!searchQuery && filterStatus === "all" && (
-                <GlowButton onClick={() => setShowInviteModal(true)} className="mt-4">
+                <GlowButton onClick={() => setShowEnrollModal(true)} className="mt-4">
                   <UserPlus className="w-4 h-4 mr-2" />
-                  Invite Your First Student
+                  Enroll Your First Student
                 </GlowButton>
               )}
             </div>
@@ -561,10 +936,6 @@ export default function CourseStudentsPage() {
                           <p className="text-sm text-gray-400 flex items-center gap-2">
                             <Calendar className="w-4 h-4" />
                             Enrolled: {new Date(student.enrolled_at).toLocaleDateString()}
-                          </p>
-                          <p className="text-sm text-gray-400 flex items-center gap-2">
-                            <Clock className="w-4 h-4" />
-                            Last Active: {new Date(student.last_active).toLocaleDateString()}
                           </p>
                         </div>
                       </div>
@@ -614,6 +985,7 @@ export default function CourseStudentsPage() {
                         variant="outline"
                         size="sm"
                         onClick={() => handleSendReminder(student)}
+                        title="Send reminder email"
                       >
                         <Send className="w-4 h-4" />
                       </GlowButton>
@@ -680,57 +1052,58 @@ export default function CourseStudentsPage() {
         )}
       </div>
 
-      {/* Invite Student Modal */}
-      <Dialog open={showInviteModal} onOpenChange={setShowInviteModal}>
+      {/* Enroll Student Modal */}
+      <Dialog open={showEnrollModal} onOpenChange={setShowEnrollModal}>
         <DialogContent className="bg-gray-900 border-gray-800 max-w-md">
           <DialogHeader>
-            <DialogTitle className="text-white">Invite Students</DialogTitle>
+            <DialogTitle className="text-white">Enroll Existing Student</DialogTitle>
           </DialogHeader>
           
           <div className="space-y-4 py-4">
             <div>
-              <Label htmlFor="email">Email Address</Label>
+              <Label htmlFor="username">Student Username</Label>
               <Input
-                id="email"
-                type="email"
-                placeholder="student@example.com"
-                value={inviteData.email}
-                onChange={(e) => setInviteData({ ...inviteData, email: e.target.value })}
+                id="username"
+                type="text"
+                placeholder="john_doe"  // Changed from email placeholder
+                value={enrollData.email}
+                onChange={(e) => setEnrollData({ ...enrollData, email: e.target.value })}
                 className="mt-1"
               />
               <p className="text-xs text-gray-400 mt-1">
-                Separate multiple emails with commas
+                Enter the student's username (not email). The student must already have an account.
               </p>
             </div>
-            
+
             <div>
-              <Label htmlFor="message">Personal Message (Optional)</Label>
-              <Textarea
-                id="message"
-                placeholder="Welcome to the course! I'm excited to have you join..."
-                value={inviteData.message}
-                onChange={(e) => setInviteData({ ...inviteData, message: e.target.value })}
-                rows={3}
-                className="mt-1"
-              />
-            </div>
-            
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="send_email"
-                checked={inviteData.send_email}
-                onChange={(e) => setInviteData({ ...inviteData, send_email: e.target.checked })}
-                className="rounded border-gray-700 bg-gray-800 text-purple-600 focus:ring-purple-500"
-              />
-              <Label htmlFor="send_email" className="text-sm">
-                Send email notification
-              </Label>
+              <Label htmlFor="offering">Course Offering</Label>
+              <Select
+                value={enrollData.offeringId.toString()}
+                onValueChange={(value) => setEnrollData({ ...enrollData, offeringId: parseInt(value) })}
+              >
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Select offering" />
+                </SelectTrigger>
+                <SelectContent>
+                  {courseOfferings.map((offering) => (
+                    <SelectItem key={offering.id} value={offering.id.toString()}>
+                      {offering.name} ({offering.status})
+                      {offering.max_students && ` - Max: ${offering.max_students}`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {courseOfferings.length === 0 && !loadingOfferings && (
+                <p className="text-xs text-yellow-400 mt-1">
+                  No active course offerings available. Please create an offering first.
+                </p>
+              )}
             </div>
             
             <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
               <p className="text-sm text-blue-400">
-                Students will receive an invitation to join this course. They'll need to accept the invitation to get started.
+                Enter the student's <strong>username</strong> to enroll them. 
+                The student must have an existing account.
               </p>
             </div>
           </div>
@@ -738,16 +1111,20 @@ export default function CourseStudentsPage() {
           <DialogFooter>
             <GlowButton
               variant="outline"
-              onClick={() => setShowInviteModal(false)}
+              onClick={() => {
+                setShowEnrollModal(false);
+                setEnrollData({ email: "", offeringId: courseOfferings[0]?.id || 0 });
+              }}
             >
               Cancel
             </GlowButton>
             <GlowButton
-              onClick={handleInviteStudent}
-              isLoading={inviting}
+              onClick={handleEnrollStudent}
+              isLoading={enrolling}
+              disabled={courseOfferings.length === 0}
             >
-              <Send className="w-4 h-4 mr-2" />
-              Send Invitation
+              <UserPlus className="w-4 h-4 mr-2" />
+              Enroll Student
             </GlowButton>
           </DialogFooter>
         </DialogContent>

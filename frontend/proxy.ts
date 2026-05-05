@@ -33,6 +33,7 @@ const publicOnlyRoutes = [
   "/register",
   "/forgot-password",
   "/reset-password",
+  "/faq"
 ];
 
 // Routes that should be accessible to both authenticated and unauthenticated users

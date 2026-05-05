@@ -1,3 +1,4 @@
+// components/ui/rich-text-editor.tsx
 "use client";
 
 import { useEditor, EditorContent } from "@tiptap/react";
@@ -30,11 +31,11 @@ const MenuBar = ({ editor }: { editor: any }) => {
   if (!editor) return null;
 
   return (
-    <div className="border-b border-gray-700 p-2 flex flex-wrap gap-1 bg-gray-800/30">
+    <div className="border-b border-gray-700 p-2 flex flex-wrap gap-1 bg-gray-800/30 sticky top-0 z-10">
       <button
         onClick={() => editor.chain().focus().toggleBold().run()}
         className={`p-1.5 rounded hover:bg-gray-700 transition-colors ${
-          editor.isActive("bold") ? "bg-purple-600 text-white" : "text-gray-400"
+          editor.isActive("bold") ? "bg-purple-600 text-white" : "text-gray-400 hover:text-white"
         }`}
         title="Bold"
       >
@@ -43,7 +44,7 @@ const MenuBar = ({ editor }: { editor: any }) => {
       <button
         onClick={() => editor.chain().focus().toggleItalic().run()}
         className={`p-1.5 rounded hover:bg-gray-700 transition-colors ${
-          editor.isActive("italic") ? "bg-purple-600 text-white" : "text-gray-400"
+          editor.isActive("italic") ? "bg-purple-600 text-white" : "text-gray-400 hover:text-white"
         }`}
         title="Italic"
       >
@@ -52,7 +53,7 @@ const MenuBar = ({ editor }: { editor: any }) => {
       <button
         onClick={() => editor.chain().focus().toggleBulletList().run()}
         className={`p-1.5 rounded hover:bg-gray-700 transition-colors ${
-          editor.isActive("bulletList") ? "bg-purple-600 text-white" : "text-gray-400"
+          editor.isActive("bulletList") ? "bg-purple-600 text-white" : "text-gray-400 hover:text-white"
         }`}
         title="Bullet List"
       >
@@ -61,7 +62,7 @@ const MenuBar = ({ editor }: { editor: any }) => {
       <button
         onClick={() => editor.chain().focus().toggleOrderedList().run()}
         className={`p-1.5 rounded hover:bg-gray-700 transition-colors ${
-          editor.isActive("orderedList") ? "bg-purple-600 text-white" : "text-gray-400"
+          editor.isActive("orderedList") ? "bg-purple-600 text-white" : "text-gray-400 hover:text-white"
         }`}
         title="Numbered List"
       >
@@ -70,7 +71,7 @@ const MenuBar = ({ editor }: { editor: any }) => {
       <button
         onClick={() => editor.chain().focus().toggleCodeBlock().run()}
         className={`p-1.5 rounded hover:bg-gray-700 transition-colors ${
-          editor.isActive("codeBlock") ? "bg-purple-600 text-white" : "text-gray-400"
+          editor.isActive("codeBlock") ? "bg-purple-600 text-white" : "text-gray-400 hover:text-white"
         }`}
         title="Code Block"
       >
@@ -79,7 +80,7 @@ const MenuBar = ({ editor }: { editor: any }) => {
       <button
         onClick={() => editor.chain().focus().toggleBlockquote().run()}
         className={`p-1.5 rounded hover:bg-gray-700 transition-colors ${
-          editor.isActive("blockquote") ? "bg-purple-600 text-white" : "text-gray-400"
+          editor.isActive("blockquote") ? "bg-purple-600 text-white" : "text-gray-400 hover:text-white"
         }`}
         title="Quote"
       >
@@ -89,7 +90,7 @@ const MenuBar = ({ editor }: { editor: any }) => {
       <button
         onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
         className={`p-1.5 rounded hover:bg-gray-700 transition-colors ${
-          editor.isActive("heading", { level: 1 }) ? "bg-purple-600 text-white" : "text-gray-400"
+          editor.isActive("heading", { level: 1 }) ? "bg-purple-600 text-white" : "text-gray-400 hover:text-white"
         }`}
         title="Heading 1"
       >
@@ -98,7 +99,7 @@ const MenuBar = ({ editor }: { editor: any }) => {
       <button
         onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
         className={`p-1.5 rounded hover:bg-gray-700 transition-colors ${
-          editor.isActive("heading", { level: 2 }) ? "bg-purple-600 text-white" : "text-gray-400"
+          editor.isActive("heading", { level: 2 }) ? "bg-purple-600 text-white" : "text-gray-400 hover:text-white"
         }`}
         title="Heading 2"
       >
@@ -108,10 +109,18 @@ const MenuBar = ({ editor }: { editor: any }) => {
       <button
         onClick={() => {
           const url = window.prompt("Enter URL:");
-          if (url) editor.chain().focus().setLink({ href: url }).run();
+          if (url) {
+            // Check if it's a valid URL
+            try {
+              new URL(url);
+              editor.chain().focus().setLink({ href: url }).run();
+            } catch {
+              alert("Please enter a valid URL (including http:// or https://)");
+            }
+          }
         }}
         className={`p-1.5 rounded hover:bg-gray-700 transition-colors ${
-          editor.isActive("link") ? "bg-purple-600 text-white" : "text-gray-400"
+          editor.isActive("link") ? "bg-purple-600 text-white" : "text-gray-400 hover:text-white"
         }`}
         title="Add Link"
       >
@@ -120,14 +129,14 @@ const MenuBar = ({ editor }: { editor: any }) => {
       <div className="w-px h-6 bg-gray-700 mx-1" />
       <button
         onClick={() => editor.chain().focus().undo().run()}
-        className="p-1.5 rounded hover:bg-gray-700 transition-colors text-gray-400"
+        className="p-1.5 rounded hover:bg-gray-700 transition-colors text-gray-400 hover:text-white"
         title="Undo"
       >
         <Undo className="w-4 h-4" />
       </button>
       <button
         onClick={() => editor.chain().focus().redo().run()}
-        className="p-1.5 rounded hover:bg-gray-700 transition-colors text-gray-400"
+        className="p-1.5 rounded hover:bg-gray-700 transition-colors text-gray-400 hover:text-white"
         title="Redo"
       >
         <Redo className="w-4 h-4" />
@@ -158,9 +167,13 @@ export function RichTextEditor({ value, onChange, placeholder, className = "" }:
       Image,
       Link.configure({
         openOnClick: false,
+        HTMLAttributes: {
+          target: "_blank",
+          rel: "noopener noreferrer",
+        },
       }),
     ],
-    content: value,
+    content: value || "",
     immediatelyRender: false,
     editorProps: {
       attributes: {
@@ -168,16 +181,24 @@ export function RichTextEditor({ value, onChange, placeholder, className = "" }:
       },
     },
     onUpdate: ({ editor }) => {
-      onChange(editor.getHTML());
+      const html = editor.getHTML();
+      onChange(html);
     },
   });
 
   // Update editor content when value changes from outside
   useEffect(() => {
     if (editor && value !== editor.getHTML()) {
-      editor.commands.setContent(value);
+      editor.commands.setContent(value || "");
     }
   }, [editor, value]);
+
+  // Check if content is empty (just an empty paragraph)
+  const isEmpty = () => {
+    if (!editor) return true;
+    const html = editor.getHTML();
+    return !html || html === "<p></p>" || html === "<p><br></p>";
+  };
 
   // Don't render anything during SSR
   if (!mounted) {
@@ -191,12 +212,14 @@ export function RichTextEditor({ value, onChange, placeholder, className = "" }:
   return (
     <div className="border border-gray-700 rounded-lg overflow-hidden bg-gray-800/30">
       <MenuBar editor={editor} />
-      <EditorContent editor={editor} />
-      {(!value || value === "<p></p>") && editor?.isEmpty && (
-        <div className="text-gray-500 text-sm p-4 -mt-[200px] pointer-events-none">
-          {placeholder}
-        </div>
-      )}
+      <div className="relative">
+        <EditorContent editor={editor} />
+        {placeholder && isEmpty() && (
+          <div className="absolute top-4 left-4 text-gray-500 text-sm pointer-events-none">
+            {placeholder}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
