@@ -320,50 +320,48 @@ export default function LandingGuest() {
             <div className="flex flex-wrap justify-center items-center gap-x-12 gap-y-8">
               <div className="transition-all duration-300 hover:scale-110 cursor-pointer hover:drop-shadow-lg hover:drop-shadow-purple-500/30">
                 <div className="flex items-center gap-0 text-2xl font-medium tracking-tight">
-                  <span className="text-[#4285F4] drop-shadow-glow-blue">G</span>
-                  <span className="text-[#EA4335] drop-shadow-glow-red">o</span>
-                  <span className="text-[#FBBC05] drop-shadow-glow-yellow">o</span>
-                  <span className="text-[#4285F4] drop-shadow-glow-blue">g</span>
-                  <span className="text-[#34A853] drop-shadow-glow-green">l</span>
-                  <span className="text-[#EA4335] drop-shadow-glow-red">e</span>
+                  <span className="text-[#4285F4] drop-shadow-glow-blue">L</span>
+                  <span className="text-[#EA4335] drop-shadow-glow-red">u</span>
+                  <span className="text-[#FBBC05] drop-shadow-glow-yellow">m</span>
+                  <span className="text-[#4285F4] drop-shadow-glow-blue">i</span>
+                  <span className="text-[#34A853] drop-shadow-glow-green">n</span>
+                  <span className="text-[#EA4335] drop-shadow-glow-red">a</span>
                 </div>
               </div>
 
               <div className="transition-all duration-300 hover:scale-110 cursor-pointer">
                 <span className="font-serif text-2xl font-bold text-[#8C1515] tracking-tight hover:drop-shadow-lg hover:drop-shadow-red-500/30">
-                  Stanford
+                  Redstone
                 </span>
               </div>
 
               <div className="transition-all duration-300 hover:scale-110 cursor-pointer">
                 <span className="font-sans text-2xl font-black text-[#052FAD] tracking-tighter hover:drop-shadow-lg hover:drop-shadow-blue-500/30">
-                  IBM
+                  Axiom
                 </span>
               </div>
 
               <div className="transition-all duration-300 hover:scale-110 cursor-pointer">
                 <span className="text-2xl font-black tracking-tight bg-gradient-to-r from-[#0064E1] to-[#0081FB] bg-clip-text text-transparent hover:drop-shadow-lg hover:drop-shadow-blue-500/30">
-                  Meta
+                  Novix
                 </span>
               </div>
 
               <div className="transition-all duration-300 hover:scale-110 cursor-pointer">
                 <span className="font-serif text-2xl font-bold text-[#00356B] tracking-tight hover:drop-shadow-lg hover:drop-shadow-blue-500/30">
-                  Yale
+                  Bluevale
                 </span>
               </div>
 
               <div className="transition-all duration-300 hover:scale-110 cursor-pointer">
                 <div className="flex items-center gap-0 text-2xl font-bold tracking-tight">
-                  <span className="text-[#F25022] drop-shadow-glow-red">M</span>
-                  <span className="text-[#7FBA00] drop-shadow-glow-green">i</span>
-                  <span className="text-[#00A4EF] drop-shadow-glow-blue">c</span>
-                  <span className="text-[#FFB900] drop-shadow-glow-yellow">r</span>
+                  <span className="text-[#F25022] drop-shadow-glow-red">C</span>
+                  <span className="text-[#7FBA00] drop-shadow-glow-green">o</span>
+                  <span className="text-[#00A4EF] drop-shadow-glow-blue">n</span>
+                  <span className="text-[#FFB900] drop-shadow-glow-yellow">t</span>
                   <span className="text-[#F25022] drop-shadow-glow-red">o</span>
                   <span className="text-[#7FBA00] drop-shadow-glow-green">s</span>
                   <span className="text-[#00A4EF] drop-shadow-glow-blue">o</span>
-                  <span className="text-[#FFB900] drop-shadow-glow-yellow">f</span>
-                  <span className="text-[#F25022] drop-shadow-glow-red">t</span>
                 </div>
               </div>
             </div>
