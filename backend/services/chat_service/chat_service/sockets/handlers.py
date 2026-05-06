@@ -103,12 +103,14 @@ def init_socket_events(socketio, db_session_factory):
             emit("error", {"message": "Invalid request data"})
             return
 
-        room_id = data.get("room_id")
-        if not room_id:
-            emit("error", {"message": "room_id required"})
+        try:
+            room_id = int(data.get("room_id"))
+        except (TypeError, ValueError):
+            emit("error", {"message": "Invalid room_id"})
             return
-        if page < 1 or page_size < 1 or (cursor is not None and cursor < 1):
-            emit("error", {"message": "Invalid message query"})
+
+        if room_id < 1:
+            emit("error", {"message": "room_id required"})
             return
 
         if not db_session_factory:

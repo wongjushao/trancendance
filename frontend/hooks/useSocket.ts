@@ -22,7 +22,7 @@ function resolveSocketUrl(): string {
   return 'http://localhost:5002';
 }
 
-const SOCKET_PATH = '/api/chat-service/socket.io';
+const SOCKET_PATH = process.env.NEXT_PUBLIC_SOCKET_PATH || '/api/chat-service/socket.io';
 
 export const useSocket = (token?: string) => {
   const socketRef = useRef<Socket | null>(null);
@@ -60,9 +60,8 @@ export const useSocket = (token?: string) => {
 
     const socketOptions: Partial<ManagerOptions & SocketOptions> = {
       auth: { token },
-      transports: ['websocket', 'polling'],
+      transports: ['polling', 'websocket'],
       path: SOCKET_PATH,
-      withCredentials: true,
       reconnection: true,
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,

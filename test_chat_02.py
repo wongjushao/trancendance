@@ -1,218 +1,198 @@
 #!/usr/bin/env python3
-"""
-Chat Service Testing Script (FULL FLOW)
-
-Flow:
-1. Connect to DB
-2. Fetch specific users by name
-3. Make them friends
-4. Create DM room
-5. Send messages
-6. Retrieve messages
-"""
+from __future__ import annotations
 
 import os
-import time
-from typing import Optional
-from supabase import create_client, Client
+import sys
+from dataclasses import dataclass
+from typing import Iterable
+
 from dotenv import load_dotenv
-
-load_dotenv()
-
-SUPABASE_URL = os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY")
-
-# ---------------- COLORS ----------------
-class Colors:
-    HEADER = '\033[95m'
-    BLUE = '\033[94m'
-    GREEN = '\033[92m'
-    YELLOW = '\033[93m'
-    RED = '\033[91m'
-    END = '\033[0m'
-    BOLD = '\033[1m'
-
-def print_success(msg): print(f"{Colors.GREEN}✓ {msg}{Colors.END}")
-def print_error(msg): print(f"{Colors.RED}✗ {msg}{Colors.END}")
-def print_info(msg): print(f"{Colors.BLUE}ℹ {msg}{Colors.END}")
-
-def print_header(msg):
-    print(f"\n{Colors.HEADER}{'='*60}")
-    print(f"{msg:^60}")
-    print(f"{'='*60}{Colors.END}\n")
-
-# ---------------- MAIN CLASS ----------------
-class ChatTester:
-    def __init__(self):
-        self.supabase: Optional[Client] = None
-        self.user1_id = None
-        self.user2_id = None
-
-    # ---------------- DB ----------------
-    def connect_database(self):
-        print_info("Connecting to database...")
-
-        if not SUPABASE_URL or not SUPABASE_KEY:
-            print_error("Missing Supabase env variables")
-            return False
-
-        try:
-            self.supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-            print_success("Connected to database")
-            return True
-        except Exception as e:
-            print_error(f"Connection failed: {e}")
-            return False
-
-    # ---------------- FETCH USERS (UPDATED) ----------------
-    def get_two_users(self):
-        print_info("Fetching specific users from database...")
-
-        try:
-            USER1_USERNAME = "aissa_aissa"
-            USER2_PATTERN = "isa"
-
-            # user1 exact
-            res1 = self.supabase.table('profiles') \
-                .select('id, username') \
-                .eq('username', USER1_USERNAME) \
-                .execute()
-
-            if not res1.data:
-                print_error("User1 not found")
-                return False
-
-            user1 = res1.data[0]
-
-            # user2 partial match
-            res2 = self.supabase.table('profiles') \
-                .select('id, username') \
-                .ilike('username', f"%{USER2_PATTERN}%") \
-                .execute()
-
-            user2 = None
-            for u in res2.data:
-                if u['id'] != user1['id']:
-                    user2 = u
-                    break
-
-            if not user2:
-                print_error("User2 not found")
-                return False
-
-            self.user1_id = user1['id']
-            self.user2_id = user2['id']
-
-            print_success(f"User 1: {user1['username']} ({self.user1_id})")
-            print_success(f"User 2: {user2['username']} ({self.user2_id})")
-
-            return True
-
-        except Exception as e:
-            print_error(f"User fetch failed: {e}")
-            return False
-
-    # ---------------- FRIENDSHIP ----------------
-    def make_friends(self):
-        print_info("Creating friendship...")
-
-        existing = self.supabase.table('friendships') \
-            .select('*') \
-            .or_(f"and(requester_id.eq.{self.user1_id},addressee_id.eq.{self.user2_id}),and(requester_id.eq.{self.user2_id},addressee_id.eq.{self.user1_id})") \
-            .execute()
-
-        if existing.data:
-            print_info("Already friends")
-            return True
-
-        self.supabase.table('friendships').insert([
-            {'requester_id': self.user1_id, 'addressee_id': self.user2_id, 'status': 'accepted'},
-            {'requester_id': self.user2_id, 'addressee_id': self.user1_id, 'status': 'accepted'}
-        ]).execute()
-
-        print_success("Friendship created")
-        return True
-
-    # ---------------- ROOM ----------------
-    def create_dm_room(self):
-        print_info("Creating DM room...")
-
-        room = self.supabase.table('chat_rooms').insert({
-            'type': 'direct',
-            'related_course_id': None
-        }).execute()
-
-        room_id = room.data[0]['id']
-
-        self.supabase.table('chat_room_members').insert([
-            {'room_id': room_id, 'user_id': self.user1_id},
-            {'room_id': room_id, 'user_id': self.user2_id}
-        ]).execute()
-
-        print_success(f"Room created: {room_id}")
-        return room_id
-
-    # ---------------- SEND ----------------
-    def send_message(self, room_id, sender, content):
-        self.supabase.table('messages').insert({
-            'room_id': room_id,
-            'sender_id': sender,
-            'content': content,
-            'message_type': 'text'
-        }).execute()
-
-        print_success(f"Message: {content}")
-
-    # ---------------- FETCH ----------------
-    def get_messages(self, room_id):
-        res = self.supabase.table('messages') \
-            .select('*') \
-            .eq('room_id', room_id) \
-            .order('created_at') \
-            .execute()
-
-        return res.data
-
-    # ---------------- DISPLAY ----------------
-    def display(self, msgs):
-        print("\nMessages:")
-        print("-" * 50)
-        for m in msgs:
-            print(f"{m['sender_id'][:8]}: {m['content']}")
-        print("-" * 50)
-
-    # ---------------- FULL TEST ----------------
-    def run(self):
-        print_header("CHAT SERVICE TEST")
-
-        if not self.connect_database(): return
-        if not self.get_two_users(): return
-        self.make_friends()
-
-        room_id = self.create_dm_room()
-
-        print_header("SENDING")
-
-        msgs = [
-            (self.user1_id, "Hello from Aissa"),
-            (self.user2_id, "Hello from Isa"),
-            (self.user1_id, "Testing full pipeline"),
-        ]
-
-        for u, m in msgs:
-            self.send_message(room_id, u, m)
-            time.sleep(0.3)
-
-        print_header("RETRIEVING")
-
-        data = self.get_messages(room_id)
-        self.display(data)
-
-        print_header("DONE")
-        print_success(f"Room ID: {room_id}")
-        print_success(f"Messages: {len(data)}")
+from supabase import Client, create_client
 
 
-# ---------------- ENTRY ----------------
+@dataclass(frozen=True)
+class ChatUser:
+    email: str
+    uid: str
+
+
+USER_1 = ChatUser(
+    email="wongjushao@gmail.com",
+    uid="da3657de-d9be-4eae-9bea-03569de1474f",
+)
+USER_2 = ChatUser(
+    email="wjun-kea@student.42kl.edu.my",
+    uid="9d22ed15-8336-42b1-894c-7fcdf27729a4",
+)
+
+
+def require_env(name: str) -> str:
+    value = os.getenv(name)
+    if not value:
+        print(f"Missing required environment variable: {name}")
+        sys.exit(1)
+    return value
+
+
+def get_supabase_client() -> Client:
+    load_dotenv()
+
+    supabase_url = os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL")
+    supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY")
+
+    if not supabase_url or not supabase_key:
+        print(
+            "Missing Supabase configuration. Set SUPABASE_URL/NEXT_PUBLIC_SUPABASE_URL "
+            "and SUPABASE_SERVICE_ROLE_KEY/SUPABASE_ANON_KEY."
+        )
+        sys.exit(1)
+
+    return create_client(supabase_url, supabase_key)
+
+
+def ensure_profiles_exist(client: Client, users: Iterable[ChatUser]) -> None:
+    user_list = list(users)
+    user_ids = [user.uid for user in user_list]
+
+    response = (
+        client.table("profiles")
+        .select("id, username, first_name, last_name")
+        .in_("id", user_ids)
+        .execute()
+    )
+    profiles_by_id = {profile["id"]: profile for profile in response.data or []}
+    missing = [user for user in user_list if user.uid not in profiles_by_id]
+
+    if missing:
+        for user in missing:
+            print(f"Profile not found for {user.email} ({user.uid})")
+        sys.exit(1)
+
+    for user in user_list:
+        profile = profiles_by_id[user.uid]
+        display_name = (
+            profile.get("username")
+            or " ".join(
+                part for part in [profile.get("first_name"), profile.get("last_name")] if part
+            )
+            or "unnamed profile"
+        )
+        print(f"Found profile: {user.email} -> {display_name} ({user.uid})")
+
+
+def ensure_accepted_friendship(client: Client, user1: ChatUser, user2: ChatUser) -> None:
+    existing = (
+        client.table("friendships")
+        .select("id, requester_id, addressee_id, status")
+        .or_(
+            f"and(requester_id.eq.{user1.uid},addressee_id.eq.{user2.uid}),"
+            f"and(requester_id.eq.{user2.uid},addressee_id.eq.{user1.uid})"
+        )
+        .execute()
+    )
+
+    friendships = existing.data or []
+    if friendships:
+        for friendship in friendships:
+            if friendship.get("status") != "accepted":
+                (
+                    client.table("friendships")
+                    .update({"status": "accepted"})
+                    .eq("id", friendship["id"])
+                    .execute()
+                )
+        print("Friendship already exists; status is accepted.")
+        return
+
+    (
+        client.table("friendships")
+        .insert(
+            {
+                "requester_id": user1.uid,
+                "addressee_id": user2.uid,
+                "status": "accepted",
+            }
+        )
+        .execute()
+    )
+    print("Created accepted friendship.")
+
+
+def find_existing_dm_room(client: Client, user1: ChatUser, user2: ChatUser) -> int | None:
+    user1_memberships = (
+        client.table("chat_room_members")
+        .select("room_id")
+        .eq("user_id", user1.uid)
+        .execute()
+    )
+    user1_room_ids = [member["room_id"] for member in user1_memberships.data or []]
+    if not user1_room_ids:
+        return None
+
+    shared_memberships = (
+        client.table("chat_room_members")
+        .select("room_id")
+        .eq("user_id", user2.uid)
+        .in_("room_id", user1_room_ids)
+        .execute()
+    )
+    shared_room_ids = [member["room_id"] for member in shared_memberships.data or []]
+    if not shared_room_ids:
+        return None
+
+    rooms = (
+        client.table("chat_rooms")
+        .select("id")
+        .eq("type", "direct")
+        .in_("id", shared_room_ids)
+        .limit(1)
+        .execute()
+    )
+    if not rooms.data:
+        return None
+
+    return int(rooms.data[0]["id"])
+
+
+def ensure_dm_room(client: Client, user1: ChatUser, user2: ChatUser) -> int:
+    existing_room_id = find_existing_dm_room(client, user1, user2)
+    if existing_room_id is not None:
+        print(f"DM room already exists: {existing_room_id}")
+        return existing_room_id
+
+    room_response = (
+        client.table("chat_rooms")
+        .insert({"type": "direct", "related_course_id": None})
+        .execute()
+    )
+    room_id = int(room_response.data[0]["id"])
+
+    (
+        client.table("chat_room_members")
+        .upsert(
+            [
+                {"room_id": room_id, "user_id": user1.uid},
+                {"room_id": room_id, "user_id": user2.uid},
+            ],
+            on_conflict="room_id,user_id",
+        )
+        .execute()
+    )
+    print(f"Created DM room: {room_id}")
+    return room_id
+
+
+def main() -> None:
+    client = get_supabase_client()
+
+    ensure_profiles_exist(client, [USER_1, USER_2])
+    ensure_accepted_friendship(client, USER_1, USER_2)
+    room_id = ensure_dm_room(client, USER_1, USER_2)
+
+    print()
+    print("Done. These users can now chat with each other.")
+    print(f"Room ID: {room_id}")
+
+
 if __name__ == "__main__":
-    ChatTester().run()
+    main()

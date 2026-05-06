@@ -18,6 +18,7 @@ import {
   syncMessages,
   type Message as SyncMessage,
 } from '@/lib/chatViewSync';
+import { formatChatTime, normalizeChatTimestamp } from '@/lib/chatTime';
 
 interface ChatRoom {
   id: number;
@@ -40,6 +41,18 @@ interface Message {
   created_at: string;
   timestamp: string;
   is_me: boolean;
+}
+
+interface IncomingSocketMessage {
+  id: number;
+  room_id: number;
+  sender_id: string;
+  sender_name: string;
+  sender_avatar?: string;
+  content: string;
+  message_type: string;
+  created_at?: string | null;
+  timestamp?: string | null;
 }
 
 interface ChatContextType {
@@ -165,7 +178,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     if (!isConnected || !currentUserId) return;
 
-    const unsubscribeReceive = on('receive_message', (message: any) => {
+    const unsubscribeReceive = on('receive_message', (message: IncomingSocketMessage) => {
       const isFromMe = message.sender_id === currentUserId;
 
       if (isFromMe) {
@@ -178,15 +191,12 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         if (matchedKey) {
+          const createdAt = normalizeChatTimestamp(message.created_at);
           const formatted: Message = {
             ...message,
+            created_at: createdAt,
             is_me: true,
-            timestamp:
-              message.timestamp ||
-              new Date(message.created_at).toLocaleTimeString([], {
-                hour: '2-digit',
-                minute: '2-digit',
-              }),
+            timestamp: message.timestamp || formatChatTime(createdAt),
           };
           setMessages((prev) => prev.map((m) => (m.id === matchedKey ? formatted : m)));
           pendingMessagesRef.current.delete(matchedKey);
@@ -194,15 +204,12 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
+      const createdAt = normalizeChatTimestamp(message.created_at);
       const formatted: Message = {
         ...message,
+        created_at: createdAt,
         is_me: isFromMe,
-        timestamp:
-          message.timestamp ||
-          new Date(message.created_at).toLocaleTimeString([], {
-            hour: '2-digit',
-            minute: '2-digit',
-          }),
+        timestamp: message.timestamp || formatChatTime(createdAt),
       };
 
       if (currentRoom && message.room_id === currentRoom.id) {

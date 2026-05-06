@@ -9,6 +9,8 @@
  * DB → API → chatViewSync.ts → UI (page.tsx + chatbubble.tsx)
  */
 
+import { formatChatTime, normalizeChatTimestamp } from '@/lib/chatTime';
+
 export interface Message {
   id: number;
   room_id: number;
@@ -36,6 +38,18 @@ export interface FetchMessagesResult {
   total_count?: number;
   has_more?: boolean;
   last_timestamp?: string;
+}
+
+interface RawMessage {
+  id: number;
+  room_id: number;
+  sender_id: string;
+  sender_name: string;
+  sender_avatar?: string;
+  content: string;
+  created_at?: string | null;
+  timestamp?: string | null;
+  message_type?: string;
 }
 
 export interface SyncOptions {
@@ -136,14 +150,15 @@ export async function fetchLatestMessages(
     console.log(`[chatViewSync] Fetched ${data.messages?.length || 0} messages for room ${roomId}`);
 
     // Format messages with is_me flag
-    const formattedMessages = (data.messages || []).map((msg: any) => ({
-      ...msg,
-      is_me: msg.sender_id === currentUserId,
-      timestamp: msg.timestamp || new Date(msg.created_at).toLocaleTimeString([], {
-        hour: '2-digit',
-        minute: '2-digit',
-      }),
-    }));
+    const formattedMessages = ((data.messages || []) as RawMessage[]).map((msg) => {
+      const createdAt = normalizeChatTimestamp(msg.created_at);
+      return {
+        ...msg,
+        created_at: createdAt,
+        is_me: msg.sender_id === currentUserId,
+        timestamp: msg.timestamp || formatChatTime(createdAt),
+      };
+    });
 
     // Update cache
     messageCache.set(roomId, formattedMessages);

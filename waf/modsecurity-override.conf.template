@@ -6,3 +6,9 @@
 # Limit expanded methods to API routes only.
 SecRule REQUEST_URI "@beginsWith /api/" \
   "id:1000001,phase:1,pass,nolog,t:none,setvar:'tx.allowed_methods=GET HEAD POST OPTIONS PUT PATCH DELETE'"
+
+# Socket.IO polling POST frames are plain Engine.IO payloads, not normal JSON
+# request bodies. Let the chat socket endpoint pass through the WAF so the
+# long-polling handshake can complete and then upgrade to WebSocket.
+SecRule REQUEST_URI "@beginsWith /api/chat-service/socket.io/" \
+  "id:1000002,phase:1,pass,nolog,t:none,ctl:ruleEngine=Off"

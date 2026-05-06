@@ -10,6 +10,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useChat } from "@/contexts/ChatContext";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 import { forceRefreshMessages, clearRoomCache } from "@/lib/chatViewSync";
+import { chatTimestampMs, formatChatDateKey } from "@/lib/chatTime";
 
 interface Message {
   id: number | string;
@@ -22,6 +23,16 @@ interface Message {
   created_at: string;
   timestamp: string;
   is_me: boolean;
+}
+
+interface ChatRoom {
+  id: number;
+  type: 'direct' | 'course';
+  display_name: string;
+  last_message: string | null;
+  last_message_time: string | null;
+  unread_count: number;
+  related_course_id?: number;
 }
 
 export function ChatBubble() {
@@ -145,7 +156,7 @@ export function ChatBubble() {
     router.push("/messages");
   };
 
-  const handleSelectRoom = (room: any) => {
+  const handleSelectRoom = (room: ChatRoom) => {
     selectRoom(room);
     setView('chat');
     setSearchQuery("");
@@ -162,17 +173,14 @@ export function ChatBubble() {
 
   // Sort messages by created_at to ensure proper order
   const sortedMessages = [...messages].sort((a, b) => {
-    const dateA = new Date(a.created_at || a.timestamp);
-    const dateB = new Date(b.created_at || b.timestamp);
-    return dateA.getTime() - dateB.getTime();
+    return chatTimestampMs(a.created_at) - chatTimestampMs(b.created_at);
   });
 
   // Group messages by date
   const groupMessagesByDate = (msgs: Message[]) => {
     const groups: { [key: string]: Message[] } = {};
     msgs.forEach(msg => {
-      const date = new Date(msg.created_at || msg.timestamp);
-      const dateKey = date.toLocaleDateString();
+      const dateKey = formatChatDateKey(msg.created_at);
       if (!groups[dateKey]) {
         groups[dateKey] = [];
       }

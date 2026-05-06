@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import uuid
 from typing import Any
-from datetime import datetime
+from datetime import timezone
 
 from backend.common.models import Message, Profile
 
@@ -46,6 +46,12 @@ def serialize_message(
     # Format timestamp
     timestamp = message.created_at.strftime("%I:%M %p") if message.created_at else None
     
+    created_at = None
+    if message.created_at:
+        # Message timestamps are stored in UTC. Include the timezone marker so
+        # browsers do not parse the value as local time.
+        created_at = message.created_at.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
+
     return {
         "id": message.id,
         "room_id": message.room_id,
@@ -54,7 +60,7 @@ def serialize_message(
         "sender_avatar": sender.avatar_url if sender else None,
         "content": message.content,
         "message_type": message.message_type,
-        "created_at": message.created_at.isoformat() if message.created_at else None,
+        "created_at": created_at,
         "timestamp": timestamp,
         "is_me": current_user_id is not None and str(message.sender_id) == str(current_user_id),
     }

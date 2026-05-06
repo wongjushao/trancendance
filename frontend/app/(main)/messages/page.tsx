@@ -10,6 +10,7 @@ import { useChat } from "@/contexts/ChatContext";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 import { forceRefreshMessages, clearRoomCache } from "@/lib/chatViewSync";
+import { chatTimestampMs, formatChatDateKey } from "@/lib/chatTime";
 
 interface Message {
   id: number | string;
@@ -96,17 +97,14 @@ export default function MessagesPage() {
 
   // Sort messages by created_at to ensure proper order
   const sortedMessages = [...messages].sort((a, b) => {
-    const dateA = new Date(a.created_at || a.timestamp);
-    const dateB = new Date(b.created_at || b.timestamp);
-    return dateA.getTime() - dateB.getTime();
+    return chatTimestampMs(a.created_at) - chatTimestampMs(b.created_at);
   });
 
   // Group messages by date
   const groupMessagesByDate = (msgs: Message[]) => {
     const groups: { [key: string]: Message[] } = {};
     msgs.forEach((msg) => {
-      const date = new Date(msg.created_at || msg.timestamp);
-      const dateKey = date.toLocaleDateString();
+      const dateKey = formatChatDateKey(msg.created_at);
       if (!groups[dateKey]) {
         groups[dateKey] = [];
       }
