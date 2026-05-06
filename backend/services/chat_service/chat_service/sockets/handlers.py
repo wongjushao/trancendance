@@ -107,6 +107,9 @@ def init_socket_events(socketio, db_session_factory):
         if not room_id:
             emit("error", {"message": "room_id required"})
             return
+        if page < 1 or page_size < 1 or (cursor is not None and cursor < 1):
+            emit("error", {"message": "Invalid message query"})
+            return
 
         if not db_session_factory:
             emit("error", {"message": "Database not available"})
@@ -206,6 +209,7 @@ def init_socket_events(socketio, db_session_factory):
                 "status": "ok",
                 "message_id": message_dict["id"],
                 "temp_id": temp_id,
+                "message": message_dict,
             })
 
             # Broadcast to all other clients in the room
@@ -248,9 +252,15 @@ def init_socket_events(socketio, db_session_factory):
             emit("error", {"message": "Invalid request"})
             return
 
-        room_id = data.get("room_id")
-        page = data.get("page", 1)
-        page_size = min(data.get("page_size", 50), 100)
+        try:
+            room_id = int(data.get("room_id"))
+            page = int(data.get("page", 1))
+            page_size = min(int(data.get("page_size", 50)), 100)
+            raw_cursor = data.get("cursor")
+            cursor = int(raw_cursor) if raw_cursor is not None else None
+        except (TypeError, ValueError):
+            emit("error", {"message": "Invalid message query"})
+            return
 
         if not room_id:
             emit("error", {"message": "room_id required"})
@@ -269,6 +279,7 @@ def init_socket_events(socketio, db_session_factory):
                 user_id=user_id,
                 page=page,
                 page_size=page_size,
+                cursor=cursor,
             )
             emit("messages_history", result)
         except RoomAccessError as exc:

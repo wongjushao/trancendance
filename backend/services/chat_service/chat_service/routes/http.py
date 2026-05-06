@@ -163,6 +163,7 @@ def get_room_messages_endpoint(room_id: int):
         query = MessageHistoryQuerySchema(
             page=page,
             page_size=page_size,
+            cursor=cursor,
         )
     except RuntimeError as exc:
         return jsonify({"error": str(exc)}), 503
@@ -179,7 +180,7 @@ def get_room_messages_endpoint(room_id: int):
             user_id=user_id,
             page=query.page,
             page_size=query.page_size,
-            cursor=cursor,
+            cursor=query.cursor,
         )
         return jsonify(payload), 200
     except RoomAccessError as exc:

@@ -53,8 +53,9 @@ def create_message(
         
         logger.info(f"[MessageService] Message created with ID: {message.id}")
         
-        # Use centralized serialization
-        return serialize_message(message, sender, sender_id)
+        result = serialize_message(message, sender, sender_id)
+        session.commit()
+        return result
         
     except SQLAlchemyError as e:
         logger.error(f"[MessageService] Database error: {e}", exc_info=True)
@@ -70,8 +71,18 @@ def get_room_messages(
     page_size: int = 50,
     cursor: int | None = None
 ) -> dict:
-    """Get messages for a room with cursor-based pagination."""
-    logger.info(f"[MessageService] Getting messages for room {room_id}, user {user_id}, page {page}")
+    """Get room messages in chronological order.
+
+    Without a cursor, the latest page is returned. With a cursor, older
+    messages with IDs lower than the cursor are returned for upward scrolling.
+    """
+    logger.info(
+        "[MessageService] Getting messages for room %s, user %s, page %s, cursor %s",
+        room_id,
+        user_id,
+        page,
+        cursor,
+    )
     
     # Verify user is a member
     is_member = session.query(ChatRoomMember).filter(
@@ -90,28 +101,20 @@ def get_room_messages(
         .filter(Message.room_id == room_id)
     )
 
-    if cursor:
-        # Cursor-based pagination: get messages after cursor
-        query = (
-            base_query
-            .filter(Message.id > cursor)
-            .order_by(Message.id.asc())
-        )
-        messages_with_senders = query.limit(page_size).all()
-        has_more = len(messages_with_senders) == page_size
-        next_cursor = messages_with_senders[-1][0].id if has_more else None
+    query = base_query.order_by(Message.id.desc())
+    if cursor is not None:
+        query = query.filter(Message.id < cursor)
     else:
-        # Page-based pagination (legacy)
-        offset = (page - 1) * page_size
-        query = base_query.order_by(Message.id.desc()).offset(offset).limit(page_size)
-        messages_with_senders = query.all()
-        # Reverse to get chronological order
-        messages_with_senders = list(reversed(messages_with_senders))
-        
-        # Get total count
-        total = session.query(Message).filter(Message.room_id == room_id).count()
-        next_cursor = None
-        has_more = (page * page_size) < total
+        # Keep the legacy page parameter working for clients that still send it.
+        query = query.offset((page - 1) * page_size)
+
+    messages_with_senders = query.limit(page_size + 1).all()
+    has_more = len(messages_with_senders) > page_size
+    messages_with_senders = messages_with_senders[:page_size]
+    messages_with_senders = list(reversed(messages_with_senders))
+    next_cursor = messages_with_senders[0][0].id if has_more and messages_with_senders else None
+
+    total = session.query(Message).filter(Message.room_id == room_id).count()
     
     # Process messages using centralized serialization
     result_messages = []
@@ -123,6 +126,7 @@ def get_room_messages(
     return {
         "messages": result_messages,
         "total": len(result_messages),
+        "total_count": total,
         "page": page,
         "page_size": page_size,
         "next_cursor": next_cursor,
