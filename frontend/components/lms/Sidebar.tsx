@@ -144,8 +144,8 @@ export function Sidebar({ user }: SidebarProps) {
       { href: "/analytics", label: "Analytics", icon: BarChart3 },
     ];
 
-    // Add organization admin link for org_admin users
-    if (roleData.role === "org_admin" && roleData.organizationId) {
+    // Add organization admin link for admin users
+    if (roleData.role === "admin" && roleData.organizationId) {
       baseItems.splice(2, 0, {  // Changed from 3 to 2 - inserts after Dashboard and Organizations
         href: `/organizations/${roleData.organizationId}/admin`,
         label: "Admin Panel",

@@ -74,7 +74,7 @@ const STEP_LABELS = ["Profile", "Personal & Career", "Organization", "Interests"
 const ROLES: { value: UserRole; label: string; description: string }[] = [
   { value: 'student', label: 'Student', description: 'Learn at your own pace, take courses, and earn certificates.' },
   { value: 'teacher', label: 'Teacher', description: 'Create courses, share knowledge, and mentor students.' },
-  { value: 'org_admin', label: 'Organization Admin', description: 'Manage your organization\'s members, courses, and settings.' },
+  { value: 'admin', label: 'Organization Admin', description: 'Manage your organization\'s members, courses, and settings.' },
 ];
 
 // Types
@@ -476,11 +476,11 @@ export default function OnboardingPage() {
 
     // Set role data after successful registration
     let role: UserRole;
-    let pendingRole: 'teacher' | 'org_admin' | null = null;
+    let pendingRole: 'teacher' | 'admin' | null = null;
 
-    if (formData.desiredRole === 'org_admin') {
-      role = 'pending_org_admin';
-      pendingRole = 'org_admin';
+    if (formData.desiredRole === 'admin') {
+      role = 'pending_admin';
+      pendingRole = 'admin';
     } else if (formData.desiredRole === 'teacher') {
       role = 'pending_teacher';
       pendingRole = 'teacher';
@@ -985,7 +985,7 @@ export default function OnboardingPage() {
                           ))}
                         </div>
                         
-                        {formData.desiredRole === "org_admin" && (
+                        {formData.desiredRole === "admin" && (
                           <div className="mt-3 p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl">
                             <p className="text-xs text-blue-400">
                               After completing onboarding, you'll be asked to set up your organization.
@@ -1005,7 +1005,7 @@ export default function OnboardingPage() {
                         <p className="text-[#A0A0B5]">
                           {formData.desiredRole === "teacher" 
                             ? "Select the organization where you'd like to teach. Your request will be sent to the organization admin for approval."
-                            : formData.desiredRole === "org_admin"
+                            : formData.desiredRole === "admin"
                             ? "You'll create a new organization after onboarding. Admin privileges will be activated after verification."
                             : "You can join organizations later from your dashboard."}
                         </p>
@@ -1106,7 +1106,7 @@ export default function OnboardingPage() {
                             </div>
                           )}
                         </div>
-                      ) : formData.desiredRole === "org_admin" ? (
+                      ) : formData.desiredRole === "admin" ? (
                         <div className="p-6 bg-purple-500/5 border border-purple-500/20 rounded-xl text-center">
                           <Building2 className="w-12 h-12 text-purple-400 mx-auto mb-3" />
                           <p className="text-white font-medium mb-2">You'll create a new organization</p>

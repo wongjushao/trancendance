@@ -98,7 +98,7 @@ export default function AssignmentsPage() {
   const [feedback, setFeedback] = useState("");
   const [submittingGrade, setSubmittingGrade] = useState(false);
 
-  const isTeacher = roleData.role === "teacher" || roleData.role === "org_admin";
+  const isTeacher = roleData.role === "teacher" || roleData.role === "admin";
 
   useEffect(() => {
     if (isTeacher) {

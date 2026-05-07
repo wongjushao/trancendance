@@ -116,8 +116,8 @@ export default function CourseStudentsPage() {
   const router = useRouter();
   const courseId = params.id as string;
   const { roleData } = useRole();
-  const isTeacher = roleData.role === "teacher" || roleData.role === "org_admin";
-  const isAdmin = roleData.role === "org_admin";
+  const isTeacher = roleData.role === "teacher" || roleData.role === "admin";
+  const isAdmin = roleData.role === "admin";
 
   const [students, setStudents] = useState<Student[]>([]);
   const [course, setCourse] = useState<CourseData | null>(null);
@@ -297,7 +297,6 @@ export default function CourseStudentsPage() {
         return;
       }
 
-      // FIX: Remove 'email' from the select - it doesn't exist in profiles
       const { data: classMembers, error: membersError } = await supabase
         .from('class_members')
         .select(`
@@ -409,7 +408,29 @@ export default function CourseStudentsPage() {
         }
       }
 
-      // Build student list - FIX: Use username instead of email
+      // NEW: Fetch real emails from backend
+      const { data: { session } } = await supabase.auth.getSession();
+      let emailMap: Record<string, string> = {};
+      
+      try {
+        const emailResponse = await fetch('/api/org/users/batch-emails', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session?.access_token}`,
+          },
+          body: JSON.stringify({ user_ids: userIds }),
+        });
+        
+        if (emailResponse.ok) {
+          const emailData = await emailResponse.json();
+          emailMap = emailData.users || {};
+        }
+      } catch (emailError) {
+        console.error('Error fetching emails:', emailError);
+      }
+
+      // Build student list with real emails
       const studentList: Student[] = classMembers.map(cm => {
         const profile = cm.profiles as unknown as Profile;
         const progress = progressByUser[cm.user_id] || { completed: 0, total: totalLessons };
@@ -420,15 +441,17 @@ export default function CourseStudentsPage() {
           ? Math.round(userSubmissions.reduce((sum, s) => sum + s.grade, 0) / userSubmissions.length)
           : 0;
 
-        // Use username or build name from first_name/last_name
         const displayName = profile?.first_name 
           ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() 
           : profile?.username || 'Unknown';
 
+        // Use real email from auth.users, fallback to username
+        const userEmail = emailMap[cm.user_id] || profile?.username || '';
+
         return {
           id: cm.user_id,
           name: displayName,
-          email: profile?.username || '', // Use username as email fallback
+          email: userEmail,  // Now this will be the full email!
           avatar: profile?.avatar_url || undefined,
           enrolled_at: cm.enrolled_at,
           progress: progressPercent,
@@ -480,9 +503,10 @@ export default function CourseStudentsPage() {
     }
   };
 
+  // Replace the handleEnrollStudent function with this:
   const handleEnrollStudent = async () => {
     if (!enrollData.email) {
-      toast.error("Please enter a username or email");
+      toast.error("Please enter an email address");
       return;
     }
 
@@ -491,111 +515,63 @@ export default function CourseStudentsPage() {
       return;
     }
 
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@([^\s@]+\.)+[^\s@]+$/;
+    if (!emailRegex.test(enrollData.email)) {
+      toast.error("Please enter a valid email address");
+      return;
+    }
+
     setEnrolling(true);
-    const supabase = getSupabaseBrowserClient();
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
-
-      // Check if course offering exists and has capacity
-      const { data: offering, error: offeringError } = await supabase
-        .from('course_classes')
-        .select('id, max_students')
-        .eq('id', enrollData.offeringId)
-        .single();
-
-      if (offeringError || !offering) {
-        toast.error('Selected course offering not found');
+      const supabase = getSupabaseBrowserClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        toast.error("You must be logged in");
         setEnrolling(false);
         return;
       }
 
-      // Check capacity if max_students is set
-      if (offering.max_students) {
-        const { count, error: countError } = await supabase
-          .from('class_members')
-          .select('id', { count: 'exact', head: true })
-          .eq('course_class_id', offering.id);
+      // Call the backend endpoint to handle everything
+      const response = await fetch('/api/org-service/users/enroll', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          email: enrollData.email.trim(),
+          course_class_id: enrollData.offeringId,
+        }),
+      });
 
-        if (countError) throw countError;
+      const data = await response.json();
 
-        if (count && count >= offering.max_students) {
-          toast.error(`This course offering has reached its maximum capacity (${offering.max_students} students)`);
-          setEnrolling(false);
-          return;
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to enroll student");
+      }
+
+      if (data.success) {
+        // Show appropriate success message
+        if (data.user?.added_to_organization) {
+          toast.success(`${data.user.first_name || data.user.username || data.user.email} has been added to the organization and enrolled in the course!`);
+        } else {
+          toast.success(data.message);
         }
-      }
-
-      // Search by username OR try as email (for backward compatibility)
-      let existingUser = null;
-      
-      // First, try to find by username
-      const { data: userByUsername, error: usernameError } = await supabase
-        .from('profiles')
-        .select('id, username, first_name, last_name')
-        .eq('username', enrollData.email)  // Using 'username' column
-        .maybeSingle();
-      
-      if (!usernameError && userByUsername) {
-        existingUser = userByUsername;
+        
+        // Refresh student list
+        await fetchStudents();
+        setShowEnrollModal(false);
+        setEnrollData({ email: "", offeringId: courseOfferings[0]?.id || 0 });
       } else {
-        // If not found by username, try to find by email using a custom function
-        // Since email isn't in profiles, we need to check auth.users
-        // For now, just show error
-        toast.error(`User "${enrollData.email}" not found. Please use their username.`);
-        setEnrolling(false);
-        return;
-      }
-      
-      if (!existingUser) {
-        toast.error(`User with username "${enrollData.email}" does not exist. They need to register first.`);
-        setEnrolling(false);
-        return;
+        throw new Error(data.error || "Failed to enroll student");
       }
 
-      // Check if already enrolled in this offering
-      const { data: existingEnrollment, error: enrollmentCheckError } = await supabase
-        .from('class_members')
-        .select('id')
-        .eq('course_class_id', offering.id)
-        .eq('user_id', existingUser.id)
-        .maybeSingle();
-
-      if (enrollmentCheckError) throw enrollmentCheckError;
-
-      if (existingEnrollment) {
-        toast.error('This student is already enrolled in this course offering');
-        setEnrolling(false);
-        return;
-      }
-
-      // Enroll the user
-      const { error: enrollError } = await supabase
-        .from('class_members')
-        .insert({
-          course_class_id: offering.id,
-          user_id: existingUser.id,
-          role: 'student',
-          enrolled_at: new Date().toISOString(),
-        });
-
-      if (enrollError) throw enrollError;
-
-      const studentName = existingUser.first_name 
-        ? `${existingUser.first_name || ''} ${existingUser.last_name || ''}`.trim() 
-        : existingUser.username;
-      
-      toast.success(`${studentName} has been enrolled in the course!`);
-
-      // Refresh student list
-      await fetchStudents();
-      setShowEnrollModal(false);
-      setEnrollData({ email: "", offeringId: courseOfferings[0]?.id || 0 });
-
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error enrolling student:', error);
-      toast.error('Failed to enroll student. Please try again.');
+      toast.error(error.message || "Failed to enroll student. Please try again.");
     } finally {
       setEnrolling(false);
     }
@@ -1056,27 +1032,27 @@ export default function CourseStudentsPage() {
       <Dialog open={showEnrollModal} onOpenChange={setShowEnrollModal}>
         <DialogContent className="bg-gray-900 border-gray-800 max-w-md">
           <DialogHeader>
-            <DialogTitle className="text-white">Enroll Existing Student</DialogTitle>
+            <DialogTitle className="text-white">Enroll Student</DialogTitle>
           </DialogHeader>
           
           <div className="space-y-4 py-4">
             <div>
-              <Label htmlFor="username">Student Username</Label>
+              <Label htmlFor="email">Student Email <span className="text-red-400">*</span></Label>
               <Input
-                id="username"
-                type="text"
-                placeholder="john_doe"  // Changed from email placeholder
+                id="email"
+                type="email"
+                placeholder="student@example.com"
                 value={enrollData.email}
                 onChange={(e) => setEnrollData({ ...enrollData, email: e.target.value })}
                 className="mt-1"
               />
               <p className="text-xs text-gray-400 mt-1">
-                Enter the student's username (not email). The student must already have an account.
+                Enter the student's email address. They will be automatically added to the organization if needed.
               </p>
             </div>
 
             <div>
-              <Label htmlFor="offering">Course Offering</Label>
+              <Label htmlFor="offering">Course Offering <span className="text-red-400">*</span></Label>
               <Select
                 value={enrollData.offeringId.toString()}
                 onValueChange={(value) => setEnrollData({ ...enrollData, offeringId: parseInt(value) })}
@@ -1102,9 +1078,13 @@ export default function CourseStudentsPage() {
             
             <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
               <p className="text-sm text-blue-400">
-                Enter the student's <strong>username</strong> to enroll them. 
-                The student must have an existing account.
+                The student will be:
               </p>
+              <ul className="text-xs text-blue-300 mt-2 space-y-1 list-disc list-inside">
+                <li>Automatically added to the organization (if not already a member)</li>
+                <li>Enrolled in the selected course offering</li>
+                <li>Notified by email (if email service is configured)</li>
+              </ul>
             </div>
           </div>
           
@@ -1121,7 +1101,7 @@ export default function CourseStudentsPage() {
             <GlowButton
               onClick={handleEnrollStudent}
               isLoading={enrolling}
-              disabled={courseOfferings.length === 0}
+              disabled={courseOfferings.length === 0 || !enrollData.email}
             >
               <UserPlus className="w-4 h-4 mr-2" />
               Enroll Student

@@ -7,7 +7,7 @@ from prometheus_client import Counter
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from backend.common.db import create_engine_and_session
-from backend.services.org_service.org_service.routes import courses_ns, health_ns, metrics_ns, organizations_ns
+from backend.services.org_service.org_service.routes import courses_ns, health_ns, metrics_ns, organizations_ns, users_ns
 
 
 REQUESTS = Counter("org_requests_total", "Total org service HTTP requests")
@@ -70,6 +70,7 @@ def create_app():
         metrics_ns,
         organizations_ns,
         courses_ns,
+        users_ns,
     ):
         api.add_namespace(namespace)
 

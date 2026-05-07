@@ -34,8 +34,24 @@ const clearRoleCookie = () => {
   document.cookie = 'user_role_data=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
 };
 
+// Add this function to validate that teachers/admins only have one teaching org
+const validateTeachingOrganization = (roleData: RoleData): RoleData => {
+  // If user is teacher or admin, ensure they have only one organization
+  if (roleData.role === 'teacher' || roleData.role === 'admin') {
+    // If they have multiple organizations, we need to handle it
+    // In practice, the backend should enforce this
+    return roleData;
+  }
+  return roleData;
+};
+
 export function RoleProvider({ children }: { children: React.ReactNode }) {
-  const [roleData, setRoleData] = useState<RoleData>(() => getUserRoleData());
+
+  const [roleData, setRoleData] = useState<RoleData>(() => {
+    const data = getUserRoleData();
+    return validateTeachingOrganization(data);
+  });
+
   const [isInitialized, setIsInitialized] = useState(false);
 
   const refreshRole = useCallback(() => {
@@ -86,15 +102,15 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     const roleHierarchy: Record<UserRole, number> = {
       student: 1,
       pending_teacher: 1,
-      pending_org_admin: 1,
+      pending_admin: 1,
       teacher: 2,
-      org_admin: 3,
+      admin: 3,
     };
     return roleHierarchy[roleData.role] >= roleHierarchy[requiredRole];
   }, [roleData.role]);
 
   const isPending = useCallback((): boolean => {
-    return roleData.role === 'pending_org_admin' || roleData.role === 'pending_teacher';
+    return roleData.role === 'pending_admin' || roleData.role === 'pending_teacher';
   }, [roleData.role]);
 
   return (

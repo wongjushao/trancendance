@@ -4,7 +4,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Search, BookOpen, Users, Plus, Clock, ChevronRight, Eye, Edit, Archive, RotateCcw, AlertCircle, BarChart3, Badge } from "lucide-react";
+import { Search, BookOpen, Users, Plus, Clock, ChevronRight, Eye, Edit, Archive, RotateCcw, AlertCircle, BarChart3, Badge, Building2 } from "lucide-react";
 import { GlowCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
 import { Input } from "@/components/ui/input";
@@ -56,10 +56,6 @@ export default function CoursesPage() {
   const [archivedCourses, setArchivedCourses] = useState<Course[]>([]);
   const [userId, setUserId] = useState<string | null>(null);
 
-  // Add for organization filtering
-  const [selectedOrgFilter, setSelectedOrgFilter] = useState<number | null>(null);
-  const [userOrganizations, setUserOrganizations] = useState<Array<{ id: number; name: string }>>([]);
-  
   // Archive/Unarchive modal states
   const [archiveModalOpen, setArchiveModalOpen] = useState(false);
   const [unarchiveModalOpen, setUnarchiveModalOpen] = useState(false);
@@ -69,7 +65,7 @@ export default function CoursesPage() {
     fetchData();
   }, []);
 
-// Replace the entire fetchData function in courses/page.tsx with this simplified version:
+  // Replace the entire fetchData function in courses/page.tsx with this simplified version:
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -90,38 +86,53 @@ export default function CoursesPage() {
       
       const profileMap = new Map(profiles?.map(p => [p.id, p]) || []);
       
-      // 2. Get unique enrolled course IDs from BOTH tables
+      // 2. Get unique enrolled course IDs (ONLY as STUDENT)
       const enrolledCourseIds = new Set<number>();
       
-      // 2a. From course_members (direct course enrollment)
+      // 2a. From course_members (direct course enrollment) - ONLY where role is 'student'
       const { data: courseMembers } = await supabase
         .from("course_members")
         .select("course_id")
         .eq("user_id", user.id)
+        .eq("role", "student")  // ← ADD THIS - ONLY students
         .eq("status", "active");
       
       courseMembers?.forEach(cm => {
         enrolledCourseIds.add(cm.course_id);
       });
       
-      // 2b. From class_members (offering-based enrollment)
+      // 2b. From class_members (offering-based enrollment) - ONLY where role is 'student'
       const { data: classMembers } = await supabase
         .from("class_members")
         .select(`
           course_class_id,
           course_classes!inner(course_id)
         `)
-        .eq("user_id", user.id);
+        .eq("user_id", user.id)
+        .eq("role", "student");  // ← ADD THIS - ONLY students
       
+      console.log("=== CLASS MEMBERS DEBUG ===");
+      console.log("User ID:", user.id);
+      console.log("Class members error:", classMembersError);
+      console.log("Class members found:", classMembers?.length);
+      console.log("Class members data:", JSON.stringify(classMembers, null, 2));
+
+      // Also check all class members regardless of role to see what exists
+      const { data: allClassMembers } = await supabase
+        .from("class_members")
+        .select("*")
+        .eq("user_id", user.id);
+      console.log("ALL class members (any role):", JSON.stringify(allClassMembers, null, 2));
+            
       classMembers?.forEach(cm => {
         if (cm.course_classes?.course_id) {
           enrolledCourseIds.add(cm.course_classes.course_id);
         }
       });
       
-      console.log("Unique enrolled course IDs:", Array.from(enrolledCourseIds));
+      console.log("Unique enrolled course IDs (as student):", Array.from(enrolledCourseIds));
       
-      // 3. Fetch enrolled course details
+      // 3. Fetch enrolled course details (only as student)
       const enrolledCoursesData: EnrolledCourse[] = [];
       
       if (enrolledCourseIds.size > 0) {
@@ -133,26 +144,17 @@ export default function CoursesPage() {
           .eq("status", "published");
         
         if (coursesData) {
-          // For each course, calculate progress
           for (const course of coursesData) {
-            // Get total lessons count directly - simpler approach
+            // Calculate progress (same as before)
             let totalLessons = 0;
-            
-            // Get modules for this course
             const { data: modules } = await supabase
               .from("modules")
-              .select(`
-                id,
-                classes ( id )
-              `)
+              .select(`id, classes ( id )`)
               .eq("course_id", course.id);
             
             if (modules && modules.length > 0) {
-              // Get all class IDs
               const classIds = modules.flatMap(m => m.classes?.map((c: any) => c.id) || []);
-              
               if (classIds.length > 0) {
-                // Get lesson count for these classes
                 const { count } = await supabase
                   .from("lessons")
                   .select("id", { count: "exact", head: true })
@@ -161,25 +163,13 @@ export default function CoursesPage() {
               }
             }
             
-            // Get completed lessons count for this user in this course
             let completedLessons = 0;
-            
-            // Get all lessons for this course first
             const { data: courseLessons } = await supabase
               .from("lessons")
-              .select(`
-                id,
-                classes!inner (
-                  module_id,
-                  modules!inner (
-                    course_id
-                  )
-                )
-              `)
+              .select(`id, classes!inner ( module_id, modules!inner ( course_id ) )`)
               .eq("classes.modules.course_id", course.id);
             
             const lessonIds = courseLessons?.map(l => l.id) || [];
-            
             if (lessonIds.length > 0) {
               const { data: completedProgress } = await supabase
                 .from("lesson_progress")
@@ -187,7 +177,6 @@ export default function CoursesPage() {
                 .eq("user_id", user.id)
                 .eq("status", "completed")
                 .in("lesson_id", lessonIds);
-              
               completedLessons = completedProgress?.length || 0;
             }
             
@@ -216,54 +205,12 @@ export default function CoursesPage() {
       setEnrolledCourses(enrolledCoursesData);
       console.log("Enrolled courses count:", enrolledCoursesData.length);
       
-      // 4. Get enrolled course IDs for discover filter
+      // 4. Get enrolled course IDs for discover filter (still exclude enrolled)
       const enrolledIds = Array.from(enrolledCourseIds);
       
-      // 5. Get user's organization memberships for visibility filtering
-      const { data: orgMemberships } = await supabase
-        .from("organization_members")
-        .select("organization_id")
-        .eq("user_id", user.id)
-        .not("member_role", "eq", "pending");
-      
-      const userOrgIds = orgMemberships?.map(m => m.organization_id) || [];
-      
-      // 6. Fetch discoverable courses
-      let discoverQuery = supabase
-        .from("courses")
-        .select("*")
-        .eq("status", "published");
-      
-      // Exclude enrolled courses
-      if (enrolledIds.length > 0) {
-        discoverQuery = discoverQuery.not("id", "in", `(${enrolledIds.join(",")})`);
-      }
-      
-      // Apply visibility filter
-      if (userOrgIds.length > 0) {
-        discoverQuery = discoverQuery.or(
-          `visibility.eq.public,` +
-          `and(visibility.eq.org,organization_id.in.(${userOrgIds.join(",")}))`
-        );
-      } else {
-        discoverQuery = discoverQuery.eq("visibility", "public");
-      }
-      
-      const { data: discoverData } = await discoverQuery;
-      
-      if (discoverData) {
-        const formattedCourses = discoverData.map(course => ({
-          ...course,
-          instructor_name: getInstructorName(course.created_by, profileMap),
-          instructor_avatar: getInstructorAvatar(course.created_by, profileMap),
-          enrolled: false,
-        }));
-        setDiscoverCourses(formattedCourses);
-        console.log("Discover courses count:", formattedCourses.length);
-      }
-      
-      // 7. Fetch created courses (for teachers/admins)
-      if (roleData.role === "teacher" || roleData.role === "org_admin") {
+      // 5. Get user's courses where they are instructor/creator (for created tab)
+      // This is separate from enrolled courses
+      if (roleData.role === "teacher" || roleData.role === "admin") {
         const { data: createdData } = await supabase
           .from("courses")
           .select("*")
@@ -296,39 +243,61 @@ export default function CoursesPage() {
         }
       }
       
+      // 6. Get user's organization memberships for visibility filtering
+      const { data: orgMemberships } = await supabase
+        .from("organization_members")
+        .select("organization_id")
+        .eq("user_id", user.id)
+        .not("member_role", "eq", "pending");
+      
+      const userOrgIds = orgMemberships?.map(m => m.organization_id) || [];
+      
+      // 7. Fetch discoverable courses
+      // Don't exclude created courses from discover - they should be discoverable by others
+      let discoverQuery = supabase
+        .from("courses")
+        .select("*")
+        .eq("status", "published");
+      
+      // Exclude enrolled courses (as student) from discover
+      if (enrolledIds.length > 0) {
+        discoverQuery = discoverQuery.not("id", "in", `(${enrolledIds.join(",")})`);
+      }
+      
+      // Also exclude courses created by the user? Optional - they can see their own courses in "My Created Courses" tab
+      // For discover, we typically don't show your own courses
+      discoverQuery = discoverQuery.neq("created_by", user.id);
+      
+      // Apply visibility filter
+      if (userOrgIds.length > 0) {
+        discoverQuery = discoverQuery.or(
+          `visibility.eq.public,` +
+          `and(visibility.eq.org,organization_id.in.(${userOrgIds.join(",")}))`
+        );
+      } else {
+        discoverQuery = discoverQuery.eq("visibility", "public");
+      }
+      
+      const { data: discoverData } = await discoverQuery;
+      
+      if (discoverData) {
+        const formattedCourses = discoverData.map(course => ({
+          ...course,
+          instructor_name: getInstructorName(course.created_by, profileMap),
+          instructor_avatar: getInstructorAvatar(course.created_by, profileMap),
+          enrolled: false,
+        }));
+        setDiscoverCourses(formattedCourses);
+        console.log("Discover courses count:", formattedCourses.length);
+      }
+      
     } catch (error) {
       console.error("Error fetching courses:", error);
     } finally {
       setLoading(false);
     }
   };
-
-  // Fetch user's organizations for filtering
-  useEffect(() => {
-    const fetchUserOrgs = async () => {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) return;
-      
-      const { data: memberships } = await supabase
-        .from("organization_members")
-        .select("organization_id, organizations(id, name)")
-        .eq("user_id", user.id)
-        .in("member_role", ["admin", "sub_admin", "teacher"]);
-      
-      if (memberships) {
-        const orgs = memberships.map(m => ({
-          id: m.organization_id,
-          name: m.organizations?.name || `Organization ${m.organization_id}`
-        }));
-        setUserOrganizations(orgs);
-      }
-    };
     
-    fetchUserOrgs();
-  }, []);
-  
   const getInstructorName = (createdBy: string, profileMap: Map<string, any>): string => {
     const profile = profileMap.get(createdBy);
     if (profile) {
@@ -352,11 +321,6 @@ export default function CoursesPage() {
         course.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (course.description && course.description.toLowerCase().includes(searchQuery.toLowerCase()))
       );
-    }
-    
-    // Apply organization filter for created courses only
-    if (selectedOrgFilter !== null) {
-      filtered = filtered.filter(course => course.organization_id === selectedOrgFilter);
     }
     
     return filtered;
@@ -531,12 +495,15 @@ export default function CoursesPage() {
   };
 
   const getOrgName = (orgId: number): string => {
-    const org = userOrganizations.find(o => o.id === orgId);
-    return org?.name || `Org ${orgId}`;
+    // Since teachers/admins are only in one org, we can use roleData
+    if ((roleData.role === 'teacher' || roleData.role === 'admin') && roleData.organizationId === orgId) {
+      return roleData.organizationName || `Org ${orgId}`;
+    }
+    return `Org ${orgId}`;
   };
 
-  const isTeacher = roleData.role === "teacher" || roleData.role === "org_admin";
-  const isStudent = roleData.role === "student" || roleData.role === "teacher";
+  const isTeacher = roleData.role === "teacher" || roleData.role === "admin";
+  const isStudent = roleData.role === "student";
   const hasArchivedCourses = archivedCourses.length > 0;
 
   return (
@@ -581,8 +548,11 @@ export default function CoursesPage() {
       ) : (
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)} className="w-full">
           <TabsList className="bg-gray-900/50 border border-gray-800">
-            {isStudent && enrolledCourses.length > 0 && (
-              <TabsTrigger value="my">My Courses</TabsTrigger>
+          // Change the tab visibility condition:
+          <TabsList className="bg-gray-900/50 border border-gray-800">
+            {/* Show My Courses if user has ANY student enrollments, regardless of current role */}
+            {enrolledCourses.length > 0 && (
+              <TabsTrigger value="my">My Courses ({enrolledCourses.length})</TabsTrigger>
             )}
             <TabsTrigger value="discover">Discover</TabsTrigger>
             {isTeacher && createdCourses.length > 0 && (
@@ -592,6 +562,7 @@ export default function CoursesPage() {
               <TabsTrigger value="archived">Archived</TabsTrigger>
             )}
           </TabsList>
+
 
           {/* My Courses Tab - UNCHANGED */}
           {isStudent && (
@@ -728,35 +699,17 @@ export default function CoursesPage() {
           {/* Created Courses Tab - ADD Archive Button ONLY */}
           {isTeacher && (
             <TabsContent value="created" className="mt-6">
-              {/* Add Organization Filter Bar */}
-              <div className="mb-6">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm text-gray-400 mr-2">Filter by organization:</span>
-                  <button
-                    onClick={() => setSelectedOrgFilter(null)}
-                    className={`px-3 py-1.5 rounded-lg text-sm transition-all ${
-                      selectedOrgFilter === null
-                        ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
-                        : 'bg-slate-800/50 text-gray-400 hover:bg-slate-800 border border-slate-700'
-                    }`}
-                  >
-                    All
-                  </button>
-                  {userOrganizations.map(org => (
-                    <button
-                      key={org.id}
-                      onClick={() => setSelectedOrgFilter(org.id)}
-                      className={`px-3 py-1.5 rounded-lg text-sm transition-all ${
-                        selectedOrgFilter === org.id
-                          ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
-                          : 'bg-slate-800/50 text-gray-400 hover:bg-slate-800 border border-slate-700'
-                      }`}
-                    >
-                      {org.name}
-                    </button>
-                  ))}
+  
+              {/* Show organization name as info instead - ADD THIS */}
+              {roleData.organizationId && (
+                <div className="mb-4 p-3 bg-purple-500/10 border border-purple-500/30 rounded-lg flex items-center gap-2">
+                  <Building2 className="w-4 h-4 text-purple-400" />
+                  <span className="text-sm text-gray-300">
+                    Teaching organization: <span className="text-purple-400 font-medium">{roleData.organizationName || `Organization ${roleData.organizationId}`}</span>
+                  </span>
                 </div>
-              </div>
+              )}
+
 
               {filteredCreatedCourses.length > 0 ? (
                 <div className="space-y-4">

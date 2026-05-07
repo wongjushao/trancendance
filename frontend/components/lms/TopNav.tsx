@@ -2,7 +2,7 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { Bell, Search, User, ChevronDown, Settings, CreditCard, LogOut, Award, BookOpen, UserCircle, AlertTriangle, X } from "lucide-react";
+import { Bell, Search, User, ChevronDown, Settings, CreditCard, LogOut, Award, BookOpen, UserCircle, AlertTriangle, X, Building2 } from "lucide-react";
 import { Input } from "../ui/input";
 import SignOutButton from "../SignOutButton";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
@@ -346,7 +346,15 @@ export function TopNav({ user }: TopNavProps) {
                 </div>
               )}
             </div>
-          </div>
+          )}
+
+          {/* For students with an organization - smaller display */}
+          {roleData.organizationName && roleData.role === "student" && (
+            <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1 bg-gray-800/50 rounded-lg border border-gray-700">
+              <Building2 className="w-3.5 h-3.5 text-gray-400" />
+              <span className="text-xs text-gray-300">{roleData.organizationName}</span>
+            </div>
+          )}
 
           {/* Actions */}
           <div className="flex items-center gap-4">
