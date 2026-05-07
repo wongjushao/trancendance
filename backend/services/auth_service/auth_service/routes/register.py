@@ -8,7 +8,8 @@ import jwt
 import requests
 from flask import current_app, jsonify, request
 from flask_restx import Namespace, Resource
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from backend.common.models import Profile, Organization, OrganizationMember, OrganizationDomain
 from backend.services.auth_service.auth_service.utils.supabase_jwt import extract_bearer_token, verify_supabase_jwt
@@ -61,6 +62,13 @@ def _parse_interests(value: list | None) -> list | None:
     if isinstance(value, list):
         return [str(item) for item in value if item]
     return None
+
+
+def _normalize_username(value: object) -> str | None:
+    if value is None:
+        return None
+    username = str(value).strip()
+    return username or None
 
 
 # ── Serialiser ────────────────────────────────────────────────────────────────
@@ -142,6 +150,7 @@ def register_profile():
     
     # Get job title - support both 'job_title' and 'role' field names
     job_title = payload.get("job_title") or payload.get("role") or None
+    username = _normalize_username(payload.get("username"))
 
     # ── Upsert the profile row ────────────────────────────────────────────────
     session = db_session()
@@ -151,8 +160,20 @@ def register_profile():
             profile = Profile(id=user_id)
             session.add(profile)
 
+        if username:
+            duplicate = (
+                session.query(Profile.id)
+                .filter(
+                    Profile.id != user_id,
+                    func.lower(Profile.username) == username.lower(),
+                )
+                .first()
+            )
+            if duplicate:
+                return jsonify({"error": "Username is already taken"}), 409
+
         # Update all fields (combining both versions)
-        profile.username     = payload.get("username")       or profile.username
+        profile.username     = username                      or profile.username
         profile.first_name   = payload.get("first_name")     or profile.first_name
         profile.last_name    = payload.get("last_name")      or profile.last_name
         profile.phone_number = payload.get("phone_number")   or profile.phone_number
@@ -203,6 +224,9 @@ def register_profile():
             "profile": serialize_profile(profile),
         }), 201
 
+    except IntegrityError:
+        session.rollback()
+        return jsonify({"error": "Username is already taken"}), 409
     except SQLAlchemyError as exc:
         session.rollback()
         return jsonify({"error": str(exc)}), 500

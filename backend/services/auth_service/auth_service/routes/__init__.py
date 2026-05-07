@@ -2,6 +2,7 @@ from .account import account_ns
 from .auth import auth_ns
 from .avatar import avatar_ns
 from .docs import AUTH_API_DESCRIPTION, AUTH_API_TITLE, AUTH_API_VERSION, AUTH_DOC_PATH
+from .friends import friends_ns
 from .health import health_ns
 from .metadata import metadata_ns
 from .metrics import metrics_ns
@@ -18,6 +19,7 @@ __all__ = [
     "account_ns",
     "auth_ns",
     "avatar_ns",
+    "friends_ns",
     "health_ns",
     "metadata_ns",
     "metrics_ns",

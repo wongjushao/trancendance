@@ -2,15 +2,17 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Send, Loader2, Paperclip, Search, MessageCircle, User, Ban } from "lucide-react";
+import { Send, Loader2, Paperclip, Search, MessageCircle, User, Ban, Check, X } from "lucide-react";
 import { useChat } from "@/contexts/ChatContext";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 import { forceRefreshMessages, clearRoomCache } from "@/lib/chatViewSync";
 import { chatTimestampMs, formatChatDateKey } from "@/lib/chatTime";
+import { toast } from "sonner";
 
 interface Message {
   id: number | string;
@@ -23,6 +25,7 @@ interface Message {
   created_at: string;
   timestamp: string;
   is_me: boolean;
+  friend_request_status?: string;
 }
 
 interface ChatProfile {
@@ -42,6 +45,7 @@ interface ChatProfile {
 }
 
 export default function MessagesPage() {
+  const router = useRouter();
   const {
     rooms,
     currentRoom,
@@ -49,6 +53,7 @@ export default function MessagesPage() {
     isLoading,
     sendMessage,
     selectRoom,
+    loadMessages,
     isConnected,
     blockUser,
     unblockUser,
@@ -63,6 +68,7 @@ export default function MessagesPage() {
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileActionLoading, setProfileActionLoading] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState<ChatProfile | null>(null);
+  const [friendRequestActions, setFriendRequestActions] = useState<Record<string, "accepted" | "rejected" | "loading">>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
 
@@ -167,6 +173,52 @@ export default function MessagesPage() {
       setProfileActionLoading(false);
     }
   };
+
+  const openFullProfile = useCallback((profile: ChatProfile) => {
+    const identifier = profile.username || profile.display_name || profile.id;
+    setProfileOpen(false);
+    router.push(`/profile/${encodeURIComponent(identifier)}`);
+  }, [router]);
+
+  const respondToFriendRequest = useCallback(
+    async (message: Message, action: "accept" | "reject") => {
+      if (!accessToken) {
+        toast.error("Authentication error");
+        return;
+      }
+
+      setFriendRequestActions((prev) => ({ ...prev, [String(message.id)]: "loading" }));
+      try {
+        const response = await fetch(`/api/auth-service/friends/respond/${message.sender_id}`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ action }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to respond to friend request");
+        }
+
+        const status = data.status === "accepted" ? "accepted" : "rejected";
+        setFriendRequestActions((prev) => ({ ...prev, [String(message.id)]: status }));
+        toast.success(status === "accepted" ? "Friend request accepted" : "Friend request rejected");
+        if (currentRoom) {
+          await loadMessages(currentRoom.id, 1);
+        }
+      } catch (error) {
+        setFriendRequestActions((prev) => {
+          const next = { ...prev };
+          delete next[String(message.id)];
+          return next;
+        });
+        toast.error(error instanceof Error ? error.message : "Failed to respond to friend request");
+      }
+    },
+    [accessToken, currentRoom, loadMessages],
+  );
 
   const messagingBlocked =
     currentRoom?.type === "direct" &&
@@ -458,15 +510,51 @@ export default function MessagesPage() {
                               {msg.sender_name}
                             </button>
                           )}
-                          <div
-                            className={`px-3 py-2 md:px-4 md:py-2.5 rounded-2xl text-sm break-words whitespace-pre-wrap transition-shadow ${
-                              msg.is_me
-                                ? "bg-gradient-to-br from-purple-500 to-violet-600 text-white rounded-tr-sm shadow-lg shadow-purple-500/20 hover:shadow-purple-500/30"
-                                : "bg-[#252530] text-white rounded-tl-sm border border-white/10 hover:border-white/20"
-                            }`}
-                          >
-                            {msg.content}
-                          </div>
+                          {msg.message_type === "friend_request" && !msg.is_me ? (
+                            <div className="rounded-2xl rounded-tl-sm border border-purple-400/30 bg-purple-500/10 p-4 text-sm text-white">
+                              <p className="font-medium">{msg.content}</p>
+                              <p className="mt-1 text-xs text-[#A0A0B5]">Accept to become friends, or reject to decline the request.</p>
+                              {(friendRequestActions[String(msg.id)] || msg.friend_request_status) === "accepted" || (friendRequestActions[String(msg.id)] || msg.friend_request_status) === "rejected" ? (
+                                <p className="mt-3 text-xs font-medium text-purple-200">
+                                  Request {friendRequestActions[String(msg.id)] || msg.friend_request_status}
+                                </p>
+                              ) : (
+                                <div className="mt-3 flex gap-2">
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    onClick={() => respondToFriendRequest(msg, "accept")}
+                                    disabled={friendRequestActions[String(msg.id)] === "loading"}
+                                    className="h-8 rounded-full bg-green-600 px-3 text-xs text-white hover:bg-green-500"
+                                  >
+                                    <Check className="mr-1 h-3.5 w-3.5" />
+                                    Accept
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => respondToFriendRequest(msg, "reject")}
+                                    disabled={friendRequestActions[String(msg.id)] === "loading"}
+                                    className="h-8 rounded-full border-white/10 px-3 text-xs text-white hover:bg-white/10"
+                                  >
+                                    <X className="mr-1 h-3.5 w-3.5" />
+                                    Reject
+                                  </Button>
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div
+                              className={`px-3 py-2 md:px-4 md:py-2.5 rounded-2xl text-sm break-words whitespace-pre-wrap transition-shadow ${
+                                msg.is_me
+                                  ? "bg-gradient-to-br from-purple-500 to-violet-600 text-white rounded-tr-sm shadow-lg shadow-purple-500/20 hover:shadow-purple-500/30"
+                                  : "bg-[#252530] text-white rounded-tl-sm border border-white/10 hover:border-white/20"
+                              }`}
+                            >
+                              {msg.content}
+                            </div>
+                          )}
                           <span className="text-[10px] sm:text-xs text-[#6B6B80] mt-1 px-1">
                             {msg.timestamp}
                           </span>
@@ -560,7 +648,12 @@ export default function MessagesPage() {
               </div>
             ) : selectedProfile ? (
               <div className="mt-5 space-y-5">
-                <div className="flex items-center gap-4">
+                <button
+                  type="button"
+                  onClick={() => openFullProfile(selectedProfile)}
+                  className="flex w-full items-center gap-4 rounded-xl p-2 text-left transition-colors hover:bg-white/[0.04]"
+                  aria-label={`Open ${selectedProfile.display_name} full profile`}
+                >
                   <Avatar className="h-16 w-16 ring-1 ring-white/10">
                     {selectedProfile.avatar_url && <AvatarImage src={selectedProfile.avatar_url} />}
                     <AvatarFallback className="bg-gradient-to-br from-purple-500 to-violet-600 text-xl font-semibold text-white">
@@ -580,7 +673,7 @@ export default function MessagesPage() {
                       </p>
                     )}
                   </div>
-                </div>
+                </button>
 
                 {selectedProfile.bio && (
                   <p className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-sm text-[#E0E0F0]">

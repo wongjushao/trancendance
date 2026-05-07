@@ -45,6 +45,7 @@ interface Message {
   created_at: string;
   timestamp: string;
   is_me: boolean;
+  friend_request_status?: string;
 }
 
 interface IncomingSocketMessage {
@@ -67,6 +68,7 @@ interface ChatContextType {
   sendMessage: (content: string) => void;
   selectRoom: (room: ChatRoom | null) => void;
   loadMessages: (roomId: number, page?: number) => Promise<void>;
+  refreshRooms: () => Promise<ChatRoom[]>;
   blockUser: (profileId: string) => Promise<void>;
   unblockUser: (profileId: string) => Promise<void>;
   isConnected: boolean;
@@ -329,50 +331,46 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
 
   // ---------------- FETCH ROOMS ----------------
+  const refreshRooms = useCallback(async () => {
+    if (!accessToken) return [];
+
+    setIsLoading(true);
+    try {
+      const res = await fetch('/api/chat-service/rooms', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const data = await res.json();
+      const fetched: ChatRoom[] = data.rooms || [];
+      const unique = fetched.filter(
+        (room, idx, self) => idx === self.findIndex((r) => r.id === room.id),
+      );
+      setRooms(unique);
+
+      if (unique.length > 0 && !currentRoom) {
+        const savedId =
+          typeof window !== 'undefined' ? localStorage.getItem('last_room_id') : null;
+        let initial = unique[0];
+        if (savedId) {
+          const found = unique.find((r) => r.id === Number(savedId));
+          if (found) initial = found;
+        }
+        await selectRoom(initial);
+      }
+
+      return unique;
+    } catch (e) {
+      console.error('[ChatContext] fetchRooms error', e);
+      setRooms([]);
+      return [];
+    } finally {
+      setIsLoading(false);
+    }
+  }, [accessToken, currentRoom, selectRoom]);
+
   useEffect(() => {
     if (!accessToken || !isAuthReady) return;
-
-    let cancelled = false;
-
-    const fetchRooms = async () => {
-      setIsLoading(true);
-      try {
-        const res = await fetch('/api/chat-service/rooms', {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
-        const data = await res.json();
-        if (cancelled) return;
-
-        const fetched: ChatRoom[] = data.rooms || [];
-        const unique = fetched.filter(
-          (room, idx, self) => idx === self.findIndex((r) => r.id === room.id),
-        );
-        setRooms(unique);
-
-        if (unique.length > 0 && !currentRoom) {
-          const savedId =
-            typeof window !== 'undefined' ? localStorage.getItem('last_room_id') : null;
-          let initial = unique[0];
-          if (savedId) {
-            const found = unique.find((r) => r.id === Number(savedId));
-            if (found) initial = found;
-          }
-          await selectRoom(initial);
-        }
-      } catch (e) {
-        console.error('[ChatContext] fetchRooms error', e);
-        if (!cancelled) setRooms([]);
-      } finally {
-        if (!cancelled) setIsLoading(false);
-      }
-    };
-
-    fetchRooms();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accessToken, isAuthReady]);
+    void refreshRooms();
+  }, [accessToken, isAuthReady, refreshRooms]);
 
   // ---------------- SEND MESSAGE ----------------
   const sendMessage = useCallback(
@@ -510,6 +508,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         sendMessage,
         selectRoom,
         loadMessages,
+        refreshRooms,
         blockUser,
         unblockUser,
         isConnected,

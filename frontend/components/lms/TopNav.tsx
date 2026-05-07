@@ -16,6 +16,17 @@ interface TopNavProps {
   user: SupabaseUser;
 }
 
+interface UserSearchResult {
+  id: string;
+  username: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  display_name: string;
+  avatar_url: string | null;
+  job_title: string | null;
+  department: string | null;
+}
+
 // Confirmation Modal Component
 const ConfirmSignOutModal = ({ isOpen, onClose, onConfirm }: { isOpen: boolean; onClose: () => void; onConfirm: () => void }) => {
   if (!isOpen) return null;
@@ -29,7 +40,7 @@ const ConfirmSignOutModal = ({ isOpen, onClose, onConfirm }: { isOpen: boolean; 
           </div>
           <h3 className="text-lg font-semibold text-white text-center mb-2">Sign Out?</h3>
           <p className="text-sm text-gray-400 text-center mb-6">
-            Are you sure you want to sign out? You'll need to sign in again to access your courses and dashboard.
+            Are you sure you want to sign out? You&apos;ll need to sign in again to access your courses and dashboard.
           </p>
           <div className="flex gap-3">
             <GlowButton variant="outline" onClick={onClose} fullWidth>
@@ -55,6 +66,10 @@ export function TopNav({ user }: TopNavProps) {
   const [showSignOutModal, setShowSignOutModal] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [profileName, setProfileName] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [userResults, setUserResults] = useState<UserSearchResult[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [profileData, setProfileData] = useState<{
     first_name: string | null;
     last_name: string | null;
@@ -66,6 +81,7 @@ export function TopNav({ user }: TopNavProps) {
   });
   
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLDivElement>(null);
 
   // Fetch profile data for name display
   const fetchProfileData = async () => {
@@ -163,11 +179,65 @@ export function TopNav({ user }: TopNavProps) {
         setProfileOpen(false);
         setNotifOpen(false);
       }
+      if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
+        setSearchOpen(false);
+      }
     };
 
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  useEffect(() => {
+    const query = searchQuery.trim();
+    if (query.length < 2) {
+      setUserResults([]);
+      setSearchLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(async () => {
+      setSearchLoading(true);
+      try {
+        const supabase = getSupabaseBrowserClient();
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.access_token) {
+          setUserResults([]);
+          return;
+        }
+
+        const response = await fetch(`/api/auth-service/profile/search?q=${encodeURIComponent(query)}`, {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error("Failed to search users");
+        }
+
+        const data = await response.json();
+        setUserResults(data.profiles || []);
+        setSearchOpen(true);
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          console.error("[TopNav] Error searching users:", error);
+          setUserResults([]);
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setSearchLoading(false);
+        }
+      }
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [searchQuery]);
 
   const getInitials = () => {
     if (profileData.first_name && profileData.last_name) {
@@ -182,19 +252,99 @@ export function TopNav({ user }: TopNavProps) {
     return user.email?.[0].toUpperCase() || "U";
   };
 
+  const getResultInitials = (result: UserSearchResult) => {
+    if (result.first_name && result.last_name) {
+      return `${result.first_name[0]}${result.last_name[0]}`.toUpperCase();
+    }
+    if (result.first_name) return result.first_name[0].toUpperCase();
+    if (result.username) return result.username[0].toUpperCase();
+    return "U";
+  };
+
+  const goToUserProfile = (result: UserSearchResult) => {
+    const identifier = result.username || result.display_name || result.id;
+    setSearchOpen(false);
+    setSearchQuery("");
+    router.push(`/profile/${encodeURIComponent(identifier)}`);
+  };
+
   return (
     <>
       <header className="sticky top-0 z-30 bg-gray-900/80 backdrop-blur-sm border-b border-gray-800">
         <div className="h-16 px-6 flex items-center justify-between">
           {/* Search Bar */}
-          <div className="flex-1 max-w-md">
+          <div className="flex-1 max-w-md" ref={searchRef}>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
               <Input
                 type="search"
-                placeholder="Search courses, lessons, or assignments..."
-                className="w-full pl-10 pr-4 py-2 bg-gray-800/50 border-gray-700 rounded-lg text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                placeholder="Search courses, lessons, assignments, or users..."
+                value={searchQuery}
+                onChange={(event) => {
+                  setSearchQuery(event.target.value);
+                  setSearchOpen(true);
+                }}
+                onFocus={() => setSearchOpen(true)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && userResults[0]) {
+                    event.preventDefault();
+                    goToUserProfile(userResults[0]);
+                  }
+                }}
+                className="w-full pl-10 pr-10 py-2 bg-gray-800/50 border-gray-700 rounded-lg text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
               />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery("");
+                    setUserResults([]);
+                    setSearchOpen(false);
+                  }}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 rounded text-gray-400 hover:text-white"
+                  aria-label="Clear search"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+
+              {searchOpen && searchQuery.trim().length >= 2 && (
+                <div className="absolute left-0 right-0 top-full z-50 mt-2 overflow-hidden rounded-xl border border-gray-700 bg-gray-800 shadow-xl">
+                  <div className="border-b border-gray-700 px-3 py-2 text-xs font-medium uppercase tracking-wide text-gray-400">
+                    Users
+                  </div>
+                  {searchLoading ? (
+                    <div className="px-3 py-4 text-center text-sm text-gray-400">Searching users...</div>
+                  ) : userResults.length > 0 ? (
+                    <div className="max-h-80 overflow-y-auto py-1">
+                      {userResults.map((result) => (
+                        <button
+                          key={result.id}
+                          type="button"
+                          onClick={() => goToUserProfile(result)}
+                          className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-gray-700/60"
+                        >
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-purple-500 to-pink-500">
+                            {result.avatar_url ? (
+                              <img src={result.avatar_url} alt={`${result.display_name} avatar`} className="h-full w-full object-cover" />
+                            ) : (
+                              <span className="text-sm font-semibold text-white">{getResultInitials(result)}</span>
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium text-white">{result.display_name}</p>
+                            <p className="truncate text-xs text-gray-400">
+                              {result.username ? `@${result.username}` : [result.job_title, result.department].filter(Boolean).join(" · ")}
+                            </p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="px-3 py-4 text-center text-sm text-gray-400">No users found</div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 

@@ -1,12 +1,13 @@
 # backend/services/auth_service/auth_service/routes/profile.py
 from __future__ import annotations
 
+import uuid
 from datetime import date
 
 from flask import jsonify, request, current_app
 from flask_restx import Namespace, Resource
-from sqlalchemy import func
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import func, or_
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from backend.common.models import Profile, Skill, UserSkill
 from backend.common.models.entities import ProfileEducation
@@ -150,6 +151,13 @@ def _validate_avatar_url_payload(value: object) -> str | None:
     return url
 
 
+def _normalize_username(value: object) -> str | None:
+    if value is None:
+        return None
+    username = str(value).strip()
+    return username or None
+
+
 def _serialize_profile_skills(session, user_id) -> list[dict]:
     user_skills = (
         session.query(UserSkill, Skill)
@@ -196,6 +204,13 @@ def _serialize_profile_educations(session, user_id) -> list[dict]:
     ]
 
 
+def _serialize_full_profile(session, profile: Profile) -> dict:
+    response = serialize_profile(profile)
+    response["skills"] = _serialize_profile_skills(session, profile.id)
+    response["educations"] = _serialize_profile_educations(session, profile.id)
+    return response
+
+
 def get_profile():
     """Get current user's profile."""
     db_session = current_app.config.get("DB_SESSION")
@@ -216,10 +231,122 @@ def get_profile():
         if not profile:
             return jsonify({"error": "Profile not found"}), 404
 
-        response = serialize_profile(profile)
-        response["skills"] = _serialize_profile_skills(session, user_id)
-        response["educations"] = _serialize_profile_educations(session, user_id)
-        return jsonify(response), 200
+        return jsonify(_serialize_full_profile(session, profile)), 200
+    except SQLAlchemyError as exc:
+        return jsonify({"error": str(exc)}), 500
+    finally:
+        session.close()
+
+
+def get_public_profile(identifier: str):
+    """Get a visible profile by id, username, or full name. Requires a valid bearer token."""
+    db_session = current_app.config.get("DB_SESSION")
+    if db_session is None:
+        return jsonify({"error": "Database is not configured"}), 503
+
+    token = extract_bearer_token()
+    if token is None:
+        return jsonify({"error": "Missing authorization header"}), 401
+
+    user_id, _email = verify_supabase_jwt(token)
+    if not user_id:
+        return jsonify({"error": "Invalid token"}), 401
+
+    lookup = (identifier or "").strip()
+    if not lookup:
+        return jsonify({"error": "Profile identifier is required"}), 400
+
+    lookup_lower = lookup.lower()
+    normalized_lookup_lower = lookup_lower.replace("-", " ")
+    filters = [
+        func.lower(Profile.username) == lookup_lower,
+        func.lower(func.concat(func.coalesce(Profile.first_name, ""), " ", func.coalesce(Profile.last_name, "")))
+        == normalized_lookup_lower,
+    ]
+
+    try:
+        filters.append(Profile.id == uuid.UUID(lookup))
+    except ValueError:
+        pass
+
+    session = db_session()
+    try:
+        profile = (
+            session.query(Profile)
+            .filter(or_(*filters))
+            .order_by(Profile.created_at.asc())
+            .first()
+        )
+        if not profile:
+            return jsonify({"error": "Profile not found"}), 404
+
+        return jsonify(_serialize_full_profile(session, profile)), 200
+    except SQLAlchemyError as exc:
+        return jsonify({"error": str(exc)}), 500
+    finally:
+        session.close()
+
+
+def search_public_profiles():
+    """Search visible user profiles by username or display name. Requires a valid bearer token."""
+    db_session = current_app.config.get("DB_SESSION")
+    if db_session is None:
+        return jsonify({"error": "Database is not configured"}), 503
+
+    token = extract_bearer_token()
+    if token is None:
+        return jsonify({"error": "Missing authorization header"}), 401
+
+    user_id, _email = verify_supabase_jwt(token)
+    if not user_id:
+        return jsonify({"error": "Invalid token"}), 401
+
+    query = (request.args.get("q") or "").strip()
+    if len(query) < 2:
+        return jsonify({"profiles": []}), 200
+
+    pattern = f"%{query.lower()}%"
+    display_name = func.lower(
+        func.concat(func.coalesce(Profile.first_name, ""), " ", func.coalesce(Profile.last_name, ""))
+    )
+
+    session = db_session()
+    try:
+        profiles = (
+            session.query(Profile)
+            .filter(
+                Profile.id != user_id,
+                or_(
+                    func.lower(Profile.username).like(pattern),
+                    func.lower(Profile.first_name).like(pattern),
+                    func.lower(Profile.last_name).like(pattern),
+                    display_name.like(pattern),
+                ),
+            )
+            .order_by(Profile.first_name.asc(), Profile.last_name.asc(), Profile.username.asc())
+            .limit(8)
+            .all()
+        )
+
+        return jsonify({
+            "profiles": [
+                {
+                    "id": str(profile.id),
+                    "username": profile.username,
+                    "first_name": profile.first_name,
+                    "last_name": profile.last_name,
+                    "display_name": (
+                        f"{profile.first_name or ''} {profile.last_name or ''}".strip()
+                        or profile.username
+                        or "User"
+                    ),
+                    "avatar_url": profile.avatar_url,
+                    "job_title": profile.job_title,
+                    "department": profile.department,
+                }
+                for profile in profiles
+            ]
+        }), 200
     except SQLAlchemyError as exc:
         return jsonify({"error": str(exc)}), 500
     finally:
@@ -245,7 +372,7 @@ def update_profile():
     allowed_fields = [
         "username",
         "bio",
-    "avatar_url",
+        "avatar_url",
         "professional_summary",
         "timezone",
         "language",
@@ -275,12 +402,29 @@ def update_profile():
         if "avatar_url" in data:
             avatar_url_payload = _validate_avatar_url_payload(data.get("avatar_url"))
 
+        username_payload = None
+        if "username" in data:
+            username_payload = _normalize_username(data.get("username"))
+            if username_payload:
+                duplicate = (
+                    session.query(Profile.id)
+                    .filter(
+                        Profile.id != user_id,
+                        func.lower(Profile.username) == username_payload.lower(),
+                    )
+                    .first()
+                )
+                if duplicate:
+                    return jsonify({"error": "Username is already taken"}), 409
+
         for field in allowed_fields:
             if field not in data or data[field] is None:
                 continue
 
             if field == "birthday":
                 profile.birthday = _parse_iso_date(data[field])
+            elif field == "username":
+                profile.username = username_payload
             elif field == "interests":
                 profile.interests = interests_payload
             elif field == "avatar_url":
@@ -381,6 +525,9 @@ def update_profile():
     except ValueError as exc:
         session.rollback()
         return jsonify({"error": str(exc)}), 400
+    except IntegrityError:
+        session.rollback()
+        return jsonify({"error": "Username is already taken"}), 409
     except SQLAlchemyError as exc:
         session.rollback()
         return jsonify({"error": str(exc)}), 500
@@ -432,6 +579,18 @@ class ProfileResource(Resource):
 
     def put(self):
         return update_profile()
+
+
+@profile_ns.route("/profile/public/<path:identifier>")
+class PublicProfileResource(Resource):
+    def get(self, identifier: str):
+        return get_public_profile(identifier)
+
+
+@profile_ns.route("/profile/search")
+class ProfileSearchResource(Resource):
+    def get(self):
+        return search_public_profiles()
 
 
 @profile_ns.route("/skills")

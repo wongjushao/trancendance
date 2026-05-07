@@ -35,6 +35,10 @@ CREATE TABLE public.profiles (
 	FOREIGN KEY(invited_by) REFERENCES public.profiles (id)
 );
 
+CREATE UNIQUE INDEX uq_profiles_username_lower
+  ON public.profiles (lower(username))
+  WHERE username IS NOT NULL AND btrim(username) <> '';
+
 CREATE TABLE public.api_keys (
 	id BIGSERIAL NOT NULL, 
 	user_id UUID NOT NULL, 

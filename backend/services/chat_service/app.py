@@ -1,8 +1,9 @@
 import logging
 import os
 
-from flask import Flask, jsonify
-from flask_cors import CORS
+from flask import Flask, Response, jsonify
+from flask_restx import Api
+from flask_restx.representations import output_json as restx_output_json
 from flask_socketio import SocketIO
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -44,8 +45,6 @@ def create_app():
         authorizations=authorizations,
         security="Bearer",
     )
-    chat_ns = Namespace("chat", path="/", description="Chat service endpoints")
-
     @api.representation("application/json")
     def output_json_with_response_passthrough(data, code, headers=None):
         if isinstance(data, Response):

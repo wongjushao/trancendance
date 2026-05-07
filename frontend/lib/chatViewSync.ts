@@ -22,6 +22,7 @@ export interface Message {
   timestamp: string;
   is_me: boolean;
   message_type?: string;
+  friend_request_status?: string;
 }
 
 export interface Room {
@@ -50,6 +51,7 @@ interface RawMessage {
   created_at?: string | null;
   timestamp?: string | null;
   message_type?: string;
+  friend_request_status?: string;
 }
 
 export interface SyncOptions {

@@ -309,6 +309,8 @@ def assert_can_message_room(session: Session, room_id: int, sender_id: uuid.UUID
     recipient_id = get_other_direct_room_member(session, room_id, sender_id)
     if recipient_id and is_blocked_between(session, sender_id, recipient_id):
         raise RoomAccessError("Messaging is blocked for this conversation")
+    if recipient_id and not can_dm(session, sender_id, recipient_id):
+        raise RoomAccessError("You can message this user after the friend request is accepted")
 
 
 def block_user(session: Session, blocker_id: uuid.UUID, blocked_id: uuid.UUID) -> dict:

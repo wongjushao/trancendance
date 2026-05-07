@@ -976,7 +976,7 @@ export default function SettingsPage() {
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.message || 'Failed to update profile');
+        throw new Error(error.error || error.message || 'Failed to update profile');
       }
 
       toast.success('Profile updated successfully');
@@ -986,7 +986,7 @@ export default function SettingsPage() {
       
     } catch (error) {
       console.error('Error updating profile:', error);
-      toast.error('Failed to update profile');
+      toast.error(error instanceof Error ? error.message : 'Failed to update profile');
     } finally {
       setIsSaving(false);
     }

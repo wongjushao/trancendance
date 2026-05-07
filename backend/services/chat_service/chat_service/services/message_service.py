@@ -4,10 +4,11 @@ from __future__ import annotations
 import uuid
 import logging
 from datetime import datetime
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
-from backend.common.models import Message, ChatRoomMember, Profile
+from backend.common.models import Friendship, Message, ChatRoomMember, Profile
 from backend.services.chat_service.chat_service.services.room_service import (
     RoomAccessError,
     assert_can_message_room,
@@ -124,7 +125,28 @@ def get_room_messages(
     # Process messages using centralized serialization
     result_messages = []
     for msg, sender in messages_with_senders:
-        result_messages.append(serialize_message(msg, sender, user_id))
+        serialized = serialize_message(msg, sender, user_id)
+        if msg.message_type == "friend_request":
+            friendship = (
+                session.query(Friendship)
+                .filter(
+                    or_(
+                        and_(Friendship.requester_id == msg.sender_id, Friendship.addressee_id == user_id),
+                        and_(Friendship.requester_id == user_id, Friendship.addressee_id == msg.sender_id),
+                    )
+                )
+                .first()
+            )
+            if friendship:
+                if friendship.status == "accepted":
+                    serialized["friend_request_status"] = "accepted"
+                elif friendship.status == "rejected":
+                    serialized["friend_request_status"] = "rejected"
+                elif friendship.requester_id == user_id:
+                    serialized["friend_request_status"] = "pending_sent"
+                else:
+                    serialized["friend_request_status"] = "pending_received"
+        result_messages.append(serialized)
     
     logger.info(f"[MessageService] Retrieved {len(result_messages)} messages for room {room_id}")
     

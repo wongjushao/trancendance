@@ -425,7 +425,12 @@ export default function OnboardingPage() {
         backendOk = true;
         console.log('[onboarding] Backend success');
       } else {
-        const body = await res.json().catch(() => ({}));
+        let body: { error?: string } = {};
+        try {
+          body = responseText ? JSON.parse(responseText) : {};
+        } catch {
+          body = {};
+        }
         backendErrorMessage = body?.error || `Server responded with status ${res.status}.`;
         console.error("[onboarding] Backend error:", res.status, backendErrorMessage);
       }
