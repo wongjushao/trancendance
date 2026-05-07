@@ -473,6 +473,17 @@ class UserSkill(Base):
     level: Mapped[int] = mapped_column(Integer, nullable=False)
     years: Mapped[int] = mapped_column(Integer, nullable=False)
 
+class UserBlock(Base):
+    __tablename__ = "user_blocks"
+    __table_args__ = (
+        UniqueConstraint("blocker_id", "blocked_id", name="uq_user_blocks_blocker_blocked"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    blocker_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
+    blocked_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
 
 class ProfileEducation(Base):
     __tablename__ = "profile_educations"

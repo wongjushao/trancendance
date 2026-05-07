@@ -33,6 +33,7 @@ from .entities import (
     RolePermission,
     Submission,
     UserActivityLog,
+	UserBlock,
     UserConsent,
     UserSkill,
     UserRole,
