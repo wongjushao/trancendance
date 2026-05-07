@@ -13,6 +13,7 @@ from backend.services.chat_service.chat_service.middleware.rate_limit import get
 from backend.services.chat_service.chat_service.services.message_service import (
     create_message,
     get_room_messages,
+    update_room_member_last_read,
 )
 from backend.services.chat_service.chat_service.services.room_service import (
     RoomAccessError,
@@ -24,6 +25,14 @@ logger = logging.getLogger(__name__)
 # In-memory storage for socket session data
 _socket_users: Dict[str, uuid.UUID] = {}
 _socket_rooms: Dict[str, Set[int]] = {}
+
+
+def get_online_user_ids() -> Set[uuid.UUID]:
+    return set(_socket_users.values())
+
+
+def is_user_online(user_id: uuid.UUID) -> bool:
+    return user_id in get_online_user_ids()
 
 
 def _room_channel(room_id: int) -> str:
@@ -76,6 +85,12 @@ def init_socket_events(socketio, db_session_factory):
         
         # Send confirmation to client
         emit("connected", {"status": "ok", "user_id": str(user_id)})
+        emit(
+            "presence_changed",
+            {"user_id": str(user_id), "is_online": True},
+            broadcast=True,
+            include_self=False,
+        )
         return True
 
     @socketio.on("disconnect")
@@ -84,6 +99,13 @@ def init_socket_events(socketio, db_session_factory):
         user_id = _socket_users.pop(sid, None)
         _socket_rooms.pop(sid, None)
         logger.info(f"[Socket] DISCONNECT - sid={sid}, user_id={user_id}")
+        if user_id and not is_user_online(user_id):
+            emit(
+                "presence_changed",
+                {"user_id": str(user_id), "is_online": False},
+                broadcast=True,
+                include_self=False,
+            )
 
     @socketio.on("join_room")
     def handle_join_room(data):
@@ -96,25 +118,25 @@ def init_socket_events(socketio, db_session_factory):
         
         if not user_id:
             logger.error(f"[Socket] JOIN_ROOM failed - No user_id for sid={sid}")
-            emit("error", {"message": "Not authenticated - please reconnect"})
+            emit("chat_error", {"message": "Not authenticated - please reconnect"})
             return
 
         if not data:
-            emit("error", {"message": "Invalid request data"})
+            emit("chat_error", {"message": "Invalid request data"})
             return
 
         try:
             room_id = int(data.get("room_id"))
         except (TypeError, ValueError):
-            emit("error", {"message": "Invalid room_id"})
+            emit("chat_error", {"message": "Invalid room_id"})
             return
 
         if room_id < 1:
-            emit("error", {"message": "room_id required"})
+            emit("chat_error", {"message": "room_id required"})
             return
 
         if not db_session_factory:
-            emit("error", {"message": "Database not available"})
+            emit("chat_error", {"message": "Database not available"})
             return
 
         db_session = None
@@ -122,7 +144,7 @@ def init_socket_events(socketio, db_session_factory):
             db_session = db_session_factory()
             if not validate_room_membership(db_session, room_id, user_id):
                 logger.warning(f"[Socket] User {user_id} not a member of room {room_id}")
-                emit("error", {"message": "Not a member of this room"})
+                emit("chat_error", {"message": "Not a member of this room"})
                 return
 
             # Join the room channel
@@ -135,7 +157,7 @@ def init_socket_events(socketio, db_session_factory):
             
         except Exception as exc:
             logger.error(f"[Socket] JOIN_ROOM error: {exc}", exc_info=True)
-            emit("error", {"message": "Failed to join room"})
+            emit("chat_error", {"message": "Failed to join room"})
         finally:
             if db_session:
                 db_session.close()
@@ -167,11 +189,11 @@ def init_socket_events(socketio, db_session_factory):
         
         if not user_id:
             logger.error(f"[Socket] SEND_MESSAGE failed - No user_id for sid={sid}")
-            emit("error", {"message": "Not authenticated - please refresh the page"})
+            emit("chat_error", {"message": "Not authenticated - please refresh the page"})
             return
 
         if not data:
-            emit("error", {"message": "Invalid message data"})
+            emit("chat_error", {"message": "Invalid message data"})
             return
 
         room_id = data.get("room_id")
@@ -179,11 +201,11 @@ def init_socket_events(socketio, db_session_factory):
         temp_id = data.get("temp_id")
 
         if not room_id or not content:
-            emit("error", {"message": "room_id and content required"})
+            emit("chat_error", {"message": "room_id and content required"})
             return
 
         if not db_session_factory:
-            emit("error", {"message": "Database not available"})
+            emit("chat_error", {"message": "Database not available"})
             return
 
         db_session = None
@@ -192,11 +214,11 @@ def init_socket_events(socketio, db_session_factory):
 
             rate_limiter = get_rate_limiter()
             if not rate_limiter.is_allowed(user_id):
-                emit("error", {"message": "Rate limit exceeded. Please slow down."})
+                emit("chat_error", {"message": "Rate limit exceeded. Please slow down."})
                 return
 
             if not validate_room_membership(db_session, room_id, user_id):
-                emit("error", {"message": "Not a member of this room"})
+                emit("chat_error", {"message": "Not a member of this room"})
                 return
 
             message_dict = create_message(
@@ -222,18 +244,111 @@ def init_socket_events(socketio, db_session_factory):
                 "sender_name": message_dict["sender_name"],
                 "sender_avatar": message_dict.get("sender_avatar"),
                 "content": message_dict["content"],
+                "message_type": message_dict.get("message_type", "text"),
                 "created_at": message_dict["created_at"],
                 "timestamp": message_dict.get("timestamp"),
+                "read_by_peer": message_dict.get("read_by_peer", False),
             }
 
             emit("receive_message", broadcast_payload, room=_room_channel(room_id), include_self=False)
             logger.info(f"[Socket] Message sent to room {room_id} by user {user_id}")
 
         except RoomAccessError as exc:
-            emit("error", {"message": str(exc)})
+            emit("chat_error", {"message": str(exc)})
         except Exception as exc:
             logger.error(f"[Socket] SEND_MESSAGE error: {exc}", exc_info=True)
-            emit("error", {"message": "Failed to send message"})
+            emit("chat_error", {"message": "Failed to send message"})
+        finally:
+            if db_session:
+                db_session.close()
+
+    @socketio.on("typing")
+    def handle_typing(data):
+        sid = request.sid
+        user_id = _socket_users.get(sid)
+        if not user_id or not data:
+            return
+
+        try:
+            room_id = int(data.get("room_id"))
+            typing = bool(data.get("typing"))
+        except (TypeError, ValueError):
+            return
+
+        if room_id < 1 or not db_session_factory:
+            return
+
+        db_session = None
+        try:
+            db_session = db_session_factory()
+            if not validate_room_membership(db_session, room_id, user_id):
+                return
+            emit(
+                "user_typing",
+                {"room_id": room_id, "user_id": str(user_id), "typing": typing},
+                room=_room_channel(room_id),
+                include_self=False,
+            )
+        except Exception as exc:
+            logger.error(f"[Socket] TYPING error: {exc}", exc_info=True)
+        finally:
+            if db_session:
+                db_session.close()
+
+    @socketio.on("mark_read")
+    def handle_mark_read(data):
+        sid = request.sid
+        user_id = _socket_users.get(sid)
+        if not user_id:
+            emit("chat_error", {"message": "Not authenticated"})
+            return
+
+        if not data:
+            emit("chat_error", {"message": "Invalid request"})
+            return
+
+        try:
+            room_id = int(data.get("room_id"))
+            message_id = int(data.get("message_id"))
+        except (TypeError, ValueError):
+            emit("chat_error", {"message": "Invalid mark_read payload"})
+            return
+
+        if room_id < 1 or message_id < 1 or not db_session_factory:
+            emit("chat_error", {"message": "Invalid mark_read"})
+            return
+
+        db_session = None
+        try:
+            db_session = db_session_factory()
+            if not validate_room_membership(db_session, room_id, user_id):
+                emit("chat_error", {"message": "Not a member of this room"})
+                return
+
+            changed, cursor = update_room_member_last_read(db_session, room_id, user_id, message_id)
+            if changed:
+                db_session.commit()
+                emit(
+                    "messages_read",
+                    {
+                        "room_id": room_id,
+                        "reader_id": str(user_id),
+                        "last_read_message_id": cursor,
+                    },
+                    room=_room_channel(room_id),
+                    include_self=False,
+                )
+            else:
+                db_session.rollback()
+        except RoomAccessError as exc:
+            if db_session:
+                db_session.rollback()
+            emit("chat_error", {"message": str(exc)})
+        except Exception as exc:
+            logger.error(f"[Socket] MARK_READ error: {exc}", exc_info=True)
+            if db_session:
+                db_session.rollback()
+            emit("chat_error", {"message": "Failed to update read state"})
         finally:
             if db_session:
                 db_session.close()
@@ -247,11 +362,11 @@ def init_socket_events(socketio, db_session_factory):
         
         if not user_id:
             logger.error(f"[Socket] GET_MESSAGES failed - No user_id for sid={sid}")
-            emit("error", {"message": "Not authenticated"})
+            emit("chat_error", {"message": "Not authenticated"})
             return
 
         if not data:
-            emit("error", {"message": "Invalid request"})
+            emit("chat_error", {"message": "Invalid request"})
             return
 
         try:
@@ -261,15 +376,15 @@ def init_socket_events(socketio, db_session_factory):
             raw_cursor = data.get("cursor")
             cursor = int(raw_cursor) if raw_cursor is not None else None
         except (TypeError, ValueError):
-            emit("error", {"message": "Invalid message query"})
+            emit("chat_error", {"message": "Invalid message query"})
             return
 
         if not room_id:
-            emit("error", {"message": "room_id required"})
+            emit("chat_error", {"message": "room_id required"})
             return
 
         if not db_session_factory:
-            emit("error", {"message": "Database not available"})
+            emit("chat_error", {"message": "Database not available"})
             return
 
         db_session = None
@@ -285,10 +400,10 @@ def init_socket_events(socketio, db_session_factory):
             )
             emit("messages_history", result)
         except RoomAccessError as exc:
-            emit("error", {"message": str(exc)})
+            emit("chat_error", {"message": str(exc)})
         except Exception as exc:
             logger.error(f"[Socket] GET_MESSAGES error: {exc}", exc_info=True)
-            emit("error", {"message": "Failed to load messages"})
+            emit("chat_error", {"message": "Failed to load messages"})
         finally:
             if db_session:
                 db_session.close()

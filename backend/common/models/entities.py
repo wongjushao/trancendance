@@ -440,6 +440,11 @@ class ChatRoomMember(Base):
     room_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.chat_rooms.id"), nullable=False)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
     joined_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+    last_read_message_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("public.messages.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
 
 class Skill(Base):

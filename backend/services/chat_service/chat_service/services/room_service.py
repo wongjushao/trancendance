@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import uuid
 import logging
-from typing import Any, List
+from typing import Any, Iterable, List
 from sqlalchemy.orm import Session, aliased
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import or_, and_, func
@@ -91,7 +91,11 @@ def ensure_db_session(db_session: Any) -> None:
         raise RuntimeError("Database is not configured. Set valid DATABASE_URL")
 
 
-def list_user_rooms(session: Session, user_id: uuid.UUID) -> List[dict]:
+def list_user_rooms(
+    session: Session,
+    user_id: uuid.UUID,
+    online_user_ids: Iterable[uuid.UUID] | None = None,
+) -> List[dict]:
     """Get all chat rooms for a user with last message (fully optimized with deduplication)."""
     logger.info(f"[RoomService] Listing rooms for user {user_id}")
     
@@ -168,6 +172,7 @@ def list_user_rooms(session: Session, user_id: uuid.UUID) -> List[dict]:
                 if room_id not in dm_profiles:
                     dm_profiles[room_id] = profile
         
+        online_users = set(online_user_ids or [])
         result = []
         for room, last_content, last_created_at in rooms:
             direct_profile = dm_profiles.get(room.id) if room.type == "direct" else None
@@ -191,6 +196,7 @@ def list_user_rooms(session: Session, user_id: uuid.UUID) -> List[dict]:
                 "related_course_id": room.related_course_id,
                 "profile_user_id": str(direct_profile.id) if direct_profile else None,
                 "profile_avatar": direct_profile.avatar_url if direct_profile else None,
+                "profile_is_online": direct_profile.id in online_users if direct_profile else False,
                 "display_name": display_name,
                 "last_message": last_content,
                 "last_message_time": last_created_at.isoformat() if last_created_at else None,

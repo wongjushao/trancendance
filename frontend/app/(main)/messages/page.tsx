@@ -26,6 +26,7 @@ interface Message {
   timestamp: string;
   is_me: boolean;
   friend_request_status?: string;
+  read_by_peer?: boolean;
 }
 
 interface ChatProfile {
@@ -57,6 +58,8 @@ export default function MessagesPage() {
     isConnected,
     blockUser,
     unblockUser,
+    peerTypingLabel,
+    signalTypingFromComposer,
   } = useChat();
 
   const [newMessage, setNewMessage] = useState("");
@@ -348,11 +351,22 @@ export default function MessagesPage() {
                   }`}
                 >
                   <div className="flex items-center gap-3">
-                    <Avatar className="h-11 w-11 sm:h-12 sm:w-12 ring-1 ring-white/5">
-                      <AvatarFallback className="bg-gradient-to-br from-purple-500 to-violet-600 text-white text-base sm:text-lg font-semibold">
-                        {room.display_name.charAt(0).toUpperCase()}
-                      </AvatarFallback>
-                    </Avatar>
+                    <div className="relative flex-shrink-0">
+                      <Avatar className="h-11 w-11 sm:h-12 sm:w-12 ring-1 ring-white/5">
+                        {room.profile_avatar && <AvatarImage src={room.profile_avatar} />}
+                        <AvatarFallback className="bg-gradient-to-br from-purple-500 to-violet-600 text-white text-base sm:text-lg font-semibold">
+                          {room.display_name.charAt(0).toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      {room.type === "direct" && (
+                        <span
+                          className={`absolute bottom-0 right-0 h-3.5 w-3.5 rounded-full border-2 border-[#14141C] ${
+                            room.profile_is_online ? "bg-green-400" : "bg-[#6B6B80]"
+                          }`}
+                          title={room.profile_is_online ? "Online" : "Offline"}
+                        />
+                      )}
+                    </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-start gap-2">
                         <p className="text-white font-medium truncate text-sm sm:text-base">
@@ -422,9 +436,20 @@ export default function MessagesPage() {
                 <h2 className="font-semibold text-white truncate text-sm sm:text-base">
                   {currentRoom.display_name}
                 </h2>
-                <p className="text-[10px] sm:text-xs text-[#A0A0B5]">
-                  {currentRoom.type === "direct" ? "Direct Message" : "Course Chat"}
-                </p>
+                <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-[#A0A0B5]">
+                  {currentRoom.type === "direct" ? (
+                    <>
+                      <span
+                        className={`h-2 w-2 rounded-full ${
+                          currentRoom.profile_is_online ? "bg-green-400" : "bg-[#6B6B80]"
+                        }`}
+                      />
+                      <span>{currentRoom.profile_is_online ? "Online" : "Offline"}</span>
+                    </>
+                  ) : (
+                    "Course Chat"
+                  )}
+                </div>
               </div>
             </div>
             {currentRoom.type === "direct" && currentRoom.profile_user_id && (
@@ -555,8 +580,16 @@ export default function MessagesPage() {
                               {msg.content}
                             </div>
                           )}
-                          <span className="text-[10px] sm:text-xs text-[#6B6B80] mt-1 px-1">
+                          <span className="text-[10px] sm:text-xs text-[#6B6B80] mt-1 px-1 inline-flex items-center gap-1">
                             {msg.timestamp}
+                            {msg.is_me && msg.message_type === "text" && (
+                              <span
+                                className={`tabular-nums ${msg.read_by_peer ? "text-sky-400" : "text-white/50"}`}
+                                title={msg.read_by_peer ? "Read" : "Delivered"}
+                              >
+                                {msg.read_by_peer ? "✓✓" : "✓"}
+                              </span>
+                            )}
                           </span>
                         </div>
                         {msg.is_me && (
@@ -577,6 +610,11 @@ export default function MessagesPage() {
 
           {/* Input Area */}
           <div className="p-3 sm:p-4 border-t border-white/10 bg-[#14141C]/95 backdrop-blur-sm flex-shrink-0 pb-[env(safe-area-inset-bottom)]">
+            {peerTypingLabel && (
+              <p className="max-w-4xl mx-auto mb-2 text-xs text-[#A0A0B5] animate-pulse">
+                {peerTypingLabel} is typing…
+              </p>
+            )}
             <form
               onSubmit={handleSendMessage}
               className="max-w-4xl mx-auto flex items-center gap-1.5 sm:gap-2"
@@ -591,7 +629,10 @@ export default function MessagesPage() {
               </button>
               <Input
                 value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
+                onChange={(e) => {
+                  setNewMessage(e.target.value);
+                  signalTypingFromComposer();
+                }}
                 placeholder={messagingBlocked ? "Messaging is blocked" : "Type a message..."}
                 className="flex-1 min-w-0 bg-[#0B0B0F] border-white/10 text-white rounded-full px-4 h-10 sm:h-11 focus-visible:ring-2 focus-visible:ring-purple-500/40 focus-visible:border-purple-500/40 transition-all"
                 onKeyDown={(e) => {

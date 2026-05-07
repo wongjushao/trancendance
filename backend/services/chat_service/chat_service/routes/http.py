@@ -30,6 +30,7 @@ from backend.services.chat_service.chat_service.services.room_service import (
     get_chat_profile,
     RoomAccessError
 )
+from backend.services.chat_service.chat_service.sockets.handlers import get_online_user_ids
 
 chat_bp = Blueprint("chat_service", __name__)
 
@@ -66,7 +67,7 @@ def get_rooms():
     
     session = db_session()
     try:
-        rooms = list_user_rooms(session, user_id)
+        rooms = list_user_rooms(session, user_id, get_online_user_ids())
         return jsonify({"rooms": rooms}), 200
     except SQLAlchemyError:
         session.rollback()

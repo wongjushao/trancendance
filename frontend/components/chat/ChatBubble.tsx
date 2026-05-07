@@ -25,6 +25,7 @@ interface Message {
   timestamp: string;
   is_me: boolean;
   friend_request_status?: string;
+  read_by_peer?: boolean;
 }
 
 interface ChatRoom {
@@ -37,6 +38,7 @@ interface ChatRoom {
   related_course_id?: number;
   profile_user_id?: string | null;
   profile_avatar?: string | null;
+  profile_is_online?: boolean;
   is_blocked_by_me?: boolean;
   has_blocked_me?: boolean;
 }
@@ -78,6 +80,8 @@ export function ChatBubble() {
     reconnect,
     blockUser,
     unblockUser,
+    peerTypingLabel,
+    signalTypingFromComposer,
   } = useChat();
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileLoading, setProfileLoading] = useState(false);
@@ -340,9 +344,21 @@ export function ChatBubble() {
                     <ChevronLeft className="h-5 w-5" />
                   </button>
                 )}
-                <h3 className="text-white font-semibold text-lg">
-                  {view === 'chat' && currentRoom ? currentRoom.display_name : 'Messages'}
-                </h3>
+                <div className="min-w-0">
+                  <h3 className="truncate text-lg font-semibold text-white">
+                    {view === 'chat' && currentRoom ? currentRoom.display_name : 'Messages'}
+                  </h3>
+                  {view === 'chat' && currentRoom?.type === 'direct' && (
+                    <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-white/80">
+                      <span
+                        className={`h-2 w-2 rounded-full ${
+                          currentRoom.profile_is_online ? 'bg-green-400' : 'bg-[#A0A0B5]'
+                        }`}
+                      />
+                      {currentRoom.profile_is_online ? 'Online' : 'Offline'}
+                    </div>
+                  )}
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 {view === 'chat' && currentRoom?.type === 'direct' && currentRoom.profile_user_id && (
@@ -431,12 +447,22 @@ export function ChatBubble() {
                     >
                       <div className="flex justify-between items-center">
                         <div className="flex items-center gap-3">
-                          <Avatar className="h-10 w-10">
-                            {room.profile_avatar && <AvatarImage src={room.profile_avatar} />}
-                            <AvatarFallback className="bg-gradient-to-br from-purple-500 to-violet-600 text-white">
-                              {room.display_name.charAt(0).toUpperCase()}
-                            </AvatarFallback>
-                          </Avatar>
+                          <div className="relative flex-shrink-0">
+                            <Avatar className="h-10 w-10">
+                              {room.profile_avatar && <AvatarImage src={room.profile_avatar} />}
+                              <AvatarFallback className="bg-gradient-to-br from-purple-500 to-violet-600 text-white">
+                                {room.display_name.charAt(0).toUpperCase()}
+                              </AvatarFallback>
+                            </Avatar>
+                            {room.type === 'direct' && (
+                              <span
+                                className={`absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-[#1A1A24] ${
+                                  room.profile_is_online ? 'bg-green-400' : 'bg-[#6B6B80]'
+                                }`}
+                                title={room.profile_is_online ? 'Online' : 'Offline'}
+                              />
+                            )}
+                          </div>
                           <div className="flex-1 min-w-0">
                             <p className="text-white text-sm font-medium truncate">{room.display_name}</p>
                             {room.last_message && (
@@ -551,7 +577,17 @@ export function ChatBubble() {
                                     {msg.content}
                                   </div>
                                 )}
-                                <span className="text-xs text-[#6B6B80] mt-1 px-1">{msg.timestamp}</span>
+                                <span className="text-xs text-[#6B6B80] mt-1 px-1 inline-flex items-center gap-1">
+                                  {msg.timestamp}
+                                  {msg.is_me && msg.message_type === 'text' && (
+                                    <span
+                                      className={`tabular-nums ${msg.read_by_peer ? 'text-sky-300' : 'text-white/45'}`}
+                                      title={msg.read_by_peer ? 'Read' : 'Delivered'}
+                                    >
+                                      {msg.read_by_peer ? '✓✓' : '✓'}
+                                    </span>
+                                  )}
+                                </span>
                               </div>
                               {msg.is_me && (
                                 <Avatar className="h-8 w-8 flex-shrink-0">
@@ -572,8 +608,13 @@ export function ChatBubble() {
 
               {/* Input Area */}
               {isConnected ? (
-                <form onSubmit={handleSendMessage} className="p-3 border-t border-white/10 bg-[#1A1A24]">
-                  <div className="flex gap-2">
+                <form onSubmit={handleSendMessage} className="border-t border-white/10 bg-[#1A1A24]">
+                  {peerTypingLabel && (
+                    <p className="px-3 pt-2 text-[11px] text-[#A0A0B5] animate-pulse">
+                      {peerTypingLabel} is typing…
+                    </p>
+                  )}
+                  <div className="flex gap-2 p-3">
                     <button
                       type="button"
                       className="p-2 text-[#A0A0B5] hover:text-purple-400 transition-colors rounded-lg hover:bg-white/5"
@@ -583,7 +624,10 @@ export function ChatBubble() {
                     </button>
                     <Input
                       value={newMessage}
-                      onChange={(e) => setNewMessage(e.target.value)}
+                      onChange={(e) => {
+                        setNewMessage(e.target.value);
+                        signalTypingFromComposer();
+                      }}
                       placeholder={messagingBlocked ? "Messaging is blocked" : "Type a message..."}
                       className="flex-1 bg-[#0B0B0F] border-white/10 text-white text-sm rounded-full px-4 focus:ring-2 focus:ring-purple-500/50"
                       onKeyDown={(e) => {

@@ -30,6 +30,7 @@ interface ChatRoom {
   related_course_id?: number;
   profile_user_id?: string | null;
   profile_avatar?: string | null;
+  profile_is_online?: boolean;
   is_blocked_by_me?: boolean;
   has_blocked_me?: boolean;
 }
@@ -46,6 +47,7 @@ interface Message {
   timestamp: string;
   is_me: boolean;
   friend_request_status?: string;
+  read_by_peer?: boolean;
 }
 
 interface IncomingSocketMessage {
@@ -55,9 +57,15 @@ interface IncomingSocketMessage {
   sender_name: string;
   sender_avatar?: string;
   content: string;
-  message_type: string;
+  message_type?: string;
   created_at?: string | null;
   timestamp?: string | null;
+  read_by_peer?: boolean;
+}
+
+interface IncomingPresenceChange {
+  user_id?: string;
+  is_online?: boolean;
 }
 
 interface ChatContextType {
@@ -75,6 +83,8 @@ interface ChatContextType {
   isConnecting: boolean;
   reconnect: () => void;
   socketError: string | null;
+  peerTypingLabel: string | null;
+  signalTypingFromComposer: () => void;
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
@@ -111,6 +121,12 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     new Map(),
   );
   const lastToastedErrorRef = useRef<string | null>(null);
+  const typingEmitThrottleTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>();
+  const typingIdleStopTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>();
+  const peerTypingHideTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>();
+  const markReadDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>();
+
+  const [peerTypingLabel, setPeerTypingLabel] = useState<string | null>(null);
 
   // ---------------- AUTH ----------------
   // Note: getSupabaseBrowserClient() is memoized, so the underlying GoTrue
@@ -182,6 +198,19 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [isConnected, currentRoom?.id, emit]);
 
+  useEffect(() => {
+    setPeerTypingLabel(null);
+  }, [currentRoom?.id]);
+
+  useEffect(() => {
+    return () => {
+      clearTimeout(typingEmitThrottleTimerRef.current);
+      clearTimeout(typingIdleStopTimerRef.current);
+      clearTimeout(peerTypingHideTimerRef.current);
+      clearTimeout(markReadDebounceRef.current);
+    };
+  }, []);
+
   // ---------------- LISTEN FOR INCOMING MESSAGES ----------------
   useEffect(() => {
     if (!isConnected || !currentUserId) return;
@@ -202,9 +231,11 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const createdAt = normalizeChatTimestamp(message.created_at);
           const formatted: Message = {
             ...message,
+            message_type: message.message_type ?? 'text',
             created_at: createdAt,
             is_me: true,
             timestamp: message.timestamp || formatChatTime(createdAt),
+            read_by_peer: message.read_by_peer === true,
           };
           setMessages((prev) => prev.map((m) => (m.id === matchedKey ? formatted : m)));
           pendingMessagesRef.current.delete(matchedKey);
@@ -215,9 +246,11 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const createdAt = normalizeChatTimestamp(message.created_at);
       const formatted: Message = {
         ...message,
+        message_type: message.message_type ?? 'text',
         created_at: createdAt,
         is_me: isFromMe,
         timestamp: message.timestamp || formatChatTime(createdAt),
+        read_by_peer: message.read_by_peer === true,
       };
 
       if (currentRoom && message.room_id === currentRoom.id) {
@@ -246,7 +279,67 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       /* server ack — no UI action needed */
     });
 
-    const unsubscribeError = on('error', (error: unknown) => {
+    const unsubscribePresence = on('presence_changed', (presence: IncomingPresenceChange) => {
+      if (!presence?.user_id || typeof presence.is_online !== 'boolean') return;
+
+      setRooms((prev) =>
+        prev.map((room) =>
+          room.profile_user_id === presence.user_id
+            ? { ...room, profile_is_online: presence.is_online }
+            : room,
+        ),
+      );
+      setCurrentRoom((room) =>
+        room?.profile_user_id === presence.user_id
+          ? { ...room, profile_is_online: presence.is_online }
+          : room,
+      );
+    });
+
+    const unsubscribeTyping = on(
+      'user_typing',
+      (payload: { room_id?: number; user_id?: string; typing?: boolean }) => {
+        if (!payload?.room_id || payload.user_id === currentUserId) return;
+        if (!currentRoom || payload.room_id !== currentRoom.id) return;
+
+        if (payload.typing) {
+          const label = currentRoom.type === 'direct' ? currentRoom.display_name : 'Someone';
+          setPeerTypingLabel(label);
+          clearTimeout(peerTypingHideTimerRef.current);
+          peerTypingHideTimerRef.current = setTimeout(() => setPeerTypingLabel(null), 4500);
+        } else {
+          clearTimeout(peerTypingHideTimerRef.current);
+          setPeerTypingLabel(null);
+        }
+      },
+    );
+
+    const unsubscribeMessagesRead = on(
+      'messages_read',
+      (payload: { room_id?: number; reader_id?: string; last_read_message_id?: number }) => {
+        const lr = payload?.last_read_message_id;
+        if (
+          lr == null ||
+          !payload?.reader_id ||
+          payload.reader_id === currentUserId ||
+          !currentRoom ||
+          payload.room_id !== currentRoom.id
+        ) {
+          return;
+        }
+        if (currentRoom.type !== 'direct' || currentRoom.profile_user_id !== payload.reader_id) {
+          return;
+        }
+
+        setMessages((prev) =>
+          prev.map((m) =>
+            typeof m.id === 'number' && m.is_me && m.id <= lr ? { ...m, read_by_peer: true } : m,
+          ),
+        );
+      },
+    );
+
+    const unsubscribeError = on('chat_error', (error: unknown) => {
       let msg = 'Unknown error';
       if (typeof error === 'string') {
         msg = error;
@@ -265,6 +358,9 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => {
       unsubscribeReceive();
       unsubscribeSent();
+      unsubscribePresence();
+      unsubscribeTyping();
+      unsubscribeMessagesRead();
       unsubscribeError();
     };
   }, [isConnected, on, currentRoom, currentUserId]);
@@ -372,6 +468,49 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     void refreshRooms();
   }, [accessToken, isAuthReady, refreshRooms]);
 
+  useEffect(() => {
+    if (!currentRoom || !isConnected || !currentUserId) return;
+    if (
+      currentRoom.type === 'direct' &&
+      (currentRoom.is_blocked_by_me || currentRoom.has_blocked_me)
+    ) {
+      return;
+    }
+
+    const numericIds = messages
+      .map((m) => m.id)
+      .filter((id): id is number => typeof id === 'number');
+    if (numericIds.length === 0) return;
+
+    const maxId = Math.max(...numericIds);
+    clearTimeout(markReadDebounceRef.current);
+    markReadDebounceRef.current = setTimeout(() => {
+      emit('mark_read', { room_id: currentRoom.id, message_id: maxId });
+    }, 700);
+
+    return () => clearTimeout(markReadDebounceRef.current);
+  }, [messages, currentRoom, isConnected, currentUserId, emit]);
+
+  const signalTypingFromComposer = useCallback(() => {
+    if (!currentRoom || !isConnected) return;
+    if (
+      currentRoom.type === 'direct' &&
+      (currentRoom.is_blocked_by_me || currentRoom.has_blocked_me)
+    ) {
+      return;
+    }
+
+    clearTimeout(typingEmitThrottleTimerRef.current);
+    typingEmitThrottleTimerRef.current = setTimeout(() => {
+      emit('typing', { room_id: currentRoom.id, typing: true });
+    }, 350);
+
+    clearTimeout(typingIdleStopTimerRef.current);
+    typingIdleStopTimerRef.current = setTimeout(() => {
+      emit('typing', { room_id: currentRoom.id, typing: false });
+    }, 2800);
+  }, [currentRoom, isConnected, emit]);
+
   // ---------------- SEND MESSAGE ----------------
   const sendMessage = useCallback(
     (content: string) => {
@@ -393,6 +532,10 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return;
       }
 
+      clearTimeout(typingEmitThrottleTimerRef.current);
+      clearTimeout(typingIdleStopTimerRef.current);
+      emit('typing', { room_id: currentRoom.id, typing: false });
+
       const now = new Date();
       const tempId = `temp-${now.getTime()}-${Math.random().toString(36).substring(2, 8)}`;
 
@@ -406,6 +549,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         created_at: now.toISOString(),
         timestamp: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         is_me: true,
+        read_by_peer: false,
       };
 
       setMessages((prev) => [...prev, optimistic]);
@@ -515,6 +659,8 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isConnecting,
         reconnect,
         socketError: lastError,
+        peerTypingLabel,
+        signalTypingFromComposer,
       }}
     >
       {children}

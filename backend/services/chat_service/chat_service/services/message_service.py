@@ -8,7 +8,7 @@ from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
-from backend.common.models import Friendship, Message, ChatRoomMember, Profile
+from backend.common.models import ChatRoom, Friendship, Message, ChatRoomMember, Profile
 from backend.services.chat_service.chat_service.services.room_service import (
     RoomAccessError,
     assert_can_message_room,
@@ -16,6 +16,56 @@ from backend.services.chat_service.chat_service.services.room_service import (
 from backend.services.chat_service.chat_service.services.serialization import serialize_message
 
 logger = logging.getLogger(__name__)
+
+
+def get_dm_peer_last_read_message_id(
+    session: Session,
+    room_id: int,
+    viewer_id: uuid.UUID,
+) -> int | None:
+    """For direct chats only: last-read cursor for the other participant."""
+    room = session.query(ChatRoom).filter(ChatRoom.id == room_id).first()
+    if not room or room.type != "direct":
+        return None
+
+    rows = session.query(ChatRoomMember).filter(ChatRoomMember.room_id == room_id).all()
+    if len(rows) != 2:
+        return None
+
+    for row in rows:
+        if row.user_id != viewer_id:
+            return row.last_read_message_id
+    return None
+
+
+def update_room_member_last_read(
+    session: Session,
+    room_id: int,
+    reader_id: uuid.UUID,
+    message_id: int,
+) -> tuple[bool, int | None]:
+    """Persist reader progress monotonically. Caller commits."""
+    message_row = (
+        session.query(Message)
+        .filter(Message.id == message_id, Message.room_id == room_id)
+        .first()
+    )
+    if not message_row:
+        raise RoomAccessError("Invalid message for this room")
+
+    member = (
+        session.query(ChatRoomMember)
+        .filter(ChatRoomMember.room_id == room_id, ChatRoomMember.user_id == reader_id)
+        .first()
+    )
+    if not member:
+        raise RoomAccessError(f"User {reader_id} is not a member of room {room_id}")
+
+    prev = member.last_read_message_id or 0
+    if message_id > prev:
+        member.last_read_message_id = message_id
+        return True, member.last_read_message_id
+    return False, member.last_read_message_id
 
 
 def create_message(
@@ -59,7 +109,7 @@ def create_message(
         
         logger.info(f"[MessageService] Message created with ID: {message.id}")
         
-        result = serialize_message(message, sender, sender_id)
+        result = serialize_message(message, sender, sender_id, peer_last_read_message_id=None)
         session.commit()
         return result
         
@@ -121,11 +171,18 @@ def get_room_messages(
     next_cursor = messages_with_senders[0][0].id if has_more and messages_with_senders else None
 
     total = session.query(Message).filter(Message.room_id == room_id).count()
-    
+
+    peer_last_read = get_dm_peer_last_read_message_id(session, room_id, user_id)
+
     # Process messages using centralized serialization
     result_messages = []
     for msg, sender in messages_with_senders:
-        serialized = serialize_message(msg, sender, user_id)
+        serialized = serialize_message(
+            msg,
+            sender,
+            user_id,
+            peer_last_read_message_id=peer_last_read,
+        )
         if msg.message_type == "friend_request":
             friendship = (
                 session.query(Friendship)

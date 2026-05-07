@@ -23,6 +23,7 @@ export interface Message {
   is_me: boolean;
   message_type?: string;
   friend_request_status?: string;
+  read_by_peer?: boolean;
 }
 
 export interface Room {
@@ -52,6 +53,7 @@ interface RawMessage {
   timestamp?: string | null;
   message_type?: string;
   friend_request_status?: string;
+  read_by_peer?: boolean;
 }
 
 export interface SyncOptions {
@@ -159,6 +161,7 @@ export async function fetchLatestMessages(
         created_at: createdAt,
         is_me: msg.sender_id === currentUserId,
         timestamp: msg.timestamp || formatChatTime(createdAt),
+        read_by_peer: msg.read_by_peer === true,
       };
     });
 

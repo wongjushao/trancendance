@@ -24,6 +24,32 @@ function resolveSocketUrl(): string {
 
 const SOCKET_PATH = process.env.NEXT_PUBLIC_SOCKET_PATH || '/api/chat-service/socket.io';
 
+/** Socket.IO may emit reserved `error` with empty `{}`; ignore noise and extract real messages when present. */
+function normalizeSocketNativeError(err: unknown): string | null {
+  if (err == null) return null;
+  if (typeof err === 'string') {
+    const t = err.trim();
+    return t.length ? t : null;
+  }
+  if (err instanceof Error) {
+    const t = err.message?.trim();
+    return t && t.length ? t : null;
+  }
+  if (typeof err === 'object') {
+    const o = err as Record<string, unknown>;
+    if (typeof o.message === 'string' && o.message.trim()) return o.message.trim();
+    if (typeof o.data === 'string' && o.data.trim()) return o.data.trim();
+    if (Object.keys(o).length === 0) return null;
+    try {
+      const s = JSON.stringify(o);
+      return s === '{}' ? null : s;
+    } catch {
+      return null;
+    }
+  }
+  return String(err);
+}
+
 export const useSocket = (token?: string) => {
   const socketRef = useRef<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -115,9 +141,11 @@ export const useSocket = (token?: string) => {
       }
     });
 
-    socket.on('error', (err) => {
-      console.error('[Socket] Socket error:', err);
-      setLastError(typeof err === 'string' ? err : 'Socket error');
+    socket.on('error', (err: unknown) => {
+      const msg = normalizeSocketNativeError(err);
+      if (!msg) return;
+      console.warn('[Socket] Native socket error:', msg);
+      setLastError(msg);
     });
 
   }, [token, cleanupSocket]);
