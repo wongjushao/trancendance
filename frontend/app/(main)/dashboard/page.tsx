@@ -164,7 +164,6 @@ export default function UnifiedDashboardPage() {
     pending_approvals: 0,
   });
   const [topCourses, setTopCourses] = useState<TopCourse[]>([]);
-  const [pendingApprovals, setPendingApprovals] = useState<any[]>([]);
 
   useEffect(() => {
     const hour = new Date().getHours();
@@ -500,7 +499,8 @@ export default function UnifiedDashboardPage() {
         const { count } = await supabase
           .from("class_members")
           .select("id", { count: "exact", head: true })
-          .in("course_class_id", classIds);
+          .in("course_class_id", classIds)
+          .eq("role", "student");
         studentCount = count || 0;
         totalStudents += studentCount;
       }
@@ -577,79 +577,144 @@ export default function UnifiedDashboardPage() {
   };
 
   const loadAdminData = async (userId: string) => {
-    // Check if user is admin of selected organization
-    const { data: isAdmin } = await supabase
-      .from("organization_members")
-      .select("id")
-      .eq("organization_id", selectedOrgId)
-      .eq("user_id", userId)
-      .in("member_role", ["admin", "sub_admin"])
-      .single();
+    if (!selectedOrgId) return;
+    
+    try {
+      // Check if user is admin of this organization
+      const { data: memberCheck } = await supabase
+        .from("organization_members")
+        .select("member_role")
+        .eq("organization_id", selectedOrgId)
+        .eq("user_id", userId)
+        .single();
 
-    if (!isAdmin) return;
+      if (!memberCheck || (memberCheck.member_role !== "admin" && memberCheck.member_role !== "sub_admin")) {
+        setAdminStats({
+          total_students: 0,
+          active_students: 0,
+          total_courses: 0,
+          published_courses: 0,
+          average_rating: 0,
+          completion_rate: 0,
+          pending_approvals: 0,
+        });
+        setTopCourses([]);
+        return;
+      }
 
-    // Get all courses in this organization
-    const { data: courses } = await supabase
-      .from("courses")
-      .select("*")
-      .eq("organization_id", selectedOrgId);
+      // Get all courses in this organization
+      const { data: courses } = await supabase
+        .from("courses")
+        .select("*")
+        .eq("organization_id", selectedOrgId);
 
-    const totalCourses = courses?.length || 0;
-    const publishedCourses = courses?.filter(c => c.status === "published").length || 0;
+      const totalCourses = courses?.length || 0;
+      const publishedCourses = courses?.filter(c => c.status === "published").length || 0;
 
-    // Get all students in this organization
-    const { data: courseClasses } = await supabase
-      .from("course_classes")
-      .select("id")
-      .eq("organization_id", selectedOrgId);
+      // Get all students in this organization
+      const { data: courseClasses } = await supabase
+        .from("course_classes")
+        .select("id")
+        .in("course_id", courses?.map(c => c.id) || []);
 
-    const classIds = courseClasses?.map(cc => cc.id) || [];
-    let totalStudents = 0;
-    let activeStudents = 0;
+      const classIds = courseClasses?.map(cc => cc.id) || [];
+      let totalStudents = 0;
+      let activeStudents = 0;
 
-    if (classIds.length > 0) {
-      const { count } = await supabase
-        .from("class_members")
-        .select("id", { count: "exact", head: true })
-        .in("course_class_id", classIds);
-      totalStudents = count || 0;
+      if (classIds.length > 0) {
+        // Get unique students
+        const { data: classMembers } = await supabase
+          .from("class_members")
+          .select("user_id, enrolled_at")
+          .in("course_class_id", classIds)
+          .eq("role", "student");
 
-      const thirtyDaysAgo = new Date();
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-      const { count: activeCount } = await supabase
-        .from("class_members")
-        .select("id", { count: "exact", head: true })
-        .in("course_class_id", classIds)
-        .gte("enrolled_at", thirtyDaysAgo.toISOString());
-      activeStudents = activeCount || 0;
+        const uniqueStudents = new Set(classMembers?.map(cm => cm.user_id));
+        totalStudents = uniqueStudents.size;
+
+        // Active students (enrolled in last 30 days)
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        
+        const activeSet = new Set();
+        classMembers?.forEach(cm => {
+          if (new Date(cm.enrolled_at) > thirtyDaysAgo) {
+            activeSet.add(cm.user_id);
+          }
+        });
+        activeStudents = activeSet.size;
+      }
+
+      // Calculate average rating and completion for top courses
+      const coursesWithStats = await Promise.all((courses || []).map(async (course) => {
+        // Get average rating
+        const { data: reviews } = await supabase
+          .from("course_reviews")
+          .select("rating")
+          .eq("course_id", course.id);
+        
+        const avgRating = reviews?.length 
+          ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length 
+          : 0;
+
+        // Get student count
+        const { data: ccForCourse } = await supabase
+          .from("course_classes")
+          .select("id")
+          .eq("course_id", course.id);
+        
+        const classIdsForCourse = ccForCourse?.map(cc => cc.id) || [];
+        let studentCount = 0;
+        let completion = 0;
+
+        if (classIdsForCourse.length > 0) {
+          const { data: cmForCourse } = await supabase
+            .from("class_members")
+            .select("id")
+            .in("course_class_id", classIdsForCourse);
+          
+          studentCount = cmForCourse?.length || 0;
+
+          // Calculate completion rate
+          const cmIds = cmForCourse?.map(cm => cm.id) || [];
+          if (cmIds.length > 0) {
+            const { data: progress } = await supabase
+              .from("lesson_progress")
+              .select("status")
+              .in("class_member_id", cmIds);
+            
+            const total = progress?.length || 0;
+            const completed = progress?.filter(p => p.status === "completed").length || 0;
+            completion = total > 0 ? (completed / total) * 100 : 0;
+          }
+        }
+
+        return {
+          id: course.id,
+          title: course.title,
+          students: studentCount,
+          rating: avgRating,
+          completion: Math.round(completion),
+        };
+      }));
+
+      const topCoursesSorted = coursesWithStats.sort((a, b) => b.students - a.students).slice(0, 3);
+
+      setAdminStats({
+        total_students: totalStudents,
+        active_students: activeStudents,
+        total_courses: totalCourses,
+        published_courses: publishedCourses,
+        average_rating: coursesWithStats.reduce((sum, c) => sum + c.rating, 0) / (coursesWithStats.length || 1),
+        completion_rate: coursesWithStats.reduce((sum, c) => sum + c.completion, 0) / (coursesWithStats.length || 1),
+        pending_approvals: 0,  // Set to 0 since you're removing this feature
+      });
+
+      setTopCourses(topCoursesSorted);
+
+    } catch (error) {
+      console.error("Error loading admin data:", error);
     }
-
-    // Get pending approvals
-    const { count: pendingCount } = await supabase
-      .from("organization_members")
-      .select("id", { count: "exact", head: true })
-      .eq("organization_id", selectedOrgId)
-      .eq("member_role", "pending");
-
-    setAdminStats({
-      total_students: totalStudents,
-      active_students: activeStudents,
-      total_courses: totalCourses,
-      published_courses: publishedCourses,
-      average_rating: 0,
-      completion_rate: 0,
-      pending_approvals: pendingCount || 0,
-    });
-
-    // Get top courses
-    const topCoursesData: TopCourse[] = (courses || []).slice(0, 3).map(course => ({
-      id: course.id,
-      title: course.title,
-      students: 0,
-      rating: 0,
-      completion: 0,
-    }));
-    setTopCourses(topCoursesData);
   };
 
   const switchOrganization = (orgId: number) => {
@@ -684,12 +749,19 @@ export default function UnifiedDashboardPage() {
               {greeting}, {displayName}! 👋
             </h1>
             <p className="text-gray-400">
-              Welcome to your learning dashboard
+              Welcome to your dashboard
             </p>
           </div>
 
-          {/* Organization Switcher */}
-          {organizations.length > 1 && (
+          {/* Organization Switcher - MODIFY to only show for students */}
+          {organizations.length > 1 && (userRoles.has("admin") || userRoles.has("teacher")) ? (
+            // Teachers/Admins: Show organization name as text, not a switcher
+            <div className="flex items-center gap-2 px-4 py-2 bg-slate-800/50 border border-slate-700 rounded-lg">
+              <Building2 className="w-4 h-4 text-purple-400" />
+              <span className="text-white">{currentOrg?.name}</span>
+            </div>
+          ) : organizations.length > 1 ? (
+            // Students: Show organization switcher (keep existing)
             <div className="relative">
               <button
                 onClick={() => setShowOrgSwitcher(!showOrgSwitcher)}
@@ -702,10 +774,7 @@ export default function UnifiedDashboardPage() {
 
               {showOrgSwitcher && (
                 <>
-                  <div 
-                    className="fixed inset-0 z-40"
-                    onClick={() => setShowOrgSwitcher(false)}
-                  />
+                  <div className="fixed inset-0 z-40" onClick={() => setShowOrgSwitcher(false)} />
                   <div className="absolute top-full right-0 mt-2 w-64 bg-slate-800 rounded-lg border border-slate-700 shadow-xl z-50">
                     {organizations.map(org => (
                       <button
@@ -728,7 +797,7 @@ export default function UnifiedDashboardPage() {
                 </>
               )}
             </div>
-          )}
+          ) : null}
         </div>
 
         {/* Role-based Tabs */}
@@ -851,10 +920,6 @@ export default function UnifiedDashboardPage() {
                 <Plus className="w-4 h-4 mr-2" />
                 Create New Course
               </GlowButton>
-              <GlowButton variant="outline" onClick={() => router.push("/teacher/students/invite")}>
-                <UserPlus className="w-4 h-4 mr-2" />
-                Invite Students
-              </GlowButton>
             </div>
 
             {/* Pending Grading */}
@@ -918,54 +983,70 @@ export default function UnifiedDashboardPage() {
 
           {/* ========== ADMIN / ORGANIZATION ADMIN TAB ========== */}
           <TabsContent value="admin" className="space-y-6">
-            {/* Admin Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <StatCard icon={Users} label="Total Students" value={adminStats.total_students} />
-              <StatCard icon={Activity} label="Active Students" value={adminStats.active_students} />
-              <StatCard icon={BookOpen} label="Published Courses" value={adminStats.published_courses} />
-              <StatCard icon={AlertCircle} label="Pending Approvals" value={adminStats.pending_approvals} />
-            </div>
-
-            {/* Quick Actions */}
-            <div className="flex gap-3">
-              <Link href={`/organizations/${selectedOrgId}/admin`}>
-                <GlowButton variant="primary">
-                  <Settings className="w-4 h-4 mr-2" />
-                  Organization Admin Panel
-                </GlowButton>
-              </Link>
-              <Link href="/courses/create">
-                <GlowButton variant="outline">
-                  <Plus className="w-4 h-4 mr-2" />
-                  Create New Course
-                </GlowButton>
-              </Link>
-            </div>
-
-            {/* Top Courses */}
-            {topCourses.length > 0 && (
-              <GlowCard>
-                <div className="p-6">
-                  <h3 className="text-lg font-semibold text-white mb-4">Top Performing Courses</h3>
-                  <div className="space-y-4">
-                    {topCourses.map(course => (
-                      <div key={course.id} className="flex items-center justify-between">
-                        <div>
-                          <p className="text-white">{course.title}</p>
-                          <p className="text-sm text-gray-400">{course.students} students</p>
-                        </div>
-                        <div className="text-right">
-                          <div className="flex items-center gap-1">
-                            <Star className="w-4 h-4 text-yellow-400" />
-                            <span className="text-white">{course.rating.toFixed(1)}</span>
-                          </div>
-                          <p className="text-sm text-gray-400">{course.completion}% completion</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+            {/* Loading State */}
+            {loading ? (
+              <div className="flex justify-center py-12">
+                <Loader2 className="w-8 h-8 animate-spin text-purple-500" />
+              </div>
+            ) : (
+              <>
+                {/* Admin Stats */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <StatCard icon={Users} label="Total Students" value={adminStats.total_students} />
+                  <StatCard icon={Activity} label="Active Students" value={adminStats.active_students} />
+                  <StatCard icon={BookOpen} label="Published Courses" value={adminStats.published_courses} />
                 </div>
-              </GlowCard>
+
+                {/* Quick Actions */}
+                <div className="flex gap-3">
+                  <Link href={`/organizations/${selectedOrgId}/admin`}>
+                    <GlowButton variant="primary">
+                      <Settings className="w-4 h-4 mr-2" />
+                      Organization Admin Panel
+                    </GlowButton>
+                  </Link>
+                </div>
+
+                {/* Top Courses */}
+                {topCourses.length > 0 ? (
+                  <GlowCard>
+                    <div className="p-6">
+                      <h3 className="text-lg font-semibold text-white mb-4">Top Performing Courses</h3>
+                      <div className="space-y-4">
+                        {topCourses.map(course => (
+                          <div key={course.id} className="flex items-center justify-between">
+                            <div>
+                              <p className="text-white">{course.title}</p>
+                              <p className="text-sm text-gray-400">{course.students} students</p>
+                            </div>
+                            <div className="text-right">
+                              <div className="flex items-center gap-1">
+                                <Star className="w-4 h-4 text-yellow-400" />
+                                <span className="text-white">{course.rating.toFixed(1)}</span>
+                              </div>
+                              <p className="text-sm text-gray-400">{course.completion}% completion</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </GlowCard>
+                ) : (
+                  <GlowCard>
+                    <div className="p-12 text-center">
+                      <BookOpen className="w-16 h-16 text-gray-600 mx-auto mb-4" />
+                      <h3 className="text-xl font-semibold text-white mb-2">No Courses Yet</h3>
+                      <p className="text-gray-400 mb-6">Create your first course to get started</p>
+                      <Link href="/courses/create">
+                        <GlowButton variant="primary">
+                          <Plus className="w-4 h-4 mr-2" />
+                          Create Course
+                        </GlowButton>
+                      </Link>
+                    </div>
+                  </GlowCard>
+                )}
+              </>
             )}
           </TabsContent>
         </Tabs>

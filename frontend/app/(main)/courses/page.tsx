@@ -4,7 +4,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Search, BookOpen, Users, Plus, Clock, ChevronRight, Eye, Edit, Archive, RotateCcw, AlertCircle, BarChart3, Badge } from "lucide-react";
+import { Search, BookOpen, Users, Plus, Clock, ChevronRight, Eye, Edit, Archive, RotateCcw, AlertCircle, BarChart3, Badge, Building2 } from "lucide-react";
 import { GlowCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
 import { Input } from "@/components/ui/input";
@@ -56,10 +56,6 @@ export default function CoursesPage() {
   const [archivedCourses, setArchivedCourses] = useState<Course[]>([]);
   const [userId, setUserId] = useState<string | null>(null);
 
-  // Add for organization filtering
-  const [selectedOrgFilter, setSelectedOrgFilter] = useState<number | null>(null);
-  const [userOrganizations, setUserOrganizations] = useState<Array<{ id: number; name: string }>>([]);
-  
   // Archive/Unarchive modal states
   const [archiveModalOpen, setArchiveModalOpen] = useState(false);
   const [unarchiveModalOpen, setUnarchiveModalOpen] = useState(false);
@@ -263,7 +259,7 @@ export default function CoursesPage() {
       }
       
       // 7. Fetch created courses (for teachers/admins)
-      if (roleData.role === "teacher" || roleData.role === "org_admin") {
+      if (roleData.role === "teacher" || roleData.role === "admin") {
         const { data: createdData } = await supabase
           .from("courses")
           .select("*")
@@ -302,32 +298,6 @@ export default function CoursesPage() {
       setLoading(false);
     }
   };
-
-  // Fetch user's organizations for filtering
-  useEffect(() => {
-    const fetchUserOrgs = async () => {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) return;
-      
-      const { data: memberships } = await supabase
-        .from("organization_members")
-        .select("organization_id, organizations(id, name)")
-        .eq("user_id", user.id)
-        .in("member_role", ["admin", "sub_admin", "teacher"]);
-      
-      if (memberships) {
-        const orgs = memberships.map(m => ({
-          id: m.organization_id,
-          name: m.organizations?.name || `Organization ${m.organization_id}`
-        }));
-        setUserOrganizations(orgs);
-      }
-    };
-    
-    fetchUserOrgs();
-  }, []);
   
   const getInstructorName = (createdBy: string, profileMap: Map<string, any>): string => {
     const profile = profileMap.get(createdBy);
@@ -352,11 +322,6 @@ export default function CoursesPage() {
         course.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (course.description && course.description.toLowerCase().includes(searchQuery.toLowerCase()))
       );
-    }
-    
-    // Apply organization filter for created courses only
-    if (selectedOrgFilter !== null) {
-      filtered = filtered.filter(course => course.organization_id === selectedOrgFilter);
     }
     
     return filtered;
@@ -531,11 +496,14 @@ export default function CoursesPage() {
   };
 
   const getOrgName = (orgId: number): string => {
-    const org = userOrganizations.find(o => o.id === orgId);
-    return org?.name || `Org ${orgId}`;
+    // Since teachers/admins are only in one org, we can use roleData
+    if ((roleData.role === 'teacher' || roleData.role === 'admin') && roleData.organizationId === orgId) {
+      return roleData.organizationName || `Org ${orgId}`;
+    }
+    return `Org ${orgId}`;
   };
 
-  const isTeacher = roleData.role === "teacher" || roleData.role === "org_admin";
+  const isTeacher = roleData.role === "teacher" || roleData.role === "admin";
   const isStudent = roleData.role === "student" || roleData.role === "teacher";
   const hasArchivedCourses = archivedCourses.length > 0;
 
@@ -728,35 +696,17 @@ export default function CoursesPage() {
           {/* Created Courses Tab - ADD Archive Button ONLY */}
           {isTeacher && (
             <TabsContent value="created" className="mt-6">
-              {/* Add Organization Filter Bar */}
-              <div className="mb-6">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm text-gray-400 mr-2">Filter by organization:</span>
-                  <button
-                    onClick={() => setSelectedOrgFilter(null)}
-                    className={`px-3 py-1.5 rounded-lg text-sm transition-all ${
-                      selectedOrgFilter === null
-                        ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
-                        : 'bg-slate-800/50 text-gray-400 hover:bg-slate-800 border border-slate-700'
-                    }`}
-                  >
-                    All
-                  </button>
-                  {userOrganizations.map(org => (
-                    <button
-                      key={org.id}
-                      onClick={() => setSelectedOrgFilter(org.id)}
-                      className={`px-3 py-1.5 rounded-lg text-sm transition-all ${
-                        selectedOrgFilter === org.id
-                          ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
-                          : 'bg-slate-800/50 text-gray-400 hover:bg-slate-800 border border-slate-700'
-                      }`}
-                    >
-                      {org.name}
-                    </button>
-                  ))}
+  
+              {/* Show organization name as info instead - ADD THIS */}
+              {roleData.organizationId && (
+                <div className="mb-4 p-3 bg-purple-500/10 border border-purple-500/30 rounded-lg flex items-center gap-2">
+                  <Building2 className="w-4 h-4 text-purple-400" />
+                  <span className="text-sm text-gray-300">
+                    Teaching organization: <span className="text-purple-400 font-medium">{roleData.organizationName || `Organization ${roleData.organizationId}`}</span>
+                  </span>
                 </div>
-              </div>
+              )}
+
 
               {filteredCreatedCourses.length > 0 ? (
                 <div className="space-y-4">

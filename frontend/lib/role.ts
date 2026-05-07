@@ -1,32 +1,15 @@
 // frontend/lib/role.ts
 "use client";
 
-export type UserRole = 'student' | 'teacher' | 'org_admin' | 'pending_teacher' | 'pending_org_admin';
+export type UserRole = 'student' | 'teacher' | 'admin' | 'pending_teacher' | 'pending_admin';
 
 export interface RoleData {
   role: UserRole;
   organizationId: number | null;
   organizationName: string | null;
-  pendingRole: 'teacher' | 'org_admin' | null;
+  pendingRole: 'teacher' | 'admin' | null;
   pendingOrganizationId?: number | null;
   pendingOrganizationName?: string | null;
-}
-
-// Add this function
-export function switchOrganization(organizationId: number | null, organizationName: string | null, role: UserRole): void {
-  const currentData = getUserRoleData();
-  const newData: RoleData = {
-    ...currentData,
-    role,
-    organizationId,
-    organizationName,
-  };
-  setUserRoleData(newData);
-  
-  // Dispatch event for other components
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('organizationSwitched', { detail: newData }));
-  }
 }
 
 export interface Organization {
@@ -142,14 +125,14 @@ export function hasPermission(requiredRole: UserRole): boolean {
   const roleHierarchy: Record<UserRole, number> = {
     student: 1,
     pending_teacher: 1,
-    pending_org_admin: 1,
+    pending_admin: 1,
     teacher: 2,
-    org_admin: 3,
+    admin: 3,
   };
   return roleHierarchy[role] >= roleHierarchy[requiredRole];
 }
 
-export function requestRoleUpgrade(desiredRole: 'teacher' | 'org_admin', organizationId?: number): void {
+export function requestRoleUpgrade(desiredRole: 'teacher' | 'admin', organizationId?: number): void {
   const current = getUserRoleData();
   if (current.role === desiredRole) return;
   

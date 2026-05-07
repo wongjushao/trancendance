@@ -1,4 +1,4 @@
-// frontend/app/(main)/organizations/[id]/admin/page.tsx (updated with real data)
+// frontend/app/(main)/organizations/[id]/admin/page.tsx
 "use client";
 
 import { useState, useEffect } from "react";
@@ -39,7 +39,8 @@ import {
   AlertTriangle,
   Check,
   ChevronDown,
-  Building2
+  Building2,
+  MessageCircle
 } from "lucide-react";
 import { GlowCard, StatCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
@@ -65,7 +66,6 @@ import {
 import { useRole } from "@/components/providers/RoleProvider";
 import { InviteMemberModal } from "@/components/organization/InviteMemberModal";
 import { toast } from "sonner";
-import { PendingRequestsTab } from '@/components/organization/PendingRequestsTab';
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 
 // Types for organization data from database
@@ -119,26 +119,6 @@ interface AnalyticsData {
   monthlyGrowth: number;
 }
 
-interface RoleRequestData {
-  id: string;
-  user_id: string;
-  user_name: string;
-  user_email: string;
-  requested_role: string;
-  organization_id: number;
-  created_at: string;
-}
-
-interface JoinRequestData {
-  id: string;
-  user_id: string;
-  user_name: string;
-  user_email: string;
-  requested_role: string;
-  message: string | null;
-  created_at: string;
-}
-
 interface PageProps {
   params: Promise<{ id: string }>;
 }
@@ -155,8 +135,6 @@ export default function OrganizationAdminPage({ params }: PageProps) {
   const [organization, setOrganization] = useState<OrganizationData | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
-  const [roleRequests, setRoleRequests] = useState<RoleRequestData[]>([]);
-  const [pendingJoinRequests, setPendingJoinRequests] = useState<JoinRequestData[]>([]);
   const [domains, setDomains] = useState<OrganizationDomain[]>([]);
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -168,7 +146,6 @@ export default function OrganizationAdminPage({ params }: PageProps) {
   const [editingMember, setEditingMember] = useState<Member | null>(null);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [activeTab, setActiveTab] = useState("members");
-  const [tabScrollPositions, setTabScrollPositions] = useState<Record<string, number>>({});
   
   // Settings form state
   const [settingsForm, setSettingsForm] = useState({
@@ -181,44 +158,136 @@ export default function OrganizationAdminPage({ params }: PageProps) {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [copied, setCopied] = useState(false);
-  
-  // User's organizations (for the admin switcher)
-  const [userOrgs, setUserOrgs] = useState<Array<{ id: number; name: string; role: string }>>([]);
-  const [showOrgSwitcher, setShowOrgSwitcher] = useState(false);
 
-  // Load user's organizations (where they are admin)
-  useEffect(() => {
-    const loadUserOrganizations = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
 
-      // Get all organizations where user is admin
-      const { data: memberData } = await supabase
-        .from("organization_members")
-        .select(`
-          organization_id,
-          member_role,
-          organizations:organizations!inner (
-            id,
-            name,
-            slug
-          )
-        `)
-        .eq("user_id", user.id)
-        .in("member_role", ["admin", "sub_admin"]);
+  // Add these state variables (no userOrganizations array needed)
+  const [deleteCooldown, setDeleteCooldown] = useState<{
+    organizationId: number;
+    requestedAt: string;
+    scheduledDeletionDate: string;
+    daysRemaining: number;
+  } | null>(null);
+  const [deletionStep, setDeletionStep] = useState<'select' | 'confirm' | 'cooldown' | 'recovery-request'>('select');
+  const [recoveryReason, setRecoveryReason] = useState('');
 
-      if (memberData) {
-        const orgs = memberData.map((m: any) => ({
-          id: m.organization_id,
-          name: m.organizations.name,
-          role: m.member_role
-        }));
-        setUserOrgs(orgs);
-      }
+  // Add these helper functions that use the organizationId from params
+  const startOrganizationDeletion = () => {
+    if (!organizationId || !organization?.name) {
+      toast.error("No organization found");
+      return;
+    }
+    
+    const now = new Date();
+    const scheduledDate = new Date();
+    scheduledDate.setDate(now.getDate() + 30);
+    
+    const cooldownData = {
+      organizationId: organizationId,
+      requestedAt: now.toISOString(),
+      scheduledDeletionDate: scheduledDate.toISOString(),
+      daysRemaining: 30
     };
+    
+    const existingDeletions = localStorage.getItem('pending_organization_deletions');
+    let deletions = existingDeletions ? JSON.parse(existingDeletions) : [];
+    
+    deletions = deletions.filter((d: any) => d.organizationId !== organizationId);
+    deletions.push(cooldownData);
+    
+    localStorage.setItem('pending_organization_deletions', JSON.stringify(deletions));
+    
+    setDeleteCooldown({
+      ...cooldownData,
+      daysRemaining: 30
+    });
+    setDeletionStep('cooldown');
+    
+    toast.success(`Deletion scheduled for ${organization.name}. You have 30 days to cancel.`);
+  };
 
-    loadUserOrganizations();
-  }, []);
+  const cancelOrganizationDeletion = () => {
+    if (!organizationId || !deleteCooldown) return;
+    
+    if (confirm(`Are you sure you want to cancel the deletion of ${organization?.name}?`)) {
+      const existingDeletions = localStorage.getItem('pending_organization_deletions');
+      if (existingDeletions) {
+        let deletions = JSON.parse(existingDeletions);
+        deletions = deletions.filter((d: any) => d.organizationId !== organizationId);
+        localStorage.setItem('pending_organization_deletions', JSON.stringify(deletions));
+      }
+      
+      setDeleteCooldown(null);
+      setDeletionStep('select');
+      
+      toast.success(`Deletion of ${organization?.name} has been cancelled.`);
+    }
+  };
+
+  const requestRecoveryFromAdmin = async () => {
+    if (!organizationId || !organization?.name || !recoveryReason.trim()) {
+      toast.error("Please provide a reason for recovery request");
+      return;
+    }
+    
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      const response = await fetch('/api/auth-service/contact-support', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session?.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          subject: `Organization Recovery Request: ${organization.name}`,
+          message: `Organization ID: ${organizationId}\n\nReason for recovery:\n${recoveryReason}\n\nRequesting cancellation of scheduled deletion.`,
+          type: 'org_recovery'
+        }),
+      });
+      
+      if (response.ok) {
+        toast.success("Recovery request submitted. System admin will review and contact you.");
+        setDeletionStep('cooldown');
+        setRecoveryReason("");
+      } else {
+        throw new Error("Failed to submit request");
+      }
+    } catch (error) {
+      console.error("Error submitting recovery request:", error);
+      toast.error("Failed to submit recovery request. Please try again.");
+    }
+  };
+
+  // Check for existing pending deletion on component mount
+  useEffect(() => {
+    if (!organizationId) return;
+    
+    const savedDeletions = localStorage.getItem('pending_organization_deletions');
+    if (savedDeletions) {
+      const deletions = JSON.parse(savedDeletions);
+      const pendingDeletion = deletions.find((d: any) => d.organizationId === organizationId);
+      
+      if (pendingDeletion) {
+        const scheduledDate = new Date(pendingDeletion.scheduledDeletionDate);
+        const now = new Date();
+        const daysRemaining = Math.ceil((scheduledDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+        
+        if (daysRemaining > 0) {
+          setDeleteCooldown({
+            organizationId: pendingDeletion.organizationId,
+            requestedAt: pendingDeletion.requestedAt,
+            scheduledDeletionDate: pendingDeletion.scheduledDeletionDate,
+            daysRemaining: daysRemaining
+          });
+          setDeletionStep('cooldown');
+        } else {
+          const updatedDeletions = deletions.filter((d: any) => d.organizationId !== organizationId);
+          localStorage.setItem('pending_organization_deletions', JSON.stringify(updatedDeletions));
+        }
+      }
+    }
+  }, [organizationId]);
 
   // Load organization data
   useEffect(() => {
@@ -243,6 +312,18 @@ export default function OrganizationAdminPage({ params }: PageProps) {
         toast.error("You don't have permission to access this page");
         router.push(`/organizations/${organizationId}`);
         return;
+      }
+
+      // Update roleData
+      if (roleData.role !== memberCheck.member_role || roleData.organizationId !== organizationId) {
+        setRole({
+          role: memberCheck.member_role as any,
+          organizationId: organizationId,
+          organizationName: organization?.name || null,
+          pendingRole: null,
+          pendingOrganizationId: null,
+          pendingOrganizationName: null,
+        });
       }
 
       // Get organization details
@@ -274,48 +355,151 @@ export default function OrganizationAdminPage({ params }: PageProps) {
             first_name,
             last_name,
             username,
-            email,
             avatar_url
           )
         `)
         .eq("organization_id", organizationId);
 
-      if (memberData) {
-        // Get course counts for each member
-        const membersWithCourses: Member[] = await Promise.all(memberData.map(async (m: any) => {
-          // Get number of courses this user is enrolled in or teaching
+      // Get all courses in this organization for course count
+      const { data: orgCourses } = await supabase
+        .from("courses")
+        .select("id, created_by, title, description, thumbnail, status, created_at")
+        .eq("organization_id", organizationId);
+
+      if (memberData && orgCourses) {
+        // Create a map of course counts by instructor
+        const instructorCourseCount = new Map<string, number>();
+        orgCourses.forEach(course => {
+          instructorCourseCount.set(course.created_by, (instructorCourseCount.get(course.created_by) || 0) + 1);
+        });
+
+        // Get student course counts
+        const { data: classMembers } = await supabase
+          .from("class_members")
+          .select("user_id, role");
+
+        const studentCourseCount = new Map<string, number>();
+        classMembers?.forEach(cm => {
+          if (cm.role === 'student') {
+            studentCourseCount.set(cm.user_id, (studentCourseCount.get(cm.user_id) || 0) + 1);
+          }
+        });
+
+        const membersWithCourses: Member[] = (memberData || []).map((m: any) => {
           let courseCount = 0;
           
           if (m.member_role === "student") {
-            const { count } = await supabase
-              .from("class_members")
-              .select("id", { count: "exact", head: true })
-              .eq("user_id", m.user_id);
-            courseCount = count || 0;
-          } else if (m.member_role === "teacher") {
-            const { count } = await supabase
-              .from("courses")
-              .select("id", { count: "exact", head: true })
-              .eq("created_by", m.user_id);
-            courseCount = count || 0;
+            courseCount = studentCourseCount.get(m.user_id) || 0;
+          } else if (m.member_role === "teacher" || m.member_role === "admin" || m.member_role === "sub_admin") {
+            courseCount = instructorCourseCount.get(m.user_id) || 0;
           }
+          
+          const firstName = m.user?.first_name || "";
+          const lastName = m.user?.last_name || "";
+          const username = m.user?.username || "";
+          
+          let name = "Unknown User";
+          if (firstName && lastName) name = `${firstName} ${lastName}`;
+          else if (firstName) name = firstName;
+          else if (username) name = username;
+          
+          let avatar = "U";
+          if (firstName) avatar = firstName[0].toUpperCase();
+          else if (username) avatar = username[0].toUpperCase();
           
           return {
             id: m.user_id,
             user_id: m.user_id,
-            name: m.user.first_name 
-              ? `${m.user.first_name} ${m.user.last_name || ""}`.trim()
-              : m.user.username || m.user.email,
-            email: m.user.email,
+            name: name,
+            email: "", // Email not available in profiles, using empty string
             role: m.member_role as Member["role"],
-            avatar: m.user.avatar_url || (m.user.first_name?.[0] || m.user.email?.[0] || "U").toUpperCase(),
+            avatar: m.user?.avatar_url || avatar,
             joinedAt: new Date(m.created_at).toISOString().split("T")[0],
             courses: courseCount,
             lastActive: new Date(m.created_at).toISOString().split("T")[0],
             status: "active",
           };
-        }));
+        });
+        
         setMembers(membersWithCourses);
+        
+        // Calculate analytics with proper role separation
+        const totalStudents = membersWithCourses.filter(m => m.role === "student").length;
+        const totalTeachers = membersWithCourses.filter(m => m.role === "teacher" || m.role === "admin" || m.role === "sub_admin").length;
+        const totalCoursesCount = orgCourses?.length || 0;
+        const publishedCourses = orgCourses?.filter(c => c.status === "published").length || 0;
+        
+        // Calculate average rating across all courses
+        let totalRatingSum = 0;
+        let totalRatingCount = 0;
+        for (const course of orgCourses || []) {
+          const { data: reviews } = await supabase
+            .from("course_reviews")
+            .select("rating")
+            .eq("course_id", course.id);
+          
+          if (reviews && reviews.length > 0) {
+            totalRatingSum += reviews.reduce((sum, r) => sum + r.rating, 0);
+            totalRatingCount += reviews.length;
+          }
+        }
+        const averageRating = totalRatingCount > 0 ? totalRatingSum / totalRatingCount : 0;
+        
+        // Calculate completion rate from lesson_progress
+        let totalProgress = 0;
+        let totalProgressCount = 0;
+        
+        // Get all course classes for this organization's courses
+        const courseIds = orgCourses?.map(c => c.id) || [];
+        if (courseIds.length > 0) {
+          const { data: courseClassesData } = await supabase
+            .from("course_classes")
+            .select("id")
+            .in("course_id", courseIds);
+          
+          const classIds = courseClassesData?.map(cc => cc.id) || [];
+          
+          if (classIds.length > 0) {
+            const { data: classMembersData } = await supabase
+              .from("class_members")
+              .select("id")
+              .in("course_class_id", classIds);
+            
+            const cmIds = classMembersData?.map(cm => cm.id) || [];
+            
+            if (cmIds.length > 0) {
+              const { data: lessonProgress } = await supabase
+                .from("lesson_progress")
+                .select("status")
+                .in("class_member_id", cmIds);
+              
+              const completed = lessonProgress?.filter(lp => lp.status === "completed").length || 0;
+              totalProgress += completed;
+              totalProgressCount += lessonProgress?.length || 0;
+            }
+          }
+        }
+        const completionRate = totalProgressCount > 0 ? (totalProgress / totalProgressCount) * 100 : 0;
+        
+        // Calculate monthly growth
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        
+        const recentMembers = membersWithCourses.filter(m => {
+          const joinedDate = new Date(m.joinedAt);
+          return joinedDate > thirtyDaysAgo;
+        }).length;
+        
+        const monthlyGrowth = totalStudents > 0 ? Math.round((recentMembers / totalStudents) * 100) : 0;
+        
+        setAnalytics({
+          totalStudents,
+          totalTeachers,
+          totalCourses: totalCoursesCount,
+          averageRating: Math.round(averageRating * 10) / 10,
+          completionRate: Math.round(completionRate),
+          monthlyGrowth: Math.max(0, monthlyGrowth),
+        });
       }
 
       // Get organization domains
@@ -325,113 +509,48 @@ export default function OrganizationAdminPage({ params }: PageProps) {
         .eq("organization_id", organizationId);
       setDomains(domainData || []);
 
-      // Load role requests from organization_members where member_role is 'pending'
-      const { data: pendingRoleRequests } = await supabase
-        .from("organization_members")
-        .select(`
-          id,
-          user_id,
-          member_role,
-          created_at,
-          user:profiles!organization_members_user_id_fkey (
-            first_name,
-            last_name,
-            username,
-            email
-          )
-        `)
-        .eq("organization_id", organizationId)
-        .eq("member_role", "pending");
-
-      if (pendingRoleRequests) {
-        const formattedRequests: RoleRequestData[] = pendingRoleRequests.map((req: any) => ({
-          id: req.id,
-          user_id: req.user_id,
-          user_name: req.user?.first_name 
-            ? `${req.user.first_name} ${req.user.last_name || ""}`.trim()
-            : req.user?.username || req.user?.email || "Unknown",
-          user_email: req.user?.email || "",
-          requested_role: "member", // They're requesting to join the organization
-          organization_id: organizationId,
-          created_at: req.created_at,
-        }));
-        setRoleRequests(formattedRequests);
-      }
-
-      // Load join requests (these are users requesting to join with a specific role)
-      // Note: Since there's no separate join_requests table, we're using the same organization_members table
-      // with member_role = 'pending' as the representation of join requests.
-      const { data: joinRequests } = await supabase
-        .from("organization_members")
-        .select(`
-          id,
-          user_id,
-          member_role,
-          created_at,
-          user:profiles!organization_members_user_id_fkey (
-            first_name,
-            last_name,
-            username,
-            email
-          )
-        `)
-        .eq("organization_id", organizationId)
-        .eq("member_role", "pending");
-
-      if (joinRequests) {
-        const formattedJoinRequests: JoinRequestData[] = joinRequests.map((req: any) => ({
-          id: req.id,
-          user_id: req.user_id,
-          user_name: req.user?.first_name 
-            ? `${req.user.first_name} ${req.user.last_name || ""}`.trim()
-            : req.user?.username || req.user?.email || "Unknown",
-          user_email: req.user?.email || "",
-          requested_role: req.member_role,
-          message: null,
-          created_at: req.created_at,
-        }));
-        setPendingJoinRequests(formattedJoinRequests);
-      }
-
       // Load courses for this organization with real stats
-      const { data: courseData } = await supabase
-        .from("courses")
-        .select("*")
-        .eq("organization_id", organizationId);
-      
-      if (courseData) {
-        // Get instructor names and course stats
-        const formattedCourses: Course[] = await Promise.all(courseData.map(async (c: any) => {
+      if (orgCourses) {
+        const formattedCourses: Course[] = await Promise.all(orgCourses.map(async (c: any) => {
           // Get instructor name
           let instructorName = "Unknown Instructor";
           if (c.created_by) {
-            const { data: instructor } = await supabase
-              .from("profiles")
-              .select("first_name, last_name, username")
-              .eq("id", c.created_by)
-              .single();
-            
-            if (instructor) {
-              instructorName = instructor.first_name 
-                ? `${instructor.first_name} ${instructor.last_name || ""}`.trim()
-                : instructor.username || "Instructor";
+            const instructorProfile = members.find(m => m.user_id === c.created_by);
+            if (instructorProfile) {
+              instructorName = instructorProfile.name;
+            } else {
+              const { data: instructor } = await supabase
+                .from("profiles")
+                .select("first_name, last_name, username")
+                .eq("id", c.created_by)
+                .single();
+              
+              if (instructor) {
+                instructorName = instructor.first_name 
+                  ? `${instructor.first_name} ${instructor.last_name || ""}`.trim()
+                  : instructor.username || "Instructor";
+              }
             }
           }
 
           // Get student count (through course_classes and class_members)
-          const { data: courseClasses } = await supabase
+          const { data: courseClassesData } = await supabase
             .from("course_classes")
             .select("id")
             .eq("course_id", c.id);
           
-          const classIds = courseClasses?.map(cc => cc.id) || [];
+          const classIds = courseClassesData?.map(cc => cc.id) || [];
           let studentCount = 0;
           if (classIds.length > 0) {
-            const { count } = await supabase
+            const { data: classMembersData } = await supabase
               .from("class_members")
-              .select("id", { count: "exact", head: true })
-              .in("course_class_id", classIds);
-            studentCount = count || 0;
+              .select("user_id")
+              .in("course_class_id", classIds)
+              .eq("role", "student");
+            
+            // Count unique students
+            const uniqueStudents = new Set(classMembersData?.map(cm => cm.user_id));
+            studentCount = uniqueStudents.size;
           }
 
           // Get average rating
@@ -459,167 +578,11 @@ export default function OrganizationAdminPage({ params }: PageProps) {
         setCourses(formattedCourses);
       }
 
-      // Calculate analytics from real data
-      const totalStudents = members.filter(m => m.role === "student").length;
-      const totalTeachers = members.filter(m => m.role === "teacher" || m.role === "admin").length;
-      const totalCoursesCount = courseData?.length || 0;
-      
-      // Calculate average rating across all courses
-      let totalRatingSum = 0;
-      let totalRatingCount = 0;
-      for (const course of courseData || []) {
-        const { data: reviews } = await supabase
-          .from("course_reviews")
-          .select("rating")
-          .eq("course_id", course.id);
-        
-        if (reviews && reviews.length > 0) {
-          totalRatingSum += reviews.reduce((sum, r) => sum + r.rating, 0);
-          totalRatingCount += reviews.length;
-        }
-      }
-      const averageRating = totalRatingCount > 0 ? totalRatingSum / totalRatingCount : 0;
-
-      // Calculate completion rate from lesson_progress
-      let totalProgress = 0;
-      let totalProgressCount = 0;
-      
-      // Get all class_members for this organization's courses
-      for (const course of courseData || []) {
-        const { data: courseClasses } = await supabase
-          .from("course_classes")
-          .select("id")
-          .eq("course_id", course.id);
-        
-        const classIds = courseClasses?.map(cc => cc.id) || [];
-        
-        if (classIds.length > 0) {
-          const { data: classMembers } = await supabase
-            .from("class_members")
-            .select("id")
-            .in("course_class_id", classIds);
-          
-          const cmIds = classMembers?.map(cm => cm.id) || [];
-          
-          if (cmIds.length > 0) {
-            const { data: lessonProgress } = await supabase
-              .from("lesson_progress")
-              .select("status")
-              .in("class_member_id", cmIds);
-            
-            const completed = lessonProgress?.filter(lp => lp.status === "completed").length || 0;
-            totalProgress += completed;
-            totalProgressCount += lessonProgress?.length || 0;
-          }
-        }
-      }
-      const completionRate = totalProgressCount > 0 ? (totalProgress / totalProgressCount) * 100 : 0;
-
-      // Calculate monthly growth (new members in last 30 days vs previous 30 days)
-      const thirtyDaysAgo = new Date();
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-      const sixtyDaysAgo = new Date();
-      sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
-      
-      const recentMembers = members.filter(m => new Date(m.joinedAt) > thirtyDaysAgo).length;
-      const previousMembers = members.filter(m => {
-        const joinedDate = new Date(m.joinedAt);
-        return joinedDate <= thirtyDaysAgo && joinedDate > sixtyDaysAgo;
-      }).length;
-      
-      const monthlyGrowth = previousMembers > 0 
-        ? Math.round((recentMembers - previousMembers) / previousMembers * 100) 
-        : recentMembers > 0 ? 100 : 0;
-
-      setAnalytics({
-        totalStudents,
-        totalTeachers,
-        totalCourses: totalCoursesCount,
-        averageRating: Math.round(averageRating * 10) / 10,
-        completionRate: Math.round(completionRate),
-        monthlyGrowth: Math.max(0, monthlyGrowth),
-      });
-
       setLoading(false);
     };
 
     loadData();
   }, [organizationId, router]);
-
-  // Handle tab changes with scroll preservation
-  const handleTabChange = (value: string) => {
-    setTabScrollPositions(prev => ({
-      ...prev,
-      [activeTab]: window.scrollY
-    }));
-    setActiveTab(value);
-  };
-
-  // Restore scroll position after tab changes
-  useEffect(() => {
-    const savedPosition = tabScrollPositions[activeTab];
-    if (savedPosition !== undefined) {
-      const timer = setTimeout(() => {
-        window.scrollTo({ top: savedPosition, behavior: 'instant' });
-      }, 50);
-      return () => clearTimeout(timer);
-    }
-  }, [activeTab, tabScrollPositions]);
-
-  // Role request handlers (approve/reject join requests)
-  const handleApproveRoleRequest = async (requestId: string, userId: string, requestedRole: string) => {
-    // Update the user's role in organization_members from 'pending' to actual role
-    const { error } = await supabase
-      .from("organization_members")
-      .update({ member_role: requestedRole === "teacher" ? "teacher" : "student" })
-      .eq("id", requestId);
-
-    if (error) {
-      console.error("Error approving request:", error);
-      toast.error("Failed to approve request");
-      return;
-    }
-
-    // Remove from pending list
-    setRoleRequests(prev => prev.filter(req => req.id !== requestId));
-    
-    // Get user details to add to members list
-    const approvedRequest = roleRequests.find(req => req.id === requestId);
-    if (approvedRequest) {
-      const newMember: Member = {
-        id: approvedRequest.user_id,
-        user_id: approvedRequest.user_id,
-        name: approvedRequest.user_name,
-        email: approvedRequest.user_email,
-        role: requestedRole === "teacher" ? "teacher" : "student",
-        avatar: approvedRequest.user_name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase(),
-        joinedAt: new Date().toISOString().split("T")[0],
-        courses: 0,
-        lastActive: new Date().toISOString().split("T")[0],
-        status: "active",
-      };
-      setMembers(prev => [...prev, newMember]);
-    }
-    
-    toast.success(`Request approved - user added as ${requestedRole}`);
-  };
-
-  const handleRejectRoleRequest = async (requestId: string) => {
-    // Remove the pending membership
-    const { error } = await supabase
-      .from("organization_members")
-      .delete()
-      .eq("id", requestId);
-
-    if (error) {
-      console.error("Error rejecting request:", error);
-      toast.error("Failed to reject request");
-      return;
-    }
-
-    setRoleRequests(prev => prev.filter(req => req.id !== requestId));
-    toast.info("Request has been rejected");
-  };
 
   // Member management
   const handleRemoveMember = async (memberId: string, memberName: string, memberRole: string) => {
@@ -661,10 +624,10 @@ export default function OrganizationAdminPage({ params }: PageProps) {
     
     setMembers(prev =>
       prev.map(member =>
-        member.id === editingMember.id ? editingMember : member
+        member.id === editingMember.id ? { ...member, role: editingMember.role } : member
       )
     );
-    toast.success(`${editingMember.name}'s role updated`);
+    toast.success(`${editingMember.name}'s role updated to ${editingMember.role}`);
     setEditingMember(null);
   };
 
@@ -800,14 +763,9 @@ export default function OrganizationAdminPage({ params }: PageProps) {
     toast.success("Invite link copied to clipboard");
   };
 
-  // Switch to another organization's admin page
-  const switchOrganization = (orgId: number) => {
-    router.push(`/organizations/${orgId}/admin`);
-  };
-
   const filteredMembers = members.filter(member => {
     const matchesSearch = member.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          member.email.toLowerCase().includes(searchQuery.toLowerCase());
+                          (member.email && member.email.toLowerCase().includes(searchQuery.toLowerCase()));
     const matchesRole = roleFilter === "all" || member.role === roleFilter;
     const matchesStatus = statusFilter === "all" || member.status === statusFilter;
     return matchesSearch && matchesRole && matchesStatus;
@@ -836,7 +794,7 @@ export default function OrganizationAdminPage({ params }: PageProps) {
 
   return (
     <div className="space-y-8 pb-12">
-      {/* Header with Organization Switcher */}
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-4xl font-bold text-white mb-2">
@@ -845,47 +803,7 @@ export default function OrganizationAdminPage({ params }: PageProps) {
           <p className="text-gray-400">
             Manage your organization's members, courses, and settings.
           </p>
-        </div>
-        
-        {/* Organization Switcher Dropdown */}
-        {userOrgs.length > 1 && (
-          <div className="relative">
-            <button
-              onClick={() => setShowOrgSwitcher(!showOrgSwitcher)}
-              className="flex items-center gap-2 px-4 py-2 bg-gray-800/50 border border-gray-700 rounded-lg hover:bg-gray-800 transition-colors"
-            >
-              <Building2 className="w-4 h-4 text-purple-400" />
-              <span className="text-white">Switch Organization</span>
-              <ChevronDown className="w-4 h-4 text-gray-400" />
-            </button>
-            
-            {showOrgSwitcher && (
-              <>
-                <div 
-                  className="fixed inset-0 z-40"
-                  onClick={() => setShowOrgSwitcher(false)}
-                />
-                <div className="absolute right-0 mt-2 w-64 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-50">
-                  {userOrgs.map((org) => (
-                    <button
-                      key={org.id}
-                      onClick={() => {
-                        switchOrganization(org.id);
-                        setShowOrgSwitcher(false);
-                      }}
-                      className={`w-full text-left px-4 py-3 hover:bg-gray-800 transition-colors first:rounded-t-lg last:rounded-b-lg ${
-                        org.id === organizationId ? "bg-gray-800/50 text-purple-400" : "text-white"
-                      }`}
-                    >
-                      <div className="font-medium">{org.name}</div>
-                      <div className="text-xs text-gray-500 mt-0.5 capitalize">{org.role}</div>
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-        )}
+        </div>  
       </div>
 
       {/* Stats Grid */}
@@ -893,37 +811,28 @@ export default function OrganizationAdminPage({ params }: PageProps) {
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <StatCard icon={Users} label="Total Students" value={analytics.totalStudents.toLocaleString()} />
-            <StatCard icon={BookOpen} label="Courses" value={analytics.totalCourses.toString()} />
+            <StatCard icon={Users} label="Teachers & Admins" value={analytics.totalTeachers.toLocaleString()} />
+            <StatCard icon={BookOpen} label="Total Courses" value={analytics.totalCourses.toString()} />
             <StatCard icon={Star} label="Avg. Rating" value={analytics.averageRating.toString()} />
-            <StatCard icon={TrendingUp} label="Monthly Growth" value={`+${analytics.monthlyGrowth}%`} trendUp={true} />
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <StatCard icon={TrendingUp} label="Completion Rate" value={`${analytics.completionRate}%`} />
-            <StatCard icon={Users} label="Teachers" value={analytics.totalTeachers.toString()} />
+            <StatCard icon={TrendingUp} label="Monthly Growth" value={`+${analytics.monthlyGrowth}%`} trendUp={true} />
           </div>
         </>
       )}
 
       {/* Admin Tabs */}
       <div className="tabs-content-wrapper">
-        <Tabs defaultValue="members" value={activeTab} onValueChange={handleTabChange} className="w-full">
+        <Tabs defaultValue="members" value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="bg-gray-800/50 border border-gray-700 p-1 rounded-2xl mb-8 flex-wrap h-auto">
             <TabsTrigger value="members" className="rounded-xl px-6 py-2.5">
               <Users className="w-4 h-4 mr-2" />
-              Members
+              Members ({members.length})
             </TabsTrigger>
             <TabsTrigger value="courses" className="rounded-xl px-6 py-2.5">
               <BookOpen className="w-4 h-4 mr-2" />
-              Courses
-            </TabsTrigger>
-            <TabsTrigger value="role-requests" className="rounded-xl px-6 py-2.5">
-              <Clock className="w-4 h-4 mr-2" />
-              Join Requests
-              {roleRequests.length > 0 && (
-                <span className="ml-2 px-2 py-0.5 bg-yellow-500/20 text-yellow-400 rounded-full text-xs">
-                  {roleRequests.length}
-                </span>
-              )}
+              Courses ({courses.length})
             </TabsTrigger>
             <TabsTrigger value="analytics" className="rounded-xl px-6 py-2.5">
               <BarChart3 className="w-4 h-4 mr-2" />
@@ -935,7 +844,7 @@ export default function OrganizationAdminPage({ params }: PageProps) {
             </TabsTrigger>
           </TabsList>
 
-          {/* Members Tab - UI preserved, data from Supabase */}
+          {/* Members Tab */}
           <TabsContent value="members">
             <GlowCard>
               <div className="min-h-[400px]">
@@ -1005,10 +914,10 @@ export default function OrganizationAdminPage({ params }: PageProps) {
                               </div>
                               <div>
                                 <p className="text-white font-medium">{member.name}</p>
-                                <p className="text-sm text-gray-400">{member.email}</p>
+                                <p className="text-sm text-gray-400">{member.email || "No email"}</p>
                               </div>
                             </div>
-                           </td>
+                          </td>
                           <td className="py-3 px-4">
                             <span className={`px-2 py-1 rounded-full text-xs ${
                               member.role === "admin" 
@@ -1021,7 +930,7 @@ export default function OrganizationAdminPage({ params }: PageProps) {
                             }`}>
                               {member.role === "sub_admin" ? "Sub Admin" : member.role.charAt(0).toUpperCase() + member.role.slice(1)}
                             </span>
-                            </td>
+                          </td>
                           <td className="py-3 px-4">
                             <span className={`px-2 py-1 rounded-full text-xs ${
                               member.status === "active" 
@@ -1030,7 +939,7 @@ export default function OrganizationAdminPage({ params }: PageProps) {
                             }`}>
                               {member.status}
                             </span>
-                            </td>
+                          </td>
                           <td className="py-3 px-4 text-gray-400 text-sm">{member.joinedAt}</td>
                           <td className="py-3 px-4 text-white">{member.courses}</td>
                           <td className="py-3 px-4">
@@ -1043,18 +952,18 @@ export default function OrganizationAdminPage({ params }: PageProps) {
                               </button>
                               {member.role !== "admin" && (
                                 <button 
-                                  onClick={() => handleRemoveMember(member.id, member.name, member.role)}
+                                  onClick={() => handleRemoveMember(member.user_id, member.name, member.role)}
                                   className="p-1 hover:bg-gray-700 rounded-lg transition-colors"
                                 >
                                   <Trash2 className="w-4 h-4 text-red-400" />
                                 </button>
                               )}
                             </div>
-                            </td>
-                         </>
+                          </td>
+                        </tr>
                       ))}
                     </tbody>
-                   </>
+                  </table>
                 </div>
               </div>
             </GlowCard>
@@ -1120,53 +1029,6 @@ export default function OrganizationAdminPage({ params }: PageProps) {
             </GlowCard>
           </TabsContent>
 
-          {/* Join Requests Tab */}
-          <TabsContent value="role-requests">
-            <GlowCard>
-              <div className="min-h-[400px]">
-                <h2 className="text-2xl font-bold text-white mb-6">Join Requests</h2>
-                {roleRequests.length === 0 ? (
-                  <div className="text-center py-8">
-                    <Clock className="w-12 h-12 text-gray-600 mx-auto mb-3" />
-                    <p className="text-gray-400">No pending join requests</p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {roleRequests.map((request) => (
-                      <div
-                        key={request.id}
-                        className="flex items-center justify-between p-4 bg-gray-800/30 rounded-xl border border-gray-700"
-                      >
-                        <div>
-                          <p className="text-white font-medium">{request.user_name}</p>
-                          <p className="text-gray-400 text-sm">{request.user_email}</p>
-                          <div className="flex items-center gap-2 mt-1">
-                            <span className="text-xs text-yellow-400 bg-yellow-500/10 px-2 py-0.5 rounded-full">
-                              Requests to join as member
-                            </span>
-                            <span className="text-xs text-gray-500">
-                              {new Date(request.created_at).toLocaleDateString()}
-                            </span>
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <GlowButton size="sm" onClick={() => handleApproveRoleRequest(request.id, request.user_id, "student")}>
-                            <CheckCircle className="w-4 h-4 mr-1" />
-                            Approve
-                          </GlowButton>
-                          <GlowButton size="sm" variant="ghost" onClick={() => handleRejectRoleRequest(request.id)}>
-                            <XCircle className="w-4 h-4 mr-1" />
-                            Reject
-                          </GlowButton>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </GlowCard>
-          </TabsContent>
-
           {/* Analytics Tab */}
           <TabsContent value="analytics">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -1196,7 +1058,7 @@ export default function OrganizationAdminPage({ params }: PageProps) {
                   <TrendingUp className="w-16 h-16 text-purple-400 mx-auto mb-4" />
                   <p className="text-3xl font-bold text-white mb-2">{analytics?.totalStudents}</p>
                   <p className="text-gray-400">Total students</p>
-                  <p className="text-sm text-green-400 mt-2">↑ {analytics?.monthlyGrowth}% this month</p>
+                  <p className="text-sm text-green-400 mt-2">+{analytics?.monthlyGrowth}% growth rate</p>
                 </div>
               </GlowCard>
 
@@ -1214,11 +1076,11 @@ export default function OrganizationAdminPage({ params }: PageProps) {
                   </div>
                   <div>
                     <div className="flex items-center justify-between text-sm mb-1">
-                      <span className="text-gray-400">Student Satisfaction</span>
+                      <span className="text-gray-400">Average Rating</span>
                       <span className="text-purple-400">{analytics?.averageRating}/5.0</span>
                     </div>
                     <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
-                      <div className="h-full bg-purple-500 rounded-full" style={{ width: `${(analytics?.averageRating || 0) / 5 * 100}%` }} />
+                      <div className="h-full bg-purple-500 rounded-full" style={{ width: `${((analytics?.averageRating || 0) / 5) * 100}%` }} />
                     </div>
                   </div>
                 </div>
@@ -1226,7 +1088,7 @@ export default function OrganizationAdminPage({ params }: PageProps) {
             </div>
           </TabsContent>
 
-          {/* Settings Tab - UI preserved, data from Supabase */}
+          {/* Settings Tab */}
           <TabsContent value="settings">
             <GlowCard>
               <div className="min-h-[400px]">
@@ -1320,6 +1182,7 @@ export default function OrganizationAdminPage({ params }: PageProps) {
                   <div className="space-y-4">
                     <h3 className="text-lg font-semibold text-red-400 border-b border-gray-700 pb-2">Danger Zone</h3>
                     
+                    {/* Organization Invite Link Section */}
                     <div className="p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
                       <div className="flex items-start justify-between">
                         <div className="flex items-start gap-3">
@@ -1342,24 +1205,142 @@ export default function OrganizationAdminPage({ params }: PageProps) {
                       </div>
                     </div>
 
-                    <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
-                      <div className="flex items-start gap-3 mb-4">
-                        <AlertTriangle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
-                        <div>
-                          <p className="text-sm text-red-400 font-medium">Delete Organization</p>
-                          <p className="text-xs text-gray-400 mt-1">
-                            Once deleted, all courses, members, and data will be permanently removed.
-                          </p>
-                        </div>
+                    {/* Delete Organization Section - Simplified for single org */}
+                    <div className="p-4 bg-red-500/5 rounded-lg border border-red-500/20">
+                      <div className="mb-4">
+                        <h3 className="font-semibold text-white flex items-center gap-2">
+                          <Building2 className="w-5 h-5 text-red-400" />
+                          Delete Organization
+                        </h3>
+                        <p className="text-sm text-gray-400 mt-1">
+                          Permanently delete {organization?.name}. This action cannot be undone.
+                        </p>
                       </div>
-                      <GlowButton
-                        variant="outline"
-                        onClick={() => setShowDeleteDialog(true)}
-                        className="border-red-500 text-red-400 hover:bg-red-500/10"
-                      >
-                        <Trash2 className="w-4 h-4 mr-2" />
-                        Delete Organization
-                      </GlowButton>
+
+                      {deletionStep === 'select' && (
+                        <>
+                          <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 mb-4">
+                            <p className="text-sm text-yellow-300 flex items-center gap-2">
+                              <AlertCircle className="w-4 h-4" />
+                              ⚠️ Deleting your organization will permanently remove all courses, members, and data.
+                            </p>
+                          </div>
+                          <GlowButton 
+                            onClick={() => setDeletionStep('confirm')}
+                            className="w-full bg-red-600 hover:bg-red-700"
+                          >
+                            Request Organization Deletion
+                          </GlowButton>
+                        </>
+                      )}
+
+                      {deletionStep === 'confirm' && (
+                        <div className="space-y-3">
+                          <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                            <p className="text-sm text-red-300 flex items-center gap-2">
+                              <AlertTriangle className="w-4 h-4" />
+                              Are you sure? This action cannot be undone immediately. You will have 30 days to cancel.
+                            </p>
+                          </div>
+                          <div className="flex gap-3">
+                            <GlowButton 
+                              variant="outline" 
+                              onClick={() => setDeletionStep('select')}
+                              className="flex-1"
+                            >
+                              Cancel
+                            </GlowButton>
+                            <GlowButton 
+                              onClick={startOrganizationDeletion}
+                              className="flex-1 bg-red-600 hover:bg-red-700"
+                            >
+                              Confirm Deletion Request
+                            </GlowButton>
+                          </div>
+                        </div>
+                      )}
+
+                      {deletionStep === 'cooldown' && deleteCooldown && (
+                        <div className="space-y-3">
+                          <div className="bg-orange-500/10 border border-orange-500/30 rounded-lg p-3">
+                            <div className="flex items-center gap-2 mb-2">
+                              <Clock className="w-4 h-4 text-orange-400" />
+                              <span className="text-sm font-medium text-orange-400">Deletion Scheduled</span>
+                            </div>
+                            <p className="text-sm text-gray-300">
+                              Organization <strong>{organization?.name}</strong> will be permanently deleted on:
+                            </p>
+                            <p className="text-lg font-semibold text-orange-400 my-2">
+                              {new Date(deleteCooldown.scheduledDeletionDate).toLocaleDateString()} at{' '}
+                              {new Date(deleteCooldown.scheduledDeletionDate).toLocaleTimeString()}
+                            </p>
+                            <div className="mt-3 p-2 bg-gray-800/50 rounded-lg">
+                              <div className="flex justify-between text-sm mb-1">
+                                <span className="text-gray-400">Days remaining:</span>
+                                <span className="text-orange-400 font-semibold">{deleteCooldown.daysRemaining} days</span>
+                              </div>
+                              <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
+                                <div 
+                                  className="h-full bg-orange-500 rounded-full transition-all"
+                                  style={{ width: `${((30 - deleteCooldown.daysRemaining) / 30) * 100}%` }}
+                                />
+                              </div>
+                              <p className="text-xs text-gray-500 mt-2">
+                                {deleteCooldown.daysRemaining} days remaining until permanent deletion
+                              </p>
+                            </div>
+                          </div>
+
+                          <GlowButton 
+                            variant="outline" 
+                            onClick={() => setDeletionStep('recovery-request')}
+                            className="w-full border-blue-500/50 text-blue-400 hover:bg-blue-500/10"
+                          >
+                            Request Recovery from Admin
+                          </GlowButton>
+                          
+                          <GlowButton 
+                            variant="outline" 
+                            onClick={cancelOrganizationDeletion}
+                            className="w-full border-yellow-500/50 text-yellow-400 hover:bg-yellow-500/10"
+                          >
+                            Cancel Deletion
+                          </GlowButton>
+                        </div>
+                      )}
+
+                      {deletionStep === 'recovery-request' && (
+                        <div className="space-y-3">
+                          <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
+                            <p className="text-sm text-blue-300 mb-2 flex items-center gap-2">
+                              <MessageCircle className="w-4 h-4" />
+                              Request organization recovery from system admin
+                            </p>
+                            <textarea
+                              value={recoveryReason}
+                              onChange={(e) => setRecoveryReason(e.target.value)}
+                              placeholder="Explain why you need to recover this organization..."
+                              rows={3}
+                              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm mt-2"
+                            />
+                          </div>
+                          <div className="flex gap-3">
+                            <GlowButton 
+                              variant="outline" 
+                              onClick={() => setDeletionStep('cooldown')}
+                              className="flex-1"
+                            >
+                              Back
+                            </GlowButton>
+                            <GlowButton 
+                              onClick={requestRecoveryFromAdmin}
+                              className="flex-1 bg-blue-600 hover:bg-blue-700"
+                            >
+                              Submit Recovery Request
+                            </GlowButton>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -1389,10 +1370,10 @@ export default function OrganizationAdminPage({ params }: PageProps) {
             description: organization.description,
             domain: null,
             logo_url: null,
-            primary_admin_id: "",
-            created_at: "",
-            member_count: 0,
-            course_count: 0,
+            primary_admin_id: organization.created_by,
+            created_at: organization.created_at,
+            member_count: members.length,
+            course_count: courses.length,
             verified: false,
           }}
           invitedByName={roleData.organizationName || "Admin"}
@@ -1417,23 +1398,15 @@ export default function OrganizationAdminPage({ params }: PageProps) {
                 />
               </div>
               <div>
-                <Label className="text-sm font-medium text-gray-400 mb-2 block">Email</Label>
-                <Input 
-                  defaultValue={editingMember.email} 
-                  className="bg-gray-800/50 border-gray-700" 
-                  onChange={(e) => setEditingMember({ ...editingMember, email: e.target.value })}
-                />
-              </div>
-              <div>
                 <Label className="text-sm font-medium text-gray-400 mb-2 block">Role</Label>
                 <select 
                   value={editingMember.role}
                   onChange={(e) => setEditingMember({ ...editingMember, role: e.target.value as any })}
                   className="w-full bg-gray-800/50 border border-gray-700 text-white rounded-xl h-12 px-4"
                 >
-                  <option value="sub_admin">Sub Admin</option>
-                  <option value="teacher">Teacher</option>
                   <option value="student">Student</option>
+                  <option value="teacher">Teacher</option>
+                  <option value="sub_admin">Sub Admin</option>
                 </select>
               </div>
             </div>

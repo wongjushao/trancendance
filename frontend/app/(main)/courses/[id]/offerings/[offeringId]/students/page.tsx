@@ -116,8 +116,8 @@ export default function CourseStudentsPage() {
   const router = useRouter();
   const courseId = params.id as string;
   const { roleData } = useRole();
-  const isTeacher = roleData.role === "teacher" || roleData.role === "org_admin";
-  const isAdmin = roleData.role === "org_admin";
+  const isTeacher = roleData.role === "teacher" || roleData.role === "admin";
+  const isAdmin = roleData.role === "admin";
 
   const [students, setStudents] = useState<Student[]>([]);
   const [course, setCourse] = useState<CourseData | null>(null);

@@ -2,7 +2,7 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { Bell, Search, User, ChevronDown, Settings, CreditCard, LogOut, Award, BookOpen, UserCircle, AlertTriangle, X } from "lucide-react";
+import { Bell, Search, User, ChevronDown, Settings, CreditCard, LogOut, Award, BookOpen, UserCircle, AlertTriangle, X, Building2 } from "lucide-react";
 import { Input } from "../ui/input";
 import SignOutButton from "../SignOutButton";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
@@ -185,18 +185,26 @@ export function TopNav({ user }: TopNavProps) {
   return (
     <>
       <header className="sticky top-0 z-30 bg-gray-900/80 backdrop-blur-sm border-b border-gray-800">
-        <div className="h-16 px-6 flex items-center justify-between">
-          {/* Search Bar */}
-          <div className="flex-1 max-w-md">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <Input
-                type="search"
-                placeholder="Search courses, lessons, or assignments..."
-                className="w-full pl-10 pr-4 py-2 bg-gray-800/50 border-gray-700 rounded-lg text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
-              />
+        <div className="h-16 px-6 flex items-center justify-between gap-4">
+
+          {/* Organization Display - Only show for teachers/admins (since they can't switch) */}
+          {roleData.organizationName && (roleData.role === "admin" || roleData.role === "teacher") && (
+            <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-purple-500/10 rounded-lg border border-purple-500/20">
+              <Building2 className="w-4 h-4 text-purple-400" />
+              <span className="text-sm text-white font-medium">{roleData.organizationName}</span>
+              <span className="text-xs text-purple-400 bg-purple-500/20 px-1.5 py-0.5 rounded">
+                {roleData.role === "admin" ? "Admin" : "Teacher"}
+              </span>
             </div>
-          </div>
+          )}
+
+          {/* For students with an organization - smaller display */}
+          {roleData.organizationName && roleData.role === "student" && (
+            <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1 bg-gray-800/50 rounded-lg border border-gray-700">
+              <Building2 className="w-3.5 h-3.5 text-gray-400" />
+              <span className="text-xs text-gray-300">{roleData.organizationName}</span>
+            </div>
+          )}
 
           {/* Actions */}
           <div className="flex items-center gap-4">

@@ -313,10 +313,6 @@ export default function EditCoursePage() {
   const [offeringModalOpen, setOfferingModalOpen] = useState(false);
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
   const [publishConfirmOpen, setPublishConfirmOpen] = useState(false);
-  const [showTransferModal, setShowTransferModal] = useState(false);
-  const [availableOrganizations, setAvailableOrganizations] = useState<Array<{id: number, name: string}>>([]);
-  const [selectedTargetOrg, setSelectedTargetOrg] = useState<number | null>(null);
-  const [isTransferring, setIsTransferring] = useState(false);
   const [deleteModuleModalOpen, setDeleteModuleModalOpen] = useState(false);
   const [moduleToDelete, setModuleToDelete] = useState<{ id: number; title: string } | null>(null);
   const [deleteClassModalOpen, setDeleteClassModalOpen] = useState(false);
@@ -391,64 +387,6 @@ export default function EditCoursePage() {
     })
   );
   
-  // Fetch available organizations for transfer
-  const fetchAvailableOrganizations = async () => {
-    try {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) return;
-      
-      const { data: memberships } = await supabase
-        .from('organization_members')
-        .select('organization_id, organizations(id, name)')
-        .eq('user_id', user.id)
-        .in('member_role', ['admin', 'sub_admin']);
-      
-      if (memberships) {
-        setAvailableOrganizations(memberships.map(m => ({
-          id: m.organization_id,
-          name: m.organizations?.name || `Organization ${m.organization_id}`
-        })));
-      }
-    } catch (error) {
-      console.error("Error fetching organizations:", error);
-    }
-  };
-
-  // Transfer course to another organization
-  const handleTransferCourse = async () => {
-    if (!selectedTargetOrg) {
-      toast.error("Please select an organization to transfer to");
-      return;
-    }
-    
-    setIsTransferring(true);
-    
-    try {
-      const supabase = getSupabaseBrowserClient();
-      
-      const { error } = await supabase
-        .from('courses')
-        .update({ organization_id: selectedTargetOrg })
-        .eq('id', courseId);
-      
-      if (error) throw error;
-      
-      toast.success("Course transferred successfully!");
-      setShowTransferModal(false);
-      
-      // Reload course data
-      const refreshedCourse = await getCourseWithDetails(courseId);
-      setCourse(refreshedCourse);
-      
-    } catch (error) {
-      console.error("Error transferring course:", error);
-      toast.error("Failed to transfer course. Please try again.");
-    } finally {
-      setIsTransferring(false);
-    }
-  };
 
   // Fetch user's organizations
   useEffect(() => {
@@ -3098,50 +3036,6 @@ const getDayName = (day: number): string => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Transfer Modal */}
-      {showTransferModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <GlowCard className="max-w-md w-full p-6">
-            <h2 className="text-xl font-bold text-white mb-4">Transfer Course</h2>
-            <p className="text-gray-400 mb-4">
-              Select the organization you want to transfer this course to.
-            </p>
-            
-            <div className="mb-6">
-              <Label>Target Organization</Label>
-              <Select value={selectedTargetOrg?.toString() || ""} onValueChange={(v) => setSelectedTargetOrg(parseInt(v))}>
-                <SelectTrigger className="mt-1">
-                  <SelectValue placeholder="Select organization" />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableOrganizations.map(org => (
-                    <SelectItem key={org.id} value={org.id.toString()}>
-                      {org.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            
-            <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 mb-6">
-              <p className="text-xs text-yellow-300">
-                ⚠️ Transferring a course will move it to another organization. 
-                Students from the original organization will lose access unless they are also members of the new organization.
-              </p>
-            </div>
-            
-            <div className="flex gap-3 justify-end">
-              <GlowButton variant="outline" onClick={() => setShowTransferModal(false)}>
-                Cancel
-              </GlowButton>
-              <GlowButton onClick={handleTransferCourse} isLoading={isTransferring}>
-                Confirm Transfer
-              </GlowButton>
-            </div>
-          </GlowCard>
-        </div>
-      )}
 
       {/* Delete Module Confirmation Modal */}
       <Dialog open={deleteModuleModalOpen} onOpenChange={setDeleteModuleModalOpen}>

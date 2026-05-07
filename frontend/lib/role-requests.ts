@@ -6,7 +6,7 @@ export interface RoleRequest {
   userId: string;
   userName: string;
   userEmail: string;
-  requestedRole: 'teacher' | 'org_admin';
+  requestedRole: 'teacher' | 'admin';
   organizationId: number;
   organizationName: string;
   requestedAt: Date;
@@ -50,7 +50,7 @@ export function createRoleRequest(
   userId: string,
   userName: string,
   userEmail: string,
-  requestedRole: 'teacher' | 'org_admin',
+  requestedRole: 'teacher' | 'admin',
   organizationId: number,
   organizationName: string,
   message?: string

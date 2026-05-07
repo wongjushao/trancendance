@@ -37,6 +37,10 @@ export default function OrganizationDetailPage({ params }: PageProps) {
   const organizationId = parseInt(id);
   const supabase = getSupabaseBrowserClient();
   const { roleData } = useRole();
+  const isAdminOfThisOrg = (): boolean => {
+    return (roleData.role === 'admin' || roleData.role === 'sub_admin') && 
+          roleData.organizationId === organizationId;
+  };
   
   const [loading, setLoading] = useState(true);
   const [orgName, setOrgName] = useState("");
@@ -366,32 +370,55 @@ export default function OrganizationDetailPage({ params }: PageProps) {
             </div>
           </GlowCard>
         </TabsContent>
-        
+
         {/* Settings Tab */}
         <TabsContent value="settings" className="outline-none focus:ring-0">
           <GlowCard className="border-white/5">
             <h2 className="text-2xl font-bold text-white mb-8 tracking-tight">Organization Identity</h2>
             <div className="space-y-6 max-w-2xl">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-[#A0A0B5] ml-1">Official Name</label>
-                <input
-                  type="text"
-                  defaultValue={orgName}
-                  className="w-full px-5 py-3.5 bg-[#12121A] border border-white/10 rounded-2xl text-white focus:border-purple-500/50 outline-none transition-all"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-[#A0A0B5] ml-1">About the Institution</label>
-                <textarea
-                  defaultValue={orgDescription}
-                  rows={4}
-                  className="w-full px-5 py-3.5 bg-[#12121A] border border-white/10 rounded-2xl text-white focus:border-purple-500/50 outline-none transition-all resize-none"
-                />
-              </div>
-              <div className="pt-4 flex gap-4">
-                <GlowButton variant="primary">Save Identity</GlowButton>
-                <GlowButton variant="ghost" className="text-red-400 hover:text-red-300">Leave Organization</GlowButton>
-              </div>
+              
+              {isAdminOfThisOrg() ? (
+                // Editable version for admins of this org
+                <>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-[#A0A0B5] ml-1">Official Name</label>
+                    <input
+                      type="text"
+                      defaultValue={orgName}
+                      className="w-full px-5 py-3.5 bg-[#12121A] border border-white/10 rounded-2xl text-white focus:border-purple-500/50 outline-none transition-all"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-[#A0A0B5] ml-1">About the Institution</label>
+                    <textarea
+                      defaultValue={orgDescription}
+                      rows={4}
+                      className="w-full px-5 py-3.5 bg-[#12121A] border border-white/10 rounded-2xl text-white focus:border-purple-500/50 outline-none transition-all resize-none"
+                    />
+                  </div>
+                  <div className="pt-4 flex gap-4">
+                    <GlowButton variant="primary">Save Identity</GlowButton>
+                  </div>
+                </>
+              ) : (
+                // Read-only version for non-admins
+                <>
+                  <div>
+                    <label className="text-sm font-medium text-[#A0A0B5] block mb-1">Organization Name</label>
+                    <p className="text-white px-5 py-3.5 bg-[#12121A] border border-white/5 rounded-2xl">{orgName}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-[#A0A0B5] block mb-1">Description</label>
+                    <p className="text-gray-400 px-5 py-3.5 bg-[#12121A] border border-white/5 rounded-2xl whitespace-pre-wrap">
+                      {orgDescription}
+                    </p>
+                  </div>
+                  <div className="pt-4 text-sm text-gray-500">
+                    Only organization admins can edit these settings.
+                  </div>
+                </>
+              )}
+              
             </div>
           </GlowCard>
         </TabsContent>

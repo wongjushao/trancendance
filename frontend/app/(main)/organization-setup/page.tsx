@@ -68,7 +68,7 @@ export default function OrganizationSetupPage() {
   });
 
   // Only pending admin users should access this page
-  if (roleData.role !== "pending_org_admin") {
+  if (roleData.role !== "pending_admin") {
     router.push("/dashboard");
     return null;
   }

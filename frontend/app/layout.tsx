@@ -3,7 +3,6 @@ import type { Metadata } from "next";
 import "./globals.css"; // ← IMPORTANT: This loads all styles
 import { NotificationToast } from "@/components/lms/NotificationToast";
 import { RoleProvider } from "@/components/providers/RoleProvider";
-import { FloatingDevTools } from "@/components/dev/FloatingDevTools";
 
 export const metadata: Metadata = {
   title: "Educatorio",
@@ -21,7 +20,6 @@ export default function RootLayout({
         <RoleProvider>
           {children}
           <NotificationToast />
-          <FloatingDevTools />
         </RoleProvider>
       </body>
     </html>
