@@ -25,6 +25,10 @@ const nextConfig: NextConfig = {
         source: '/api/notification-service/:path*',
         destination: 'https://notification-service:5004/:path*',
       },
+      {
+        source: '/api/org-service/:path*',
+        destination: 'https://org-service:5003/:path*',
+      },
     ]
   },
   // Remove the 'api' block completely - it doesn't belong here

@@ -331,7 +331,8 @@ export default function UnifiedDashboardPage() {
           )
         )
       `)
-      .eq("user_id", userId);
+      .eq("user_id", userId)
+      .eq("role", "student");
 
     // Use a Map to deduplicate courses by ID
     const coursesMap = new Map<number, EnrolledCourse>();
@@ -341,6 +342,11 @@ export default function UnifiedDashboardPage() {
     for (const cm of classMembers || []) {
       const course = cm.course_classes?.courses;
       if (!course) continue;
+
+      if (course.created_by === userId) {
+        console.log(`Skipping course "${course.title}" because user is the instructor`);
+        continue;
+      }
 
       // If we already have this course, use the best progress (highest)
       const existingCourse = coursesMap.get(course.id);
@@ -671,7 +677,8 @@ export default function UnifiedDashboardPage() {
           const { data: cmForCourse } = await supabase
             .from("class_members")
             .select("id")
-            .in("course_class_id", classIdsForCourse);
+            .in("course_class_id", classIdsForCourse)
+            .eq("role", "student");
           
           studentCount = cmForCourse?.length || 0;
 
