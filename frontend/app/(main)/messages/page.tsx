@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Send, Loader2, Paperclip, Search, MessageCircle, User, Ban, Check, X } from "lucide-react";
+import { Send, Loader2, Search, MessageCircle, User, Ban, Check, X } from "lucide-react";
 import { useChat } from "@/contexts/ChatContext";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
@@ -619,14 +619,6 @@ export default function MessagesPage() {
               onSubmit={handleSendMessage}
               className="max-w-4xl mx-auto flex items-center gap-1.5 sm:gap-2"
             >
-              <button
-                type="button"
-                className="p-2 text-[#A0A0B5] hover:text-purple-400 transition-colors rounded-lg hover:bg-white/5 active:scale-95 flex-shrink-0"
-                title="Attach file (coming soon)"
-                aria-label="Attach file"
-              >
-                <Paperclip className="h-5 w-5" />
-              </button>
               <Input
                 value={newMessage}
                 onChange={(e) => {

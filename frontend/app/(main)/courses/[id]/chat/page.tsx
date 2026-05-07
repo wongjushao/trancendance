@@ -10,9 +10,6 @@ import {
   Users,
   MessageSquare,
   Loader2,
-  Smile,
-  Paperclip,
-  MoreVertical,
 } from "lucide-react";
 import { GlowCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";

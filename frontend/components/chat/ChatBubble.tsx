@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { MessageCircle, X, Send, Maximize2, Paperclip, Loader2, ChevronLeft, RefreshCw, User, Ban, Check } from "lucide-react";
+import { MessageCircle, X, Send, Maximize2, Loader2, ChevronLeft, RefreshCw, User, Ban, Check } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -615,13 +615,6 @@ export function ChatBubble() {
                     </p>
                   )}
                   <div className="flex gap-2 p-3">
-                    <button
-                      type="button"
-                      className="p-2 text-[#A0A0B5] hover:text-purple-400 transition-colors rounded-lg hover:bg-white/5"
-                      title="Attach file (coming soon)"
-                    >
-                      <Paperclip className="h-5 w-5" />
-                    </button>
                     <Input
                       value={newMessage}
                       onChange={(e) => {
