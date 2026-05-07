@@ -10,6 +10,7 @@ import { NotificationToast } from "@/components/lms/NotificationToast";
 import { ChatBubble } from "@/components/chat/ChatBubble";
 import { ChatProvider } from "@/contexts/ChatContext";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
+import { useRole } from '@/components/providers/RoleProvider';
 
 // Custom hook to listen to sidebar state
 function useSidebarState() {

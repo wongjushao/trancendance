@@ -31,12 +31,7 @@ const nextConfig: NextConfig = {
       },
     ]
   },
-  // Increase body parser limit for file uploads
-  api: {
-    bodyParser: {
-      sizeLimit: '10mb',
-    },
-  },
+  // Remove the 'api' block completely - it doesn't belong here
   images: {
     remotePatterns: [
       {
@@ -56,6 +51,12 @@ const nextConfig: NextConfig = {
         hostname: '*.supabase.co',
         port: '',
         pathname: '/storage/v1/object/public/**',
+      },
+      {
+        protocol: 'https',
+        hostname: 'images.unsplash.com',
+        port: '',
+        pathname: '/**', // Allows all paths from this hostname
       },
     ],
   },

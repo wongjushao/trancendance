@@ -33,11 +33,15 @@ const publicOnlyRoutes = [
   "/register",
   "/forgot-password",
   "/reset-password",
+  "/faq"
 ];
 
 // Routes that should be accessible to both authenticated and unauthenticated users
 const publicRoutes = [
   "/",
+  "/privacy",
+  "/terms",
+  "/contact",
   "/auth/callback",
   "/auth/confirm",
   "/auth/error",
@@ -123,6 +127,12 @@ export async function proxy(request: NextRequest) {
 
   // Authenticated users
   console.log("[proxy] User authenticated:", session.user.id);
+
+  const mfaPending = request.cookies.get("mfa_pending")?.value === "true";
+  if (mfaPending && pathname !== "/auth/mfa-verify") {
+    console.log("[proxy] MFA pending, redirecting to verification page");
+    return NextResponse.redirect(new URL("/auth/mfa-verify", request.url));
+  }
 
   // Don't re-show login/register to signed-in users
   if (publicOnlyRoutes.some(route => pathname === route)) {

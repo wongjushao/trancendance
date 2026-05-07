@@ -10,7 +10,6 @@ import { useAvatar } from "@/lib/useAvatar";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 import { useRouter } from "next/navigation";
 import { GlowButton } from "./GlowButton";
-import { OrganizationSwitcher } from '@/components/organization/OrganizationSwitcher';
 import { useRole } from '@/components/providers/RoleProvider';
 
 interface TopNavProps {
@@ -197,16 +196,6 @@ export function TopNav({ user }: TopNavProps) {
                 className="w-full pl-10 pr-4 py-2 bg-gray-800/50 border-gray-700 rounded-lg text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
               />
             </div>
-          </div>
-
-          {/* Organization Switcher - Add this after search */}
-          <div className="hidden md:block w-64">
-            <OrganizationSwitcher 
-              currentOrganizationId={activeOrgId}
-              onSwitch={(orgId, orgName, role) => {
-                setActiveOrgId(orgId);
-              }}
-            />
           </div>
 
           {/* Actions */}

@@ -1,9 +1,22 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, time
 
-from sqlalchemy import Boolean, BigInteger, Date, ForeignKey, Integer, PrimaryKeyConstraint, Text, UniqueConstraint, text
+from sqlalchemy import (
+    Boolean,
+    BigInteger,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    PrimaryKeyConstraint,
+    Text,
+    Time,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -63,6 +76,29 @@ class Organization(Base):
     description: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+
+
+class OrganizationVerificationRequest(Base):
+    __tablename__ = "organization_verification_requests"
+    __table_args__ = (
+        CheckConstraint(
+            "status in ('pending','verified','expired','cancelled')",
+            name="ck_org_verification_requests_status",
+        ),
+        UniqueConstraint("token_hash", name="uq_org_verification_requests_token_hash"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    org_name: Mapped[str] = mapped_column(Text, nullable=False)
+    admin_email: Mapped[str] = mapped_column(Text, nullable=False)
+    requested_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
+    token_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'pending'"))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    organization_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("public.organizations.id"))
 
 
 class OrganizationDomain(Base):
@@ -134,13 +170,25 @@ class UserRole(Base):
 
 class Course(Base):
     __tablename__ = "courses"
-    __table_args__ = {"schema": "public"}
+    __table_args__ = (
+        CheckConstraint("visibility in ('public','org','private')", name="ck_courses_visibility"),
+        CheckConstraint("status in ('draft','published','archived')", name="ck_courses_status"),
+        CheckConstraint("level in ('beginner','intermediate','advanced')", name="ck_courses_level"),
+        {"schema": "public"},
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     organization_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.organizations.id"), nullable=False)
     title: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     visibility: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'private'"))
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'draft'"))
+    thumbnail: Mapped[str | None] = mapped_column(Text)
+    level: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'intermediate'"))
+    category: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'Development'"))
+    learning_objectives: Mapped[list[str]] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    prerequisites: Mapped[list[str]] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    tags: Mapped[list[str]] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
     created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
 
@@ -158,31 +206,44 @@ class CourseMember(Base):
     role: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'student'"))
     joined_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'active'"))
+    completed_at: Mapped[datetime | None]
+    last_accessed_at: Mapped[datetime | None]
 
 
 class Module(Base):
     __tablename__ = "modules"
-    __table_args__ = {"schema": "public"}
+    __table_args__ = (
+        UniqueConstraint("course_id", "order_index", name="uq_modules_course_order"),
+        {"schema": "public"},
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     course_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.courses.id"), nullable=False)
     title: Mapped[str] = mapped_column(Text, nullable=False)
     order_index: Mapped[int | None] = mapped_column(Integer)
+    is_published: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
 
 
 class Class(Base):
     __tablename__ = "classes"
-    __table_args__ = {"schema": "public"}
+    __table_args__ = (
+        UniqueConstraint("module_id", "order_index", name="uq_classes_module_order"),
+        {"schema": "public"},
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     module_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.modules.id"), nullable=False)
     title: Mapped[str] = mapped_column(Text, nullable=False)
     order_index: Mapped[int | None] = mapped_column(Integer)
+    is_published: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
 
 
 class Lesson(Base):
     __tablename__ = "lessons"
-    __table_args__ = {"schema": "public"}
+    __table_args__ = (
+        UniqueConstraint("class_id", "order_index", name="uq_lessons_class_order"),
+        {"schema": "public"},
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     class_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.classes.id"), nullable=False)
@@ -191,6 +252,10 @@ class Lesson(Base):
     content_url: Mapped[str | None] = mapped_column(Text)
     content_json: Mapped[dict | None] = mapped_column(JSONB)
     order_index: Mapped[int | None] = mapped_column(Integer)
+    is_published: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    duration_seconds: Mapped[int | None] = mapped_column(Integer)
+    video_thumbnail: Mapped[str | None] = mapped_column(Text)
+    is_free_preview: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
 
 
 class Assignment(Base):
@@ -199,11 +264,110 @@ class Assignment(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     course_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.courses.id"), nullable=False)
+    course_class_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("public.course_classes.id", ondelete="CASCADE"))
     lesson_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("public.lessons.id"))
     title: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     due_at: Mapped[datetime | None]
+    points: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("100"))
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+
+
+class CourseClass(Base):
+    __tablename__ = "course_classes"
+    __table_args__ = (
+        CheckConstraint("status in ('upcoming','ongoing','completed','cancelled')", name="ck_course_classes_status"),
+        CheckConstraint("max_students is null or max_students > 0", name="ck_course_classes_max_students"),
+        CheckConstraint("start_date is null or end_date is null or start_date <= end_date", name="ck_course_classes_date_range"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    course_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.courses.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    instructor_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"))
+    start_date: Mapped[date | None] = mapped_column(Date)
+    end_date: Mapped[date | None] = mapped_column(Date)
+    max_students: Mapped[int | None] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'upcoming'"))
+    is_published: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+
+
+class ClassSchedule(Base):
+    __tablename__ = "class_schedules"
+    __table_args__ = (
+        CheckConstraint("day_of_week >= 0 and day_of_week <= 6", name="ck_class_schedules_day_of_week"),
+        CheckConstraint("end_time > start_time", name="ck_class_schedules_time_range"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    course_class_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.course_classes.id", ondelete="CASCADE"), nullable=False)
+    day_of_week: Mapped[int] = mapped_column(Integer, nullable=False)
+    start_time: Mapped[time] = mapped_column(Time, nullable=False)
+    end_time: Mapped[time] = mapped_column(Time, nullable=False)
+
+
+class ClassMember(Base):
+    __tablename__ = "class_members"
+    __table_args__ = (
+        UniqueConstraint("course_class_id", "user_id", name="uq_class_members_course_class_user"),
+        CheckConstraint("role in ('student','instructor','assistant')", name="ck_class_members_role"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    course_class_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.course_classes.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id", ondelete="CASCADE"), nullable=False)
+    role: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'student'"))
+    enrolled_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+    completed_at: Mapped[datetime | None]
+
+
+class Certificate(Base):
+    __tablename__ = "certificates"
+    __table_args__ = (
+        UniqueConstraint("user_id", "course_id", name="uq_certificates_user_course"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id", ondelete="CASCADE"), nullable=False)
+    course_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.courses.id", ondelete="CASCADE"), nullable=False)
+    certificate_url: Mapped[str | None] = mapped_column(Text)
+    issued_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+    certificate_id: Mapped[str | None] = mapped_column(Text, unique=True)
+
+
+class CourseReview(Base):
+    __tablename__ = "course_reviews"
+    __table_args__ = (
+        UniqueConstraint("course_id", "user_id", name="uq_course_reviews_course_user"),
+        CheckConstraint("rating >= 1 and rating <= 5", name="ck_course_reviews_rating"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    course_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.courses.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id", ondelete="CASCADE"), nullable=False)
+    rating: Mapped[int] = mapped_column(Integer, nullable=False)
+    review: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+    updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+
+
+class CoursePrerequisite(Base):
+    __tablename__ = "course_prerequisites"
+    __table_args__ = (
+        PrimaryKeyConstraint("course_id", "prerequisite_course_id", name="pk_course_prerequisites"),
+        CheckConstraint("course_id <> prerequisite_course_id", name="ck_course_prerequisites_not_self"),
+        {"schema": "public"},
+    )
+
+    course_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.courses.id", ondelete="CASCADE"), nullable=False)
+    prerequisite_course_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.courses.id", ondelete="CASCADE"), nullable=False)
 
 
 class Submission(Base):
@@ -226,12 +390,13 @@ class Submission(Base):
 class LessonProgress(Base):
     __tablename__ = "lesson_progress"
     __table_args__ = (
-        UniqueConstraint("user_id", "lesson_id", name="uq_lesson_progress_user_lesson"),
+        UniqueConstraint("class_member_id", "lesson_id", name="uq_lesson_progress_class_member_lesson"),
         {"schema": "public"},
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
+    class_member_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("public.class_members.id", ondelete="CASCADE"))
     lesson_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.lessons.id"), nullable=False)
     # not_started / in_progress / completed
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'not_started'"))
@@ -308,6 +473,17 @@ class UserSkill(Base):
     level: Mapped[int] = mapped_column(Integer, nullable=False)
     years: Mapped[int] = mapped_column(Integer, nullable=False)
 
+class UserBlock(Base):
+    __tablename__ = "user_blocks"
+    __table_args__ = (
+        UniqueConstraint("blocker_id", "blocked_id", name="uq_user_blocks_blocker_blocked"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    blocker_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
+    blocked_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
 
 class ProfileEducation(Base):
     __tablename__ = "profile_educations"

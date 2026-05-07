@@ -10,7 +10,8 @@ import {
   FileText,
   BarChart3,
   Menu,
-  Shield
+  Shield,
+  MessageSquare
 } from "lucide-react";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 import { useAvatar } from "@/lib/useAvatar";
@@ -136,30 +137,21 @@ export function Sidebar({ user }: SidebarProps) {
   const getNavItems = () => {
     const baseItems = [
       { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-      { href: "/courses", label: "Courses", icon: BookOpen },
-      { href: "/organizations", label: "Organizations", icon: Building2 },
+      { href: "/organizations", label: "Organizations", icon: Building2 },  // Moved up
+      { href: "/courses", label: "Courses", icon: BookOpen },               // Moved down
       //{ href: "/assignments", label: "Assignments", icon: FileText },
+      {href: "/chat/rooms", label: "Chat", icon: MessageSquare },
       { href: "/analytics", label: "Analytics", icon: BarChart3 },
     ];
 
     // Add organization admin link for org_admin users
     if (roleData.role === "org_admin" && roleData.organizationId) {
-      baseItems.splice(3, 0, {
+      baseItems.splice(2, 0, {  // Changed from 3 to 2 - inserts after Dashboard and Organizations
         href: `/organizations/${roleData.organizationId}/admin`,
         label: "Admin Panel",
         icon: Building2,
       });
     }
-
-    // Add system admin link for system_admin users
-    if (roleData.role === "system_admin") {
-      baseItems.splice(3, 0, {
-        href: "/admin",
-        label: "System Admin",
-        icon: Shield,
-      });
-    }
-
     return baseItems;
   };
 

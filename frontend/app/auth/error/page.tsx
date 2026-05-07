@@ -49,13 +49,13 @@ function ErrorContent() {
             Back to Login
           </Link>
 
-          <Link
+          {/* <Link
             href="/register"
             className="px-6 py-3 rounded-xl font-medium transition-all duration-300 flex items-center justify-center gap-2 w-full bg-[#12121A] text-white border border-white/10 hover:border-purple-500/50 hover:bg-white/5"
           >
             <RefreshCw className="w-4 h-4" />
             Try signing up again
-          </Link>
+          </Link> */}
         </div>
 
         {/* Support note */}

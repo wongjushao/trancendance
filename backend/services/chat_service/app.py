@@ -28,7 +28,33 @@ def is_valid_database_url(database_url: str) -> bool:
 def create_app():
     app = Flask(__name__)
     app.wsgi_app = ProxyFix(app.wsgi_app, x_prefix=1)
-    CORS(app, supports_credentials=True, origins="*")
+    authorizations = {
+        "Bearer": {
+            "type": "apiKey",
+            "in": "header",
+            "name": "Authorization",
+            "description": "Enter your token as: Bearer <access_token>",
+        }
+    }
+    api = Api(
+        app,
+        title="Chat Service API",
+        version="1.0",
+        doc="/docs",
+        authorizations=authorizations,
+        security="Bearer",
+    )
+    chat_ns = Namespace("chat", path="/", description="Chat service endpoints")
+
+    @api.representation("application/json")
+    def output_json_with_response_passthrough(data, code, headers=None):
+        if isinstance(data, Response):
+            response = data
+            response.status_code = code
+            if headers:
+                response.headers.extend(headers)
+            return response
+        return restx_output_json(data, code, headers)
 
     database_url = os.getenv("SUPABASE_DB_URL", "")
     db_session = None

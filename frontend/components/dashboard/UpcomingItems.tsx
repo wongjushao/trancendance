@@ -1,4 +1,4 @@
-// frontend/components/dashboard/UpcomingItems.tsx
+// components/dashboard/UpcomingItems.tsx
 import Link from "next/link";
 import { Calendar, Clock, ChevronRight, Video, FileText, Target } from "lucide-react";
 import { GlowCard } from "@/components/lms/Cards";
@@ -16,85 +16,97 @@ interface UpcomingItemsProps {
   items: UpcomingItem[];
 }
 
-const getTypeIcon = (type: string) => {
-  switch (type) {
-    case "assignment":
-      return FileText;
-    case "exam":
-      return Target;
-    case "live_session":
-      return Video;
-    default:
-      return Calendar;
-  }
-};
-
-const getTypeColor = (type: string) => {
-  switch (type) {
-    case "assignment":
-      return "text-blue-400 bg-blue-500/10";
-    case "exam":
-      return "text-purple-400 bg-purple-500/10";
-    case "live_session":
-      return "text-orange-400 bg-orange-500/10";
-    default:
-      return "text-emerald-400 bg-emerald-500/10";
-  }
-};
-
 export function UpcomingItems({ items }: UpcomingItemsProps) {
-  const sortedItems = [...items].sort((a, b) => a.date.getTime() - b.date.getTime());
+  const getTypeIcon = (type: string) => {
+    switch (type) {
+      case "course":
+        return <Video className="w-4 h-4 text-purple-400" />;
+      case "assignment":
+        return <FileText className="w-4 h-4 text-yellow-400" />;
+      case "exam":
+        return <Target className="w-4 h-4 text-red-400" />;
+      case "live_session":
+        return <Video className="w-4 h-4 text-green-400" />;
+      default:
+        return <Calendar className="w-4 h-4 text-gray-400" />;
+    }
+  };
+
+  const getTypeColor = (type: string) => {
+    switch (type) {
+      case "course":
+        return "bg-purple-500/20 text-purple-400";
+      case "assignment":
+        return "bg-yellow-500/20 text-yellow-400";
+      case "exam":
+        return "bg-red-500/20 text-red-400";
+      case "live_session":
+        return "bg-green-500/20 text-green-400";
+      default:
+        return "bg-gray-500/20 text-gray-400";
+    }
+  };
+
+  const formatDate = (date: Date) => {
+    if (!date || isNaN(date.getTime())) return "Date TBD";
+    
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const targetDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    
+    const diffDays = Math.ceil((targetDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    
+    if (diffDays === 0) return "Today";
+    if (diffDays === 1) return "Tomorrow";
+    if (diffDays < 7) return `In ${diffDays} days`;
+    return date.toLocaleDateString();
+  };
+
+  const getUniqueKey = (item: UpcomingItem, index: number) => {
+    return `${item.type}-${item.id}-${index}`;
+  };
 
   return (
     <GlowCard>
-      <div className="p-4">
-        <div className="flex justify-between items-center mb-4">
-          <div>
-            <h3 className="font-semibold text-white">Upcoming Deadlines</h3>
-            <p className="text-xs text-gray-400 mt-1">Stay on track with your goals</p>
+      <div className="p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Calendar className="w-5 h-5 text-purple-400" />
+            <h3 className="text-lg font-semibold text-white">Upcoming Deadlines</h3>
           </div>
-          <Link href="/assignments">
-            <ChevronRight className="w-4 h-4 text-gray-400 hover:text-white transition-colors" />
+          <Link href="/dashboard/calendar">
+            <button className="text-sm text-gray-400 hover:text-white transition-colors">
+              View calendar
+            </button>
           </Link>
         </div>
-
+        
         <div className="space-y-3">
-          {sortedItems.length === 0 ? (
-            <div className="text-center py-6">
-              <Calendar className="w-8 h-8 text-gray-600 mx-auto mb-2" />
-              <p className="text-sm text-gray-400">No upcoming deadlines</p>
-              <p className="text-xs text-gray-500 mt-1">Enjoy your free time! 🎉</p>
-            </div>
+          {items.length === 0 ? (
+            <p className="text-gray-400 text-center py-4">No upcoming deadlines</p>
           ) : (
-            sortedItems.map((item) => {
-              const Icon = getTypeIcon(item.type);
-              const colorClass = getTypeColor(item.type);
-              const isUrgent = (item.date.getTime() - new Date().getTime()) / (1000 * 3600 * 24) < 2;
-              
+            items.map((item, index) => {
+              const displayDate = item.dueDate || item.date;
               return (
                 <div
-                  key={item.id}
-                  className="flex items-start gap-3 p-2 rounded-lg hover:bg-gray-800/50 transition-colors"
+                  key={getUniqueKey(item, index)}
+                  className="flex items-center justify-between p-3 bg-gray-800/30 rounded-lg hover:bg-gray-800/50 transition-colors"
                 >
-                  <div className={`p-2 rounded-lg ${colorClass}`}>
-                    <Icon className="w-4 h-4" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-white truncate">
-                      {item.title}
-                    </p>
-                    <p className="text-xs text-gray-400">{item.courseName}</p>
+                  <div className="flex items-center gap-3">
+                    <div className={`p-2 rounded-lg ${getTypeColor(item.type)}`}>
+                      {getTypeIcon(item.type)}
+                    </div>
+                    <div>
+                      <p className="text-white text-sm font-medium line-clamp-1">
+                        {item.title}
+                      </p>
+                      <p className="text-xs text-gray-500">{item.courseName}</p>
+                    </div>
                   </div>
                   <div className="text-right">
-                    <div className="flex items-center gap-1 text-xs text-gray-400">
-                      <Clock className="w-3 h-3" />
-                      <span>
-                        {item.date.toLocaleDateString('default', { month: 'short', day: 'numeric' })}
-                      </span>
-                    </div>
-                    {isUrgent && (
-                      <span className="text-xs text-red-400 font-medium">Urgent</span>
-                    )}
+                    <span className="text-xs text-orange-400 whitespace-nowrap">
+                      {formatDate(displayDate)}
+                    </span>
                   </div>
                 </div>
               );

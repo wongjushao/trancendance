@@ -268,3 +268,15 @@ CREATE TABLE IF NOT EXISTS public.alembic_version (
     CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
 );
 INSERT INTO public.alembic_version (version_num) VALUES ('20260225_0001');
+
+CREATE TABLE public.user_blocks (
+	id BIGSERIAL NOT NULL,
+	blocker_id UUID NOT NULL,
+	blocked_id UUID NOT NULL,
+	created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT now() NOT NULL,
+	PRIMARY KEY (id),
+	CONSTRAINT uq_user_blocks_blocker_blocked UNIQUE (blocker_id, blocked_id),
+	FOREIGN KEY(blocker_id) REFERENCES public.profiles (id),
+	FOREIGN KEY(blocked_id) REFERENCES public.profiles (id)
+);
+def downgrade():
