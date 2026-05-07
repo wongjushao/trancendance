@@ -8,7 +8,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
 from backend.common.models import Message, ChatRoomMember, Profile
-from backend.services.chat_service.chat_service.services.room_service import RoomAccessError
+from backend.services.chat_service.chat_service.services.room_service import (
+    RoomAccessError,
+    assert_can_message_room,
+)
 from backend.services.chat_service.chat_service.services.serialization import serialize_message
 
 logger = logging.getLogger(__name__)
@@ -34,6 +37,8 @@ def create_message(
         if not is_member:
             logger.error(f"[MessageService] User {sender_id} is not a member of room {room_id}")
             raise RoomAccessError(f"User {sender_id} is not a member of room {room_id}")
+
+        assert_can_message_room(session, room_id, sender_id)
         
         # Create message
         now = datetime.utcnow()

@@ -25,6 +25,9 @@ from backend.services.chat_service.chat_service.services.room_service import (
     get_or_create_dm_room,
     get_or_create_course_room,
     can_dm,
+    block_user,
+    unblock_user,
+    get_chat_profile,
     RoomAccessError
 )
 
@@ -68,6 +71,91 @@ def get_rooms():
     except SQLAlchemyError:
         session.rollback()
         return jsonify({"error": "Failed to load rooms"}), 500
+    finally:
+        session.close()
+
+
+@chat_bp.get("/profiles/<profile_id>")
+def get_profile(profile_id: str):
+    """Get a chat-visible profile with block state."""
+    db_session = current_app.config.get("DB_SESSION")
+
+    try:
+        ensure_db_session(db_session)
+        current_user_id = get_request_user_id()
+        target_user_id = uuid.UUID(profile_id)
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 503
+    except PermissionError as exc:
+        return jsonify({"error": str(exc)}), 401
+    except ValueError:
+        return jsonify({"error": "Invalid user id"}), 400
+
+    session = db_session()
+    try:
+        return jsonify({"profile": get_chat_profile(session, current_user_id, target_user_id)}), 200
+    except RoomAccessError as exc:
+        return jsonify({"error": str(exc)}), 403
+    except SQLAlchemyError:
+        session.rollback()
+        return jsonify({"error": "Failed to load profile"}), 500
+    finally:
+        session.close()
+
+
+@chat_bp.post("/blocks/<profile_id>")
+def block_profile(profile_id: str):
+    """Block a user from direct messaging the current user."""
+    db_session = current_app.config.get("DB_SESSION")
+
+    try:
+        ensure_db_session(db_session)
+        current_user_id = get_request_user_id()
+        target_user_id = uuid.UUID(profile_id)
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 503
+    except PermissionError as exc:
+        return jsonify({"error": str(exc)}), 401
+    except ValueError:
+        return jsonify({"error": "Invalid user id"}), 400
+
+    session = db_session()
+    try:
+        status = block_user(session, current_user_id, target_user_id)
+        return jsonify(status), 200
+    except RoomAccessError as exc:
+        session.rollback()
+        return jsonify({"error": str(exc)}), 400
+    except SQLAlchemyError:
+        session.rollback()
+        return jsonify({"error": "Failed to block user"}), 500
+    finally:
+        session.close()
+
+
+@chat_bp.delete("/blocks/<profile_id>")
+def unblock_profile(profile_id: str):
+    """Unblock a user for direct messaging."""
+    db_session = current_app.config.get("DB_SESSION")
+
+    try:
+        ensure_db_session(db_session)
+        current_user_id = get_request_user_id()
+        target_user_id = uuid.UUID(profile_id)
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 503
+    except PermissionError as exc:
+        return jsonify({"error": str(exc)}), 401
+    except ValueError:
+        return jsonify({"error": "Invalid user id"}), 400
+
+    session = db_session()
+    try:
+        status = unblock_user(session, current_user_id, target_user_id)
+        return jsonify(status), 200
+    except SQLAlchemyError:
+        session.rollback()
+        return jsonify({"error": "Failed to unblock user"}), 500
     finally:
         session.close()
 

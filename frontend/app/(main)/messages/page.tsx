@@ -5,7 +5,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Send, Loader2, Paperclip, Search, MessageCircle } from "lucide-react";
+import { Send, Loader2, Paperclip, Search, MessageCircle, User, Ban } from "lucide-react";
 import { useChat } from "@/contexts/ChatContext";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
@@ -25,6 +25,22 @@ interface Message {
   is_me: boolean;
 }
 
+interface ChatProfile {
+  id: string;
+  display_name: string;
+  username?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  avatar_url?: string | null;
+  bio?: string | null;
+  job_title?: string | null;
+  department?: string | null;
+  timezone?: string | null;
+  is_me: boolean;
+  is_blocked_by_me: boolean;
+  has_blocked_me: boolean;
+}
+
 export default function MessagesPage() {
   const {
     rooms,
@@ -34,7 +50,8 @@ export default function MessagesPage() {
     sendMessage,
     selectRoom,
     isConnected,
-    loadMessages,
+    blockUser,
+    unblockUser,
   } = useChat();
 
   const [newMessage, setNewMessage] = useState("");
@@ -42,6 +59,10 @@ export default function MessagesPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileActionLoading, setProfileActionLoading] = useState(false);
+  const [selectedProfile, setSelectedProfile] = useState<ChatProfile | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
 
@@ -89,11 +110,67 @@ export default function MessagesPage() {
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
-    if (newMessage.trim() && currentRoom && isConnected) {
+    if (
+      newMessage.trim() &&
+      currentRoom &&
+      isConnected &&
+      !currentRoom.is_blocked_by_me &&
+      !currentRoom.has_blocked_me
+    ) {
       sendMessage(newMessage);
       setNewMessage("");
     }
   };
+
+  const openProfile = useCallback(
+    async (profileId?: string | null) => {
+      if (!profileId || !accessToken) return;
+
+      setProfileOpen(true);
+      setProfileLoading(true);
+      try {
+        const res = await fetch(`/api/chat-service/profiles/${profileId}`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Failed to load profile");
+        setSelectedProfile(data.profile);
+      } catch (error) {
+        console.error("[MessagesPage] Error loading chat profile:", error);
+        setSelectedProfile(null);
+      } finally {
+        setProfileLoading(false);
+      }
+    },
+    [accessToken],
+  );
+
+  const handleToggleBlock = async () => {
+    if (!selectedProfile || selectedProfile.is_me) return;
+
+    setProfileActionLoading(true);
+    try {
+      if (selectedProfile.is_blocked_by_me) {
+        await unblockUser(selectedProfile.id);
+        setSelectedProfile((profile) =>
+          profile ? { ...profile, is_blocked_by_me: false } : profile,
+        );
+      } else {
+        await blockUser(selectedProfile.id);
+        setSelectedProfile((profile) =>
+          profile ? { ...profile, is_blocked_by_me: true } : profile,
+        );
+      }
+    } catch (error) {
+      console.error("[MessagesPage] Error updating block state:", error);
+    } finally {
+      setProfileActionLoading(false);
+    }
+  };
+
+  const messagingBlocked =
+    currentRoom?.type === "direct" &&
+    (currentRoom.is_blocked_by_me || currentRoom.has_blocked_me);
 
   // Sort messages by created_at to ensure proper order
   const sortedMessages = [...messages].sort((a, b) => {
@@ -282,8 +359,9 @@ export default function MessagesPage() {
                 />
               </svg>
             </button>
-            <div className="flex items-center gap-3 min-w-0">
+            <div className="flex items-center gap-3 min-w-0 flex-1">
               <Avatar className="h-9 w-9 sm:h-10 sm:w-10 ring-1 ring-white/5 flex-shrink-0">
+                {currentRoom.profile_avatar && <AvatarImage src={currentRoom.profile_avatar} />}
                 <AvatarFallback className="bg-gradient-to-br from-purple-500 to-violet-600 text-white font-semibold">
                   {currentRoom.display_name.charAt(0).toUpperCase()}
                 </AvatarFallback>
@@ -297,6 +375,18 @@ export default function MessagesPage() {
                 </p>
               </div>
             </div>
+            {currentRoom.type === "direct" && currentRoom.profile_user_id && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => openProfile(currentRoom.profile_user_id)}
+                className="ml-2 text-[#A0A0B5] hover:text-white hover:bg-white/5"
+              >
+                <User className="h-4 w-4 mr-1.5" />
+                Profile
+              </Button>
+            )}
           </div>
 
           {/* Messages Area */}
@@ -305,6 +395,14 @@ export default function MessagesPage() {
             ref={scrollAreaRef}
           >
             <div className="max-w-4xl mx-auto space-y-4 md:space-y-6">
+              {messagingBlocked && (
+                <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+                  {currentRoom?.is_blocked_by_me
+                    ? "You blocked this user. Unblock them from their profile to send messages again."
+                    : "This user has blocked you, so messaging is unavailable."}
+                </div>
+              )}
+
               {sortedMessages.length === 0 ? (
                 <div className="text-center py-12 px-4">
                   <MessageCircle className="h-12 w-12 text-[#6B6B80] mx-auto mb-3 opacity-30" />
@@ -332,12 +430,19 @@ export default function MessagesPage() {
                         } animate-in fade-in slide-in-from-bottom-1 duration-200`}
                       >
                         {!msg.is_me && (
-                          <Avatar className="h-7 w-7 sm:h-8 sm:w-8 flex-shrink-0 ring-1 ring-white/5">
+                          <button
+                            type="button"
+                            onClick={() => openProfile(msg.sender_id)}
+                            className="h-7 w-7 sm:h-8 sm:w-8 flex-shrink-0 rounded-full"
+                            aria-label={`Open ${msg.sender_name || "user"} profile`}
+                          >
+                          <Avatar className="h-7 w-7 sm:h-8 sm:w-8 ring-1 ring-white/5">
                             <AvatarImage src={msg.sender_avatar} />
                             <AvatarFallback className="bg-gradient-to-br from-purple-500 to-violet-600 text-white text-[10px] sm:text-xs font-semibold">
                               {msg.sender_name?.charAt(0).toUpperCase() || "U"}
                             </AvatarFallback>
                           </Avatar>
+                          </button>
                         )}
                         <div
                           className={`flex flex-col ${
@@ -345,9 +450,13 @@ export default function MessagesPage() {
                           } max-w-[80%] sm:max-w-[75%] md:max-w-[70%] min-w-0`}
                         >
                           {!msg.is_me && (
-                            <span className="text-[10px] sm:text-xs text-[#A0A0B5] mb-1 ml-1 truncate max-w-full">
+                            <button
+                              type="button"
+                              onClick={() => openProfile(msg.sender_id)}
+                              className="text-[10px] sm:text-xs text-[#A0A0B5] mb-1 ml-1 truncate max-w-full hover:text-white"
+                            >
                               {msg.sender_name}
-                            </span>
+                            </button>
                           )}
                           <div
                             className={`px-3 py-2 md:px-4 md:py-2.5 rounded-2xl text-sm break-words whitespace-pre-wrap transition-shadow ${
@@ -395,7 +504,7 @@ export default function MessagesPage() {
               <Input
                 value={newMessage}
                 onChange={(e) => setNewMessage(e.target.value)}
-                placeholder="Type a message..."
+                placeholder={messagingBlocked ? "Messaging is blocked" : "Type a message..."}
                 className="flex-1 min-w-0 bg-[#0B0B0F] border-white/10 text-white rounded-full px-4 h-10 sm:h-11 focus-visible:ring-2 focus-visible:ring-purple-500/40 focus-visible:border-purple-500/40 transition-all"
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
@@ -408,7 +517,7 @@ export default function MessagesPage() {
                 type="submit"
                 size="icon"
                 className="bg-gradient-to-r from-purple-500 to-violet-600 hover:shadow-lg hover:shadow-purple-500/40 active:scale-95 rounded-full h-10 w-10 sm:h-11 sm:w-11 transition-all flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
-                disabled={!newMessage.trim() || !isConnected}
+                disabled={!newMessage.trim() || !isConnected || messagingBlocked}
               >
                 <Send className="h-4 w-4" />
               </Button>
@@ -428,6 +537,85 @@ export default function MessagesPage() {
             <p className="text-sm text-[#6B6B80] mt-2">
               Choose a conversation from the sidebar
             </p>
+          </div>
+        </div>
+      )}
+      {profileOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#14141C] p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <h3 className="text-lg font-semibold text-white">Chat Profile</h3>
+              <button
+                type="button"
+                onClick={() => setProfileOpen(false)}
+                className="rounded-lg px-2 py-1 text-sm text-[#A0A0B5] hover:bg-white/5 hover:text-white"
+              >
+                Close
+              </button>
+            </div>
+
+            {profileLoading ? (
+              <div className="flex items-center justify-center py-10">
+                <Loader2 className="h-6 w-6 animate-spin text-purple-400" />
+              </div>
+            ) : selectedProfile ? (
+              <div className="mt-5 space-y-5">
+                <div className="flex items-center gap-4">
+                  <Avatar className="h-16 w-16 ring-1 ring-white/10">
+                    {selectedProfile.avatar_url && <AvatarImage src={selectedProfile.avatar_url} />}
+                    <AvatarFallback className="bg-gradient-to-br from-purple-500 to-violet-600 text-xl font-semibold text-white">
+                      {selectedProfile.display_name.charAt(0).toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0">
+                    <p className="truncate text-lg font-semibold text-white">
+                      {selectedProfile.display_name}
+                    </p>
+                    {selectedProfile.username && (
+                      <p className="truncate text-sm text-[#A0A0B5]">@{selectedProfile.username}</p>
+                    )}
+                    {(selectedProfile.job_title || selectedProfile.department) && (
+                      <p className="mt-1 text-sm text-[#A0A0B5]">
+                        {[selectedProfile.job_title, selectedProfile.department].filter(Boolean).join(" · ")}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {selectedProfile.bio && (
+                  <p className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-sm text-[#E0E0F0]">
+                    {selectedProfile.bio}
+                  </p>
+                )}
+
+                {selectedProfile.has_blocked_me && (
+                  <p className="rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-100">
+                    This user has blocked you.
+                  </p>
+                )}
+
+                {!selectedProfile.is_me && (
+                  <Button
+                    type="button"
+                    variant={selectedProfile.is_blocked_by_me ? "secondary" : "destructive"}
+                    onClick={handleToggleBlock}
+                    disabled={profileActionLoading}
+                    className="w-full"
+                  >
+                    {profileActionLoading ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Ban className="mr-2 h-4 w-4" />
+                    )}
+                    {selectedProfile.is_blocked_by_me ? "Unblock User" : "Block User"}
+                  </Button>
+                )}
+              </div>
+            ) : (
+              <p className="py-10 text-center text-sm text-[#A0A0B5]">
+                Profile could not be loaded.
+              </p>
+            )}
           </div>
         </div>
       )}

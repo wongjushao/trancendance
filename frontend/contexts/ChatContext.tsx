@@ -28,6 +28,10 @@ interface ChatRoom {
   last_message_time: string | null;
   unread_count: number;
   related_course_id?: number;
+  profile_user_id?: string | null;
+  profile_avatar?: string | null;
+  is_blocked_by_me?: boolean;
+  has_blocked_me?: boolean;
 }
 
 interface Message {
@@ -63,6 +67,8 @@ interface ChatContextType {
   sendMessage: (content: string) => void;
   selectRoom: (room: ChatRoom | null) => void;
   loadMessages: (roomId: number, page?: number) => Promise<void>;
+  blockUser: (profileId: string) => Promise<void>;
+  unblockUser: (profileId: string) => Promise<void>;
   isConnected: boolean;
   isConnecting: boolean;
   reconnect: () => void;
@@ -384,6 +390,10 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         toast.error('Authentication error');
         return;
       }
+      if (currentRoom.is_blocked_by_me || currentRoom.has_blocked_me) {
+        toast.error('Messaging is blocked for this conversation');
+        return;
+      }
 
       const now = new Date();
       const tempId = `temp-${now.getTime()}-${Math.random().toString(36).substring(2, 8)}`;
@@ -423,6 +433,73 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     [currentRoom, isConnected, emit, currentUserId],
   );
 
+  const updateRoomBlockState = useCallback(
+    (profileId: string, status: { is_blocked_by_me: boolean; has_blocked_me: boolean }) => {
+      setRooms((prev) =>
+        prev.map((room) =>
+          room.profile_user_id === profileId
+            ? {
+                ...room,
+                is_blocked_by_me: status.is_blocked_by_me,
+                has_blocked_me: status.has_blocked_me,
+              }
+            : room,
+        ),
+      );
+      setCurrentRoom((room) =>
+        room?.profile_user_id === profileId
+          ? {
+              ...room,
+              is_blocked_by_me: status.is_blocked_by_me,
+              has_blocked_me: status.has_blocked_me,
+            }
+          : room,
+      );
+    },
+    [],
+  );
+
+  const setBlockState = useCallback(
+    async (profileId: string, shouldBlock: boolean) => {
+      if (!accessToken) {
+        toast.error('Authentication error');
+        return;
+      }
+
+      const res = await fetch(`/api/chat-service/blocks/${profileId}`, {
+        method: shouldBlock ? 'POST' : 'DELETE',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(data.error || `Failed to ${shouldBlock ? 'block' : 'unblock'} user`);
+      }
+
+      updateRoomBlockState(profileId, {
+        is_blocked_by_me: data.is_blocked_by_me === true,
+        has_blocked_me: data.has_blocked_me === true,
+      });
+    },
+    [accessToken, updateRoomBlockState],
+  );
+
+  const blockUser = useCallback(
+    async (profileId: string) => {
+      await setBlockState(profileId, true);
+      toast.success('User blocked');
+    },
+    [setBlockState],
+  );
+
+  const unblockUser = useCallback(
+    async (profileId: string) => {
+      await setBlockState(profileId, false);
+      toast.success('User unblocked');
+    },
+    [setBlockState],
+  );
+
   return (
     <ChatContext.Provider
       value={{
@@ -433,6 +510,8 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         sendMessage,
         selectRoom,
         loadMessages,
+        blockUser,
+        unblockUser,
         isConnected,
         isConnecting,
         reconnect,
