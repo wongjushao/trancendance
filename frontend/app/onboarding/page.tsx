@@ -13,9 +13,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { motion, AnimatePresence } from "framer-motion";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
-import { clearOnboardingCache } from "@/lib/onboarding";
+import { clearOnboardingCache, fetchOrganizationsMatchingSessionDomain } from "@/lib/onboarding";
 import { useRole } from "@/components/providers/RoleProvider";
-import { UserRole, Organization, mockOrganizations } from "@/lib/role";
+import { UserRole, Organization } from "@/lib/role";
 import { OrganizationAutoDetect } from "@/components/onboarding/OrganizationAutoDetect";
 import { createRoleRequest } from "@/lib/role-requests";
 import { toast } from "sonner";
@@ -138,6 +138,10 @@ export default function OnboardingPage() {
 
   const [isFromInvite, setIsFromInvite] = useState(false);
 
+  /** Organizations whose verified domains match the user's email (`GET /check_org` via BFF). */
+  const [emailDomainOrganizations, setEmailDomainOrganizations] = useState<Organization[]>([]);
+  const [domainOrgsLoading, setDomainOrgsLoading] = useState(true);
+
   const [formData, setFormData] = useState<FormData>({
     avatar: null,
     avatarPreview: "",
@@ -155,8 +159,8 @@ export default function OnboardingPage() {
     interests: [],
   });
 
-  // Filter organizations based on search
-  const filteredOrganizations = mockOrganizations.filter(org =>
+  // Filter organizations based on search (domain-matched orgs from backend)
+  const filteredOrganizations = emailDomainOrganizations.filter(org =>
     org.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     org.domain.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -169,7 +173,7 @@ export default function OnboardingPage() {
         ...prev,
         selectedOrganizationId: org.id
       }));
-    } else {
+    } else if (!isFromInvite) {
       setFormData(prev => ({
         ...prev,
         selectedOrganizationId: null
@@ -284,58 +288,74 @@ export default function OnboardingPage() {
   useEffect(() => {
     const loadUserData = async () => {
       setIsLoadingUser(true);
+      setDomainOrgsLoading(true);
       const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) {
-        router.replace("/");
-        return;
-      }
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
 
-      // Fast path: check if already onboarded via the backend
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.access_token) {
-        try {
-          const response = await fetch('/api/auth-service/onboarding-status', {
-            headers: {
-              'Authorization': `Bearer ${session.access_token}`,
-            },
-          });
-          if (response.ok) {
-            const status = await response.json();
-            if (status.onboarded) {
-              router.replace("/dashboard");
-              return;
-            }
-          }
-        } catch (e) {
-          console.error('Error checking onboarding status:', e);
+        if (!user) {
+          router.replace("/");
+          return;
         }
+
+        const { data: { session } } = await supabase.auth.getSession();
+
+        // Fast path: check if already onboarded via the backend
+        if (session?.access_token) {
+          try {
+            const response = await fetch('/api/auth-service/onboarding-status', {
+              headers: {
+                'Authorization': `Bearer ${session.access_token}`,
+              },
+            });
+            if (response.ok) {
+              const status = await response.json();
+              if (status.onboarded) {
+                router.replace("/dashboard");
+                return;
+              }
+            }
+          } catch (e) {
+            console.error('Error checking onboarding status:', e);
+          }
+        }
+
+        // Organizations matching email domain (auth-service DB / organization_domains)
+        let orgs: Organization[] = [];
+        if (session?.access_token) {
+          try {
+            orgs = await fetchOrganizationsMatchingSessionDomain(session.access_token);
+          } catch (e) {
+            console.error('Error loading organizations for email domain:', e);
+          }
+        }
+        setEmailDomainOrganizations(orgs);
+
+        // Pre-fill from Google OAuth data if available
+        const userMetadata = user.user_metadata || {};
+        const userEmail = user.email || "";
+
+        const googleName = userMetadata.full_name || userMetadata.name || "";
+        const googleFirstName = userMetadata.given_name || "";
+        const googleLastName = userMetadata.family_name || "";
+
+        const suggestedUsername = googleName
+          ? googleName.toLowerCase().replace(/\s+/g, ".")
+          : userEmail.split("@")[0];
+
+        setFormData((prev) => ({
+          ...prev,
+          email: userEmail,
+          firstName: prev.firstName || googleFirstName || (googleName.split(" ")[0] || ""),
+          lastName: prev.lastName || googleLastName || (googleName.split(" ").slice(1).join(" ") || ""),
+          username: prev.username || suggestedUsername,
+        }));
+      } finally {
+        setDomainOrgsLoading(false);
+        setIsLoadingUser(false);
       }
-
-      // Pre-fill from Google OAuth data if available
-      const userMetadata = user.user_metadata || {};
-      const userEmail = user.email || "";
-      
-      const googleName = userMetadata.full_name || userMetadata.name || "";
-      const googleFirstName = userMetadata.given_name || "";
-      const googleLastName = userMetadata.family_name || "";
-      
-      const suggestedUsername = googleName
-        ? googleName.toLowerCase().replace(/\s+/g, ".")
-        : userEmail.split("@")[0];
-      
-      setFormData((prev) => ({
-        ...prev,
-        email: userEmail,
-        firstName: prev.firstName || googleFirstName || (googleName.split(" ")[0] || ""),
-        lastName: prev.lastName || googleLastName || (googleName.split(" ").slice(1).join(" ") || ""),
-        username: prev.username || suggestedUsername,
-      }));
-
-      setIsLoadingUser(false);
     };
-    
+
     loadUserData();
   }, [router]);
 
@@ -490,7 +510,7 @@ export default function OnboardingPage() {
     }
     
     const selectedOrg = formData.selectedOrganizationId 
-      ? mockOrganizations.find(o => o.id === formData.selectedOrganizationId)
+      ? emailDomainOrganizations.find(o => o.id === formData.selectedOrganizationId)
       : null;
     
     setRole({
@@ -504,7 +524,7 @@ export default function OnboardingPage() {
 
     // Create role request if teacher role was selected
     if (formData.desiredRole === 'teacher' && formData.selectedOrganizationId) {
-      const selectedOrgForRequest = mockOrganizations.find(o => o.id === formData.selectedOrganizationId);
+      const selectedOrgForRequest = emailDomainOrganizations.find(o => o.id === formData.selectedOrganizationId);
       if (selectedOrgForRequest && user) {
         createRoleRequest(
           user.id,
@@ -1014,7 +1034,8 @@ export default function OnboardingPage() {
                       {/* Organization Auto-Detect Component */}
                       <OrganizationAutoDetect
                         email={formData.email}
-                        organizations={mockOrganizations}
+                        organizations={emailDomainOrganizations}
+                        isLoadingOrganizations={domainOrgsLoading}
                         onOrganizationDetected={handleOrganizationDetected}
                       />
 

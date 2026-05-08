@@ -8,20 +8,30 @@ interface OrganizationAutoDetectProps {
   email: string;
   organizations: Organization[];
   onOrganizationDetected: (org: Organization | null) => void;
+  /** When true, keeps "checking" UI until `/check_org` (or similar) has finished loading */
+  isLoadingOrganizations?: boolean;
 }
 
 export function OrganizationAutoDetect({ 
   email, 
   organizations, 
-  onOrganizationDetected 
+  onOrganizationDetected,
+  isLoadingOrganizations = false,
 }: OrganizationAutoDetectProps) {
   const [detectedOrg, setDetectedOrg] = useState<Organization | null>(null);
   const [status, setStatus] = useState<'checking' | 'found' | 'not-found'>('checking');
-  const hasNotifiedRef = useRef(false);
+  const onDetectedRef = useRef(onOrganizationDetected);
+  onDetectedRef.current = onOrganizationDetected;
 
   useEffect(() => {
     // Skip if no email
     if (!email) {
+      setStatus('checking');
+      setDetectedOrg(null);
+      return;
+    }
+
+    if (isLoadingOrganizations) {
       setStatus('checking');
       setDetectedOrg(null);
       return;
@@ -33,10 +43,7 @@ export function OrganizationAutoDetect({
     if (!domain) {
       setStatus('not-found');
       setDetectedOrg(null);
-      if (!hasNotifiedRef.current) {
-        onOrganizationDetected(null);
-        hasNotifiedRef.current = true;
-      }
+      onDetectedRef.current(null);
       return;
     }
 
@@ -46,35 +53,28 @@ export function OrganizationAutoDetect({
     if (org) {
       setDetectedOrg(org);
       setStatus('found');
-      if (!hasNotifiedRef.current) {
-        onOrganizationDetected(org);
-        hasNotifiedRef.current = true;
-      }
+      onDetectedRef.current(org);
     } else {
       setDetectedOrg(null);
       setStatus('not-found');
-      if (!hasNotifiedRef.current) {
-        onOrganizationDetected(null);
-        hasNotifiedRef.current = true;
-      }
+      onDetectedRef.current(null);
     }
-  }, [email, organizations]); // Removed onOrganizationDetected from dependencies
-
-  // Reset notification flag when email changes
-  useEffect(() => {
-    hasNotifiedRef.current = false;
-  }, [email]);
+  }, [email, organizations, isLoadingOrganizations]);
 
   if (!email) {
     return null;
   }
 
   return (
-    <div className="mt-2 p-3 rounded-lg border transition-all duration-300 
-      ${status === 'checking' ? 'bg-gray-800/30 border-gray-700' : ''}
-      ${status === 'found' ? 'bg-green-500/10 border-green-500/30' : ''}
-      ${status === 'not-found' ? 'bg-yellow-500/10 border-yellow-500/30' : ''}
-    ">
+    <div
+      className={`mt-2 p-3 rounded-lg border transition-all duration-300 ${
+        status === 'checking'
+          ? 'bg-gray-800/30 border-gray-700'
+          : status === 'found'
+            ? 'bg-green-500/10 border-green-500/30'
+            : 'bg-yellow-500/10 border-yellow-500/30'
+      }`}
+    >
       {status === 'checking' && (
         <div className="flex items-center gap-2 text-gray-400">
           <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />

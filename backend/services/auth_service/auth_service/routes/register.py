@@ -115,6 +115,11 @@ def register_profile():
     if not user_id:
         return jsonify({"error": "Invalid token"}), 401
 
+    try:
+        user_id = uuid.UUID(str(user_id))
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid token subject"}), 401
+
     # ── Parse request body ────────────────────────────────────────────────────
     payload = request.get_json(silent=True) or {}
 
@@ -156,9 +161,6 @@ def register_profile():
     session = db_session()
     try:
         profile = session.query(Profile).filter(Profile.id == user_id).first()
-        if profile is None:
-            profile = Profile(id=user_id)
-            session.add(profile)
 
         if username:
             duplicate = (
@@ -172,6 +174,9 @@ def register_profile():
             if duplicate:
                 return jsonify({"error": "Username is already taken"}), 409
 
+        if profile is None:
+            profile = Profile(id=user_id)
+            session.add(profile)
         # Update all fields (combining both versions)
         profile.username     = username                      or profile.username
         profile.first_name   = payload.get("first_name")     or profile.first_name
@@ -187,6 +192,10 @@ def register_profile():
         
         # Mark as onboarded since this is the completion of the onboarding flow
         profile.onboarded = True
+
+        # Session uses autoflush=False; flush now so organization_members inserts
+        # always see the profile row in this transaction (FK to public.profiles).
+        session.flush()
 
         # ── Auto-join organization based on email domain (from teammate's work) ──
         if email:
@@ -224,9 +233,9 @@ def register_profile():
             "profile": serialize_profile(profile),
         }), 201
 
-    except IntegrityError:
+    except IntegrityError as exc:
         session.rollback()
-        return jsonify({"error": "Username is already taken"}), 409
+        return jsonify({"error": str(exc)}), 409
     except SQLAlchemyError as exc:
         session.rollback()
         return jsonify({"error": str(exc)}), 500

@@ -1,6 +1,48 @@
 // frontend/lib/onboarding.ts
 
+import type { Organization } from './role';
 import { getSupabaseBrowserClient } from './supabase/browser-client';
+
+interface CheckOrgApiRow {
+  id: number;
+  name: string;
+  slug?: string;
+  description?: string | null;
+  domain: string;
+}
+
+function mapCheckOrgResponse(rows: CheckOrgApiRow[]): Organization[] {
+  return rows.map((o) => ({
+    id: o.id,
+    name: o.name,
+    domain: o.domain.toLowerCase(),
+    description: (o.description ?? '').trim(),
+    memberCount: 0,
+    verified: true,
+  }));
+}
+
+/** Organizations whose verified domains match the signed-in user's email (`GET /api/auth-service/check_org`). */
+export async function fetchOrganizationsMatchingSessionDomain(
+  accessToken: string
+): Promise<Organization[]> {
+  try {
+    const response = await fetch('/api/auth-service/check_org', {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+    if (!response.ok) {
+      console.error('check_org failed:', response.status);
+      return [];
+    }
+    const data: { organizations?: CheckOrgApiRow[] } = await response.json();
+    return mapCheckOrgResponse(data.organizations ?? []);
+  } catch (e) {
+    console.error('check_org error:', e);
+    return [];
+  }
+}
 
 interface OnboardingStatusResponse {
   onboarded: boolean;
