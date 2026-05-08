@@ -975,7 +975,6 @@ interface SidebarProps {
   classMemberId: number | null;
   userReview: any;
   onRateClick: () => void;
-  onGetCertificate: () => void;
   averageRating: number;  // Add this
   courseReviews: any[];   // Add this for the count
   dashboardSidebarCollapsed: boolean;  // ADD THIS
@@ -993,7 +992,6 @@ function Sidebar({
   classMemberId,
   userReview,
   onRateClick,
-  onGetCertificate,
   averageRating,  // Add this
   courseReviews,  // Add this
   dashboardSidebarCollapsed 
@@ -1159,12 +1157,6 @@ function Sidebar({
               </GlowButton>
             )}
           </div>
-
-          {/* Certificate Button */}
-          <GlowButton variant="outline" size="sm" fullWidth onClick={onGetCertificate}>
-            <Award className="w-4 h-4 mr-2" />
-            Get Certificate
-          </GlowButton>
 
           {/* Course Stats (Optional) */}
           {courseReviews.length > 0 && (
@@ -1834,7 +1826,6 @@ export default function CourseLearnPage() {
         averageRating={averageRating}
         courseReviews={courseReviews}
         onRateClick={() => setShowRatingModal(true)}
-        onGetCertificate={() => router.push(`/certificates/generate?courseId=${courseId}`)}
         dashboardSidebarCollapsed={dashboardSidebarCollapsed}
       />
 

@@ -34,7 +34,6 @@ interface EnrolledCourse {
   totalLessons: number;
   lastAccessed: Date;
   rating: number;
-  certificateEarned: boolean;
 }
 
 interface RecentItem {
@@ -239,7 +238,6 @@ export default function StudentDashboard({
           totalLessons: allLessons.length,
           lastAccessed: new Date(cm.enrolled_at),
           rating: avgRating,
-          certificateEarned: cm.completed_at !== null,
         });
       }
 

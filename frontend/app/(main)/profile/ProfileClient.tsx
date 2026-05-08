@@ -85,12 +85,6 @@ const availableInterests = [
   { id: "security", label: "Security", icon: Shield, color: "red" },
 ];
 
-// Mock certificates data
-const certificatesData = [
-  { id: "1", title: "Advanced React Development", issuer: "LMS Platform", issueDate: "2024-01-15", grade: "92%", skills: ["React", "TypeScript", "Next.js"] },
-  { id: "2", title: "Full-Stack TypeScript", issuer: "LMS Platform", issueDate: "2024-01-10", grade: "88%", skills: ["TypeScript", "Node.js", "Express"] },
-];
-
 // Achievements data
 const achievementsData = [
   { id: "1", title: "Quick Learner", description: "Completed 5 lessons in a week", icon: Zap, earned: true, dateEarned: "2024-01-15", points: 100 },
@@ -102,9 +96,8 @@ const achievementsData = [
 // Activity timeline
 const activityTimeline = [
   { id: "1", type: "course", action: "Completed", title: "Advanced React Development", date: new Date(2024, 0, 15), points: 100 },
-  { id: "2", type: "certificate", action: "Earned", title: "TypeScript Mastery", date: new Date(2024, 0, 10), points: 50 },
-  { id: "3", type: "achievement", action: "Unlocked", title: "Quick Learner", date: new Date(2024, 0, 5), points: 25 },
-  { id: "4", type: "assignment", action: "Submitted", title: "API Integration Project", date: new Date(2024, 0, 3), points: 75 },
+  { id: "2", type: "achievement", action: "Unlocked", title: "Quick Learner", date: new Date(2024, 0, 5), points: 25 },
+  { id: "3", type: "assignment", action: "Submitted", title: "API Integration Project", date: new Date(2024, 0, 3), points: 75 },
 ];
 
 const badgesData = [
@@ -746,8 +739,6 @@ export default function ProfileClient({ user }: ProfileClientProps) {
             <GlowCard className="p-4">
               <div className="text-center">
                 <Award className="w-6 h-6 text-green-400 mx-auto mb-2" />
-                <p className="text-2xl font-bold text-white">8</p>
-                <p className="text-xs text-gray-400">Certificates</p>
               </div>
             </GlowCard>
             <GlowCard className="p-4">
@@ -787,7 +778,6 @@ export default function ProfileClient({ user }: ProfileClientProps) {
                   >
                     <div className="w-8 h-8 rounded-full bg-purple-500/20 flex items-center justify-center">
                       {activity.type === "course" && <BookOpen className="w-4 h-4 text-purple-400" />}
-                      {activity.type === "certificate" && <AwardIcon className="w-4 h-4 text-green-400" />}
                       {activity.type === "achievement" && <Trophy className="w-4 h-4 text-yellow-400" />}
                     </div>
                     <div className="flex-1">
@@ -805,122 +795,6 @@ export default function ProfileClient({ user }: ProfileClientProps) {
             </div>
           </GlowCard>
 
-          {/* Badges Section */}
-          {/* <GlowCard>
-            <div className="p-5">
-              <div className="flex justify-between items-center mb-4">
-                <div>
-                  <h3 className="font-semibold text-white">Badges</h3>
-                  <p className="text-xs text-gray-400 mt-0.5">Special recognition badges</p>
-                </div>
-                <Zap className="w-5 h-5 text-purple-400" />
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {badgesData.map((badge) => {
-                  const Icon = badge.icon;
-                  return (
-                    <div key={badge.id} className={`p-3 rounded-lg text-center ${badge.earned ? "bg-purple-500/10 border border-purple-500/30" : "bg-gray-800/30 border border-gray-700"}`}>
-                      <div className={`w-12 h-12 rounded-full mx-auto mb-2 flex items-center justify-center ${badge.earned ? "bg-purple-500/20" : "bg-gray-700/50"}`}>
-                        <Icon className={`w-6 h-6 ${badge.earned ? "text-purple-400" : "text-gray-500"}`} />
-                      </div>
-                      <h4 className="text-xs font-semibold text-white">{badge.title}</h4>
-                      <p className="text-[10px] text-gray-400 mt-0.5">{badge.description}</p>
-                      {!badge.earned && (
-                        <div className="mt-2">
-                          <div className="w-full bg-gray-700 rounded-full h-1">
-                            <div className="bg-purple-500 h-1 rounded-full" style={{ width: `${(badge.progress || 0) * 25}%` }} />
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </GlowCard> */}
-
-          {/* Achievements Grid
-          <GlowCard>
-            <div className="p-5">
-              <div className="flex justify-between items-center mb-4">
-                <div>
-                  <h3 className="font-semibold text-white">Achievements</h3>
-                  <p className="text-xs text-gray-400 mt-0.5">Badges you've earned</p>
-                </div>
-                <Trophy className="w-5 h-5 text-yellow-400" />
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {displayedAchievements.map((achievement) => {
-                  const Icon = achievement.icon;
-                  return (
-                    <div key={achievement.id} className={`p-3 rounded-lg border ${achievement.earned ? "bg-green-500/10 border-green-500/30" : "bg-gray-800/30 border-gray-700"}`}>
-                      <div className="flex items-start gap-2">
-                        <div className={`p-1.5 rounded-lg ${achievement.earned ? "bg-green-500/20" : "bg-gray-700/50"}`}>
-                          <Icon className={`w-4 h-4 ${achievement.earned ? "text-green-400" : "text-gray-400"}`} />
-                        </div>
-                        <div className="flex-1">
-                          <h4 className="text-sm font-semibold text-white">{achievement.title}</h4>
-                          <p className="text-xs text-gray-400">{achievement.description}</p>
-                          {!achievement.earned && (
-                            <div className="mt-2">
-                              <div className="w-full bg-gray-700 rounded-full h-1">
-                                <div className="bg-purple-500 h-1 rounded-full" style={{ width: `${achievement.progress}%` }} />
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                        <div className="text-right">
-                          <span className="text-xs text-purple-400">{achievement.points}</span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              {achievementsData.length > 2 && (
-                <button
-                  onClick={() => setShowAllAchievements(!showAllAchievements)}
-                  className="mt-4 text-center w-full text-sm text-purple-400 hover:text-purple-300 transition-colors"
-                >
-                  {showAllAchievements ? "Show Less" : `Show ${achievementsData.length - 2} More Achievements`}
-                </button>
-              )}
-            </div>
-          </GlowCard> */}
-
-          {/* Certificates */}
-          <GlowCard>
-            <div className="p-5">
-              <div className="flex justify-between items-center mb-4">
-                <div>
-                  <h3 className="font-semibold text-white">Recent Certificates</h3>
-                  <p className="text-xs text-gray-400 mt-0.5">Your earned credentials</p>
-                </div>
-                <Award className="w-5 h-5 text-green-400" />
-              </div>
-              <div className="space-y-3">
-                {certificatesData.map((cert) => (
-                  <div key={cert.id} className="flex items-center justify-between p-3 rounded-lg bg-gray-800/30">
-                    <div className="flex-1">
-                      <h4 className="text-sm font-semibold text-white">{cert.title}</h4>
-                      <p className="text-xs text-gray-400">{cert.issuer}</p>
-                      <div className="flex gap-1 mt-1">
-                        {cert.skills.slice(0, 2).map((skill) => (
-                          <span key={skill} className="text-xs px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400">{skill}</span>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm text-green-400 font-semibold">{cert.grade}</p>
-                      <GlowButton size="sm" variant="ghost" className="h-8 px-2 mt-1">
-                        <Download className="w-3 h-3" />
-                      </GlowButton>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </GlowCard>
         </div>
       </div>
     </div>
