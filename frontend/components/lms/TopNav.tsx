@@ -346,7 +346,7 @@ export function TopNav({ user }: TopNavProps) {
                 </div>
               )}
             </div>
-          )}
+          </div>
 
           {/* For students with an organization - smaller display */}
           {roleData.organizationName && roleData.role === "student" && (
