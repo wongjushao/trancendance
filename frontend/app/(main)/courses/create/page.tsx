@@ -7,6 +7,7 @@ import { GlowCard } from "@/components/lms/Cards";
 import CourseBasicForm from "@/components/course/CourseBasicForm";
 import { useRole } from "@/components/providers/RoleProvider";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
+import { Building2, Crown } from "lucide-react";
 
 export default function CreateCoursePage() {
   const router = useRouter();

@@ -317,3 +317,264 @@ class OrganizationVerificationResource(Resource):
             return jsonify({"error": str(exc)}), 500
         finally:
             session.close()
+
+@organizations_ns.route("/orgs/<int:org_id>/setup-status")
+class OrganizationSetupStatusResource(Resource):
+    @organizations_ns.response(200, "Setup status returned")
+    @organizations_ns.response(401, "Unauthorized")
+    def get(self, org_id: int):
+        """Get organization setup completion status."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        session = db_session()
+        try:
+            # Check if user is admin of this organization
+            membership = session.query(OrganizationMember).filter(
+                OrganizationMember.organization_id == org_id,
+                OrganizationMember.user_id == user_id,
+                OrganizationMember.member_role.in_(['admin', 'sub_admin'])
+            ).first()
+
+            if not membership:
+                return jsonify({"error": "Not authorized to view setup status"}), 403
+
+            org = session.query(Organization).filter(Organization.id == org_id).first()
+            if not org:
+                return jsonify({"error": "Organization not found"}), 404
+
+            return jsonify({
+                "is_setup_complete": org.is_setup_complete,
+                "organization_id": org.id,
+                "organization_name": org.name
+            }), 200
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+    @organizations_ns.expect(organizations_ns.model('SetupComplete', {
+        'is_setup_complete': fields.Boolean(required=True, description="Setup completion status")
+    }))
+    @organizations_ns.response(200, "Setup status updated")
+    def put(self, org_id: int):
+        """Mark organization setup as complete."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        payload = request.get_json(silent=True) or {}
+        is_complete = payload.get('is_setup_complete')
+
+        if is_complete is None:
+            return jsonify({"error": "Field 'is_setup_complete' is required"}), 400
+
+        session = db_session()
+        try:
+            # Check if user is admin of this organization
+            membership = session.query(OrganizationMember).filter(
+                OrganizationMember.organization_id == org_id,
+                OrganizationMember.user_id == user_id,
+                OrganizationMember.member_role.in_(['admin', 'sub_admin'])
+            ).first()
+
+            if not membership:
+                return jsonify({"error": "Not authorized to update setup status"}), 403
+
+            (session.query(Organization)
+             .filter(Organization.id == org_id)
+             .update({"is_setup_complete": is_complete}))
+
+            session.commit()
+
+            return jsonify({
+                "message": "Setup status updated successfully",
+                "is_setup_complete": is_complete
+            }), 200
+        except SQLAlchemyError as exc:
+            session.rollback()
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+
+@organizations_ns.route("/orgs/<int:org_id>/can-promote")
+class OrganizationCanPromoteResource(Resource):
+    @organizations_ns.response(200, "Can promote check returned")
+    @organizations_ns.response(401, "Unauthorized")
+    def get(self, org_id: int):
+        """Check if a user can promote others to teacher/admin (i.e., is admin themselves)."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        session = db_session()
+        try:
+            membership = session.query(OrganizationMember).filter(
+                OrganizationMember.organization_id == org_id,
+                OrganizationMember.user_id == user_id,
+                OrganizationMember.member_role.in_(['admin', 'sub_admin'])
+            ).first()
+
+            return jsonify({
+                "can_promote": membership is not None,
+                "organization_id": org_id,
+                "user_id": str(user_id)
+            }), 200
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+# Add this after your existing endpoints (around line 200-250)
+
+@organizations_ns.route("/orgs/<int:org_id>")
+class OrganizationResource(Resource):
+    @organizations_ns.response(200, "Organization details retrieved")
+    @organizations_ns.response(401, "Unauthorized")
+    @organizations_ns.response(404, "Organization not found")
+    def get(self, org_id: int):
+        """Get organization details by ID."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        session = db_session()
+        try:
+            organization = session.query(Organization).filter(Organization.id == org_id).first()
+            if not organization:
+                return jsonify({"error": "Organization not found"}), 404
+
+            return jsonify(serialize_organization(organization)), 200
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+    @organizations_ns.expect(organizations_ns.model('OrganizationUpdate', {
+        'name': fields.String(required=False, description="Organization name"),
+        'description': fields.String(required=False, description="Organization description"),
+        'slug': fields.String(required=False, description="Organization slug"),
+    }))
+    @organizations_ns.response(200, "Organization updated")
+    @organizations_ns.response(401, "Unauthorized")
+    @organizations_ns.response(403, "Permission denied")
+    @organizations_ns.response(404, "Organization not found")
+    def put(self, org_id: int):
+        """Update organization details (admin only)."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        payload = request.get_json(silent=True) or {}
+        
+        session = db_session()
+        try:
+            # Check if organization exists
+            organization = session.query(Organization).filter(Organization.id == org_id).first()
+            if not organization:
+                return jsonify({"error": "Organization not found"}), 404
+
+            # Check if user is admin of this organization
+            membership = session.query(OrganizationMember).filter(
+                OrganizationMember.organization_id == org_id,
+                OrganizationMember.user_id == user_id,
+                OrganizationMember.member_role.in_(['admin', 'sub_admin'])
+            ).first()
+
+            if not membership:
+                return jsonify({"error": "You don't have permission to update this organization"}), 403
+
+            # Update fields
+            if 'name' in payload:
+                organization.name = payload['name']
+            if 'description' in payload:
+                organization.description = payload['description'] or None
+            if 'slug' in payload:
+                # Validate slug format
+                slug = payload['slug']
+                if slug:
+                    # Check if slug is unique
+                    existing = session.query(Organization).filter(
+                        Organization.slug == slug,
+                        Organization.id != org_id
+                    ).first()
+                    if existing:
+                        return jsonify({"error": "Slug already in use"}), 409
+                    organization.slug = slug
+                else:
+                    organization.slug = None
+
+            session.commit()
+            session.refresh(organization)
+            
+            return jsonify(serialize_organization(organization)), 200
+            
+        except SQLAlchemyError as exc:
+            session.rollback()
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+
+@organizations_ns.route("/orgs/<int:org_id>/members/<user_id>")
+class OrganizationMemberResource(Resource):
+    @organizations_ns.response(200, "Member details retrieved")
+    @organizations_ns.response(401, "Unauthorized")
+    @organizations_ns.response(404, "Member not found")
+    def get(self, org_id: int, user_id: str):
+        """Get a specific member's role in the organization."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        current_user_id, _email = get_authenticated_user()
+        if current_user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        session = db_session()
+        try:
+            # Check if organization exists
+            organization = session.query(Organization).filter(Organization.id == org_id).first()
+            if not organization:
+                return jsonify({"error": "Organization not found"}), 404
+
+            # Get member
+            member = session.query(OrganizationMember).filter(
+                OrganizationMember.organization_id == org_id,
+                OrganizationMember.user_id == user_id
+            ).first()
+
+            if not member:
+                return jsonify({"error": "Member not found"}), 404
+
+            return jsonify({
+                "user_id": str(member.user_id),
+                "member_role": member.member_role,
+                "joined_at": member.created_at.isoformat() if member.created_at else None,
+            }), 200
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()

@@ -76,7 +76,7 @@ class Organization(Base):
     description: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
-
+    is_setup_complete: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
 
 class OrganizationVerificationRequest(Base):
     __tablename__ = "organization_verification_requests"

@@ -465,14 +465,14 @@ export default function CourseDetailPage() {
       for (const classItem of module.classes) {
         const incompleteLesson = classItem.lessons.find(l => !l.is_completed);
         if (incompleteLesson) {
-          router.push(`/courses/${courseId}/learn/lesson/${incompleteLesson.id}`);
+          router.push(`/courses/${courseId}/learn`);
           return;
         }
       }
     }
     // If all completed, go to first lesson
     if (modules[0]?.classes[0]?.lessons[0]) {
-      router.push(`/courses/${courseId}/learn/lesson/${modules[0].classes[0].lessons[0].id}`);
+      router.push(`/courses/${courseId}/learn`);
     }
   };
 
