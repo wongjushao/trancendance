@@ -125,7 +125,6 @@ export default function CourseDetailPage() {
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
   const [enrolling, setEnrolling] = useState(false);
-  const [classMemberId, setClassMemberId] = useState<number | null>(null);
   const [courseClassId, setCourseClassId] = useState<number | null>(null);
   
   // Review state
@@ -149,361 +148,50 @@ export default function CourseDetailPage() {
 
   const loadCourseData = async () => {
     setLoading(true);
-    
-    const { data: { user } } = await supabase.auth.getUser();
-    
+
     try {
-      // 1. Get course details
-      const { data: courseData, error: courseError } = await supabase
-        .from("courses")
-        .select(`
-          *,
-          organization:organization_id (
-            id,
-            name
-          ),
-          created_by_profile:created_by (
-            id,
-            first_name,
-            last_name,
-            username,
-            avatar_url,
-            bio,
-            job_title
-          )
-        `)
-        .eq("id", courseId)
-        .single();
-
-      if (courseError) throw courseError;
-      if (!courseData) throw new Error("Course not found");
-
-      // Get instructor bio
-      const instructorBio = courseData.created_by_profile?.bio;
-      const instructorJobTitle = courseData.created_by_profile?.job_title;
-
-      // Parse JSON fields
-      let learningObjectives: string[] = [];
-      let prerequisites: string[] = [];
-      let tags: string[] = [];
-
-      try {
-        learningObjectives = courseData.learning_objectives || [];
-        prerequisites = courseData.prerequisites || [];
-        tags = courseData.tags || [];
-      } catch (e) {
-        console.error("Error parsing JSON fields:", e);
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers: HeadersInit = {};
+      if (session?.access_token) {
+        headers.Authorization = `Bearer ${session.access_token}`;
       }
 
-      // Calculate total duration from lessons
-      let totalDurationSeconds = 0;
-      
-      // 2. Get modules, classes, lessons with progress
-      const { data: modulesData } = await supabase
-        .from("modules")
-        .select(`
-          id,
-          title,
-          order_index,
-          classes:classes (
-            id,
-            title,
-            order_index,
-            lessons:lessons (
-              id,
-              title,
-              content_type,
-              duration_seconds,
-              order_index,
-              is_free_preview
-            )
-          )
-        `)
-        .eq("course_id", courseId)
-        .order("order_index");
+      const res = await fetch(`/api/org-service/courses/${courseId}/detail`, { headers });
+      const payload = await res.json().catch(() => ({}));
 
-      // Calculate total duration and format modules
-      let userClassMemberId: number | null = null;
-      let userProgressMap = new Map<number, { status: string; progress_percent: number }>();
-
-      if (user) {
-        const { data: classMember } = await supabase
-          .from("class_members")
-          .select(`
-            id,
-            course_class_id,
-            enrolled_at,
-            completed_at,
-            lesson_progress (
-              lesson_id,
-              status,
-              progress_percent
-            )
-          `)
-          .eq("user_id", user.id)
-          .in(
-            "course_class_id",
-            supabase
-              .from("course_classes")
-              .select("id")
-              .eq("course_id", courseId)
-          )
-          .limit(1)
-          .single();
-
-        if (classMember) {
-          userClassMemberId = classMember.id;
-          setClassMemberId(classMember.id);
-          setCourseClassId(classMember.course_class_id);
-          
-          classMember.lesson_progress?.forEach((progress: any) => {
-            userProgressMap.set(progress.lesson_id, {
-              status: progress.status,
-              progress_percent: progress.progress_percent,
-            });
-          });
-        }
+      if (!res.ok) {
+        throw new Error((payload as { error?: string }).error || res.statusText || "Failed to load course");
       }
 
-      // Calculate total duration and mark completed lessons
-      const formattedModules = (modulesData || []).map(module => ({
-        id: module.id,
-        title: module.title,
-        order_index: module.order_index,
-        classes: (module.classes || []).map((classItem: any) => ({
-          id: classItem.id,
-          title: classItem.title,
-          order_index: classItem.order_index,
-          lessons: (classItem.lessons || []).map((lesson: any) => {
-            if (lesson.duration_seconds) {
-              totalDurationSeconds += lesson.duration_seconds;
-            }
-            
-            const progress = userProgressMap.get(lesson.id);
-            return {
-              id: lesson.id,
-              title: lesson.title,
-              content_type: lesson.content_type,
-              duration_seconds: lesson.duration_seconds,
-              order_index: lesson.order_index,
-              is_free_preview: lesson.is_free_preview,
-              is_completed: progress?.status === "completed" || false,
-            };
-          }).sort((a: Lesson, b: Lesson) => a.order_index - b.order_index),
-        })).sort((a: Class, b: Class) => a.order_index - b.order_index),
-      }));
+      const data = payload as {
+        course: CourseData;
+        modules: Module[];
+        assignments: Assignment[];
+        students: Student[];
+        reviews: Review[];
+        review_stats: ReviewStats;
+        user_review: Review | null;
+        class_member_id: number | null;
+        course_class_id: number | null;
+      };
 
-      // Format duration string
-      const durationHours = Math.floor(totalDurationSeconds / 3600);
-      const durationMinutes = Math.floor((totalDurationSeconds % 3600) / 60);
-      const durationString = durationHours > 0 
-        ? `${durationHours} hour${durationHours > 1 ? 's' : ''} ${durationMinutes > 0 ? `${durationMinutes} min` : ''}`
-        : `${durationMinutes} minutes`;
+      setCourse(data.course);
+      setModules(data.modules);
+      setAssignments(data.assignments ?? []);
+      setStudents(data.students ?? []);
+      setReviews((data.reviews ?? []).slice(0, 5));
+      setReviewStats(data.review_stats);
+      setCourseClassId(data.course_class_id ?? null);
 
-      // Calculate progress percentage
-      const totalLessons = formattedModules.reduce(
-        (sum, m) => sum + m.classes.reduce((s, c) => s + c.lessons.length, 0),
-        0
-      );
-      const completedLessons = formattedModules.reduce(
-        (sum, m) => sum + m.classes.reduce((s, c) => s + c.lessons.filter(l => l.is_completed).length, 0),
-        0
-      );
-      const progressPercent = totalLessons > 0 ? (completedLessons / totalLessons) * 100 : 0;
-
-      // Get enrollment status
-      const isEnrolled = userClassMemberId !== null;
-
-      // 3. Load reviews and stats
-      const { data: reviewsData } = await supabase
-        .from("course_reviews")
-        .select(`
-          *,
-          user:user_id (
-            id,
-            first_name,
-            last_name,
-            username,
-            avatar_url
-          )
-        `)
-        .eq("course_id", courseId)
-        .order("created_at", { ascending: false });
-
-      const allReviews: Review[] = (reviewsData || []).map(r => ({
-        id: r.id,
-        rating: r.rating,
-        review: r.review,
-        created_at: r.created_at,
-        user: r.user,
-      }));
-
-      setReviews(allReviews.slice(0, 5));
-
-      // Calculate stats
-      const avgRating = allReviews.length > 0
-        ? allReviews.reduce((sum, r) => sum + r.rating, 0) / allReviews.length
-        : 0;
-      
-      const distribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
-      allReviews.forEach(r => {
-        distribution[r.rating as keyof typeof distribution]++;
-      });
-
-      setReviewStats({
-        average: avgRating,
-        total: allReviews.length,
-        distribution,
-      });
-
-      // Check if user has reviewed
-      if (user) {
-        const userExistingReview = allReviews.find(r => r.user.id === user.id);
-        if (userExistingReview) {
-          setUserReview(userExistingReview);
-          setRatingValue(userExistingReview.rating);
-          setReviewText(userExistingReview.review || "");
-        }
+      if (data.user_review) {
+        setUserReview(data.user_review);
+        setRatingValue(data.user_review.rating);
+        setReviewText(data.user_review.review || "");
+      } else {
+        setUserReview(null);
+        setRatingValue(0);
+        setReviewText("");
       }
-
-      // 4. Get student count (using existing query)
-      const { count: studentCount } = await supabase
-        .from("class_members")
-        .select("id", { count: "exact", head: true })
-        .eq("course_class_id", courseClassId || 0);
-
-      // 5. Get instructor profile
-      const instructorName = courseData.created_by_profile?.first_name
-        ? `${courseData.created_by_profile.first_name} ${courseData.created_by_profile.last_name || ""}`.trim()
-        : courseData.created_by_profile?.username || "Unknown Instructor";
-      const instructorAvatar = courseData.created_by_profile?.avatar_url;
-
-      // 6. Get assignments
-      let userAssignments: Assignment[] = [];
-      if (user && isEnrolled) {
-        const { data: assignmentsData } = await supabase
-          .from("assignments")
-          .select(`
-            *,
-            submissions!inner (
-              id,
-              grade,
-              submitted_at
-            )
-          `)
-          .eq("course_id", courseId)
-          .eq("submissions.user_id", user.id);
-
-        const { data: allAssignments } = await supabase
-          .from("assignments")
-          .select("*")
-          .eq("course_id", courseId);
-
-        const submissionMap = new Map();
-        assignmentsData?.forEach((a: any) => {
-          submissionMap.set(a.id, a.submissions);
-        });
-
-        userAssignments = (allAssignments || []).map(assignment => {
-          const submission = submissionMap.get(assignment.id);
-          const dueDate = new Date(assignment.due_at);
-          const now = new Date();
-          let status: Assignment["status"] = "pending";
-
-          if (submission) {
-            if (submission.grade !== null) {
-              status = "graded";
-            } else {
-              status = "submitted";
-            }
-          } else if (assignment.due_at && dueDate < now) {
-            status = "overdue";
-          }
-
-          return {
-            id: assignment.id,
-            title: assignment.title,
-            due_at: assignment.due_at,
-            points: assignment.points,
-            status,
-            grade: submission?.grade,
-          };
-        });
-      }
-
-      // 7. Get enrolled students (for instructors)
-      let enrolledStudents: Student[] = [];
-      if (user && courseData.created_by === user.id && courseClassId) {
-        const { data: classMembers } = await supabase
-          .from("class_members")
-          .select(`
-            user_id,
-            enrolled_at,
-            user:user_id (
-              id,
-              first_name,
-              last_name,
-              username,
-              email,
-              avatar_url,
-              lesson_progress!class_members_id_fkey (
-                status
-              )
-            )
-          `)
-          .eq("course_class_id", courseClassId);
-
-        if (classMembers) {
-          enrolledStudents = classMembers.map(member => {
-            const completedLessons = member.user?.lesson_progress?.filter(
-              (p: any) => p.status === "completed"
-            ).length || 0;
-            const totalLessonsCount = totalLessons;
-            const progress = totalLessonsCount > 0 ? (completedLessons / totalLessonsCount) * 100 : 0;
-
-            return {
-              id: member.user_id,
-              name: member.user?.first_name
-                ? `${member.user.first_name} ${member.user.last_name || ""}`.trim()
-                : member.user?.username || member.user?.email || "Unknown",
-              email: member.user?.email || "",
-              avatar: member.user?.avatar_url || "",
-              progress: Math.round(progress),
-            };
-          });
-        }
-      }
-
-      setCourse({
-        id: courseData.id,
-        title: courseData.title,
-        description: courseData.description,
-        instructor_id: courseData.created_by,
-        instructor_name: instructorName,
-        instructor_avatar: instructorAvatar,
-        instructor_bio: instructorBio || instructorJobTitle || null,
-        thumbnail: courseData.thumbnail,
-        level: courseData.level,
-        category: courseData.category,
-        students_count: studentCount || 0,
-        rating: avgRating,
-        reviews_count: allReviews.length,
-        duration: durationString,
-        enrolled: isEnrolled,
-        progress: Math.round(progressPercent),
-        visibility: courseData.visibility,
-        status: courseData.status,
-        organization_id: courseData.organization_id,
-        organization_name: courseData.organization?.name || "",
-        learning_objectives: learningObjectives,
-        prerequisites,
-        tags,
-      });
-
-      setModules(formattedModules);
-      setAssignments(userAssignments);
-      setStudents(enrolledStudents);
-
     } catch (error) {
       console.error("Error loading course:", error);
       toast.error("Failed to load course data");
@@ -514,8 +202,8 @@ export default function CourseDetailPage() {
   };
 
   const handleEnroll = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
       router.push("/login");
       return;
     }
@@ -523,39 +211,16 @@ export default function CourseDetailPage() {
     setEnrolling(true);
 
     try {
-      const { data: courseClass } = await supabase
-        .from("course_classes")
-        .select("id, max_students")
-        .eq("course_id", courseId)
-        .eq("is_published", true)
-        .in("status", ["upcoming", "ongoing"])
-        .limit(1)
-        .single();
+      const res = await fetch(`/api/org-service/courses/${courseId}/enroll`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const body = await res.json().catch(() => ({}));
 
-      if (!courseClass) {
-        toast.error("No available course offerings at this time");
+      if (!res.ok) {
+        toast.error(typeof body.error === "string" ? body.error : "Failed to enroll in course");
         return;
       }
-
-      const { count: currentStudents } = await supabase
-        .from("class_members")
-        .select("id", { count: "exact", head: true })
-        .eq("course_class_id", courseClass.id);
-
-      if (courseClass.max_students && currentStudents && currentStudents >= courseClass.max_students) {
-        toast.error("This course offering is full");
-        return;
-      }
-
-      const { error: enrollError } = await supabase
-        .from("class_members")
-        .insert({
-          course_class_id: courseClass.id,
-          user_id: user.id,
-          role: "student",
-        });
-
-      if (enrollError) throw enrollError;
 
       toast.success("Successfully enrolled in course!");
       await loadCourseData();
@@ -589,8 +254,8 @@ export default function CourseDetailPage() {
       return;
     }
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
       toast.error("Please login to leave a review");
       router.push("/login");
       return;
@@ -604,31 +269,27 @@ export default function CourseDetailPage() {
     setSubmittingReview(true);
 
     try {
-      if (userReview) {
-        // Update existing review
-        const { error } = await supabase
-          .from("course_reviews")
-          .update({
-            rating: ratingValue,
-            review: reviewText.trim() || null,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", userReview.id);
+      const res = await fetch(`/api/org-service/courses/${courseId}/reviews`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          rating: ratingValue,
+          review: reviewText.trim() || null,
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
 
-        if (error) throw error;
+      if (!res.ok) {
+        toast.error(typeof body.error === "string" ? body.error : "Failed to submit review");
+        return;
+      }
+
+      if (userReview) {
         toast.success("Review updated successfully!");
       } else {
-        // Create new review
-        const { error } = await supabase
-          .from("course_reviews")
-          .insert({
-            course_id: courseId,
-            user_id: user.id,
-            rating: ratingValue,
-            review: reviewText.trim() || null,
-          });
-
-        if (error) throw error;
         toast.success("Review submitted successfully! Thank you for your feedback.");
       }
 
