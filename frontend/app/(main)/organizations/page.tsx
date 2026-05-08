@@ -4,12 +4,13 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Building2, Users, Plus, TrendingUp, Home, Loader2 } from "lucide-react";
+import { Building2, Users, Plus, TrendingUp, Loader2, LogIn, Eye } from "lucide-react";
 import { GlowCard, StatCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
 import { motion } from "framer-motion";
 import { useRole } from "@/components/providers/RoleProvider";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
+import { toast } from "sonner";
 
 interface Organization {
   id: number;
@@ -21,6 +22,7 @@ interface Organization {
   member_count?: number;
   course_count?: number;
   user_role?: "admin" | "sub_admin" | "teacher" | "student";
+  is_member?: boolean;
 }
 
 export default function OrganizationsPage() {
@@ -28,8 +30,10 @@ export default function OrganizationsPage() {
   const { roleData } = useRole();
   const supabase = getSupabaseBrowserClient();
   
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [myOrganizations, setMyOrganizations] = useState<Organization[]>([]);
+  const [allOrganizations, setAllOrganizations] = useState<Organization[]>([]);
   const [loading, setLoading] = useState(true);
+  const [joinRequestLoading, setJoinRequestLoading] = useState<number | null>(null);
   
   const isTeacherOrAdmin = roleData.role === "teacher" || roleData.role === "admin";
   const teachingOrgId = isTeacherOrAdmin ? roleData.organizationId : null;
@@ -48,7 +52,7 @@ export default function OrganizationsPage() {
     }
 
     try {
-      // Get all organizations the user is a member of
+      // 1. Get all organizations the user is a member of
       const { data: memberships, error: membershipsError } = await supabase
         .from("organization_members")
         .select(`
@@ -63,62 +67,161 @@ export default function OrganizationsPage() {
             created_at
           )
         `)
-        .eq("user_id", user.id);
+        .eq("user_id", user.id)
+        .not("member_role", "eq", "pending");
 
       if (membershipsError) throw membershipsError;
 
-      if (!memberships || memberships.length === 0) {
-        setOrganizations([]);
-        setLoading(false);
-        return;
+      const myOrgIds: number[] = [];
+      const myOrgsWithDetails: Organization[] = [];
+
+      if (memberships && memberships.length > 0) {
+        const myOrgIdsList = memberships.map(m => m.organization_id);
+        myOrgIds.push(...myOrgIdsList);
+
+        // Get member counts for my organizations
+        const { data: memberCounts } = await supabase
+          .from("organization_members")
+          .select("organization_id", { count: "exact" })
+          .in("organization_id", myOrgIdsList);
+
+        // Get course counts for my organizations
+        const { data: courseCounts } = await supabase
+          .from("courses")
+          .select("organization_id", { count: "exact" })
+          .in("organization_id", myOrgIdsList);
+
+        const memberCountMap = new Map<number, number>();
+        memberCounts?.forEach(cm => {
+          memberCountMap.set(cm.organization_id, (memberCountMap.get(cm.organization_id) || 0) + 1);
+        });
+
+        const courseCountMap = new Map<number, number>();
+        courseCounts?.forEach(course => {
+          courseCountMap.set(course.organization_id, (courseCountMap.get(course.organization_id) || 0) + 1);
+        });
+
+        myOrgsWithDetails.push(...memberships.map(m => ({
+          ...m.organizations,
+          member_count: memberCountMap.get(m.organization_id) || 0,
+          course_count: courseCountMap.get(m.organization_id) || 0,
+          user_role: m.member_role as Organization["user_role"],
+          is_member: true,
+        })));
       }
 
-      // Get organization IDs
-      const orgIds = memberships.map(m => m.organization_id);
+      setMyOrganizations(myOrgsWithDetails);
 
-      // Get member counts for each organization
-      const { data: memberCounts } = await supabase
-        .from("organization_members")
-        .select("organization_id", { count: "exact" })
-        .in("organization_id", orgIds);
+      // 2. Get ALL organizations (for discovery)
+      const { data: allOrgs, error: allOrgsError } = await supabase
+        .from("organizations")
+        .select("*")
+        .order("name", { ascending: true });
 
-      // Get course counts for each organization
-      const { data: courseCounts } = await supabase
-        .from("courses")
-        .select("organization_id", { count: "exact" })
-        .in("organization_id", orgIds);
+      if (allOrgsError) throw allOrgsError;
 
-      // Count members per organization
-      const memberCountMap = new Map<number, number>();
-      memberCounts?.forEach(cm => {
-        memberCountMap.set(cm.organization_id, (memberCountMap.get(cm.organization_id) || 0) + 1);
-      });
+      // 3. Get member counts and course counts for all organizations
+      if (allOrgs && allOrgs.length > 0) {
+        const allOrgIds = allOrgs.map(org => org.id);
+        
+        const { data: memberCounts } = await supabase
+          .from("organization_members")
+          .select("organization_id", { count: "exact" })
+          .in("organization_id", allOrgIds);
 
-      // Count courses per organization
-      const courseCountMap = new Map<number, number>();
-      courseCounts?.forEach(course => {
-        courseCountMap.set(course.organization_id, (courseCountMap.get(course.organization_id) || 0) + 1);
-      });
+        const { data: courseCounts } = await supabase
+          .from("courses")
+          .select("organization_id", { count: "exact" })
+          .in("organization_id", allOrgIds);
 
-      // Build organization list with user's role
-      const orgsWithDetails: Organization[] = memberships.map(m => ({
-        ...m.organizations,
-        member_count: memberCountMap.get(m.organization_id) || 0,
-        course_count: courseCountMap.get(m.organization_id) || 0,
-        user_role: m.member_role as Organization["user_role"],
-      }));
+        const memberCountMap = new Map<number, number>();
+        memberCounts?.forEach(cm => {
+          memberCountMap.set(cm.organization_id, (memberCountMap.get(cm.organization_id) || 0) + 1);
+        });
 
-      setOrganizations(orgsWithDetails);
+        const courseCountMap = new Map<number, number>();
+        courseCounts?.forEach(course => {
+          courseCountMap.set(course.organization_id, (courseCountMap.get(course.organization_id) || 0) + 1);
+        });
+
+        const orgsWithDetails: Organization[] = allOrgs.map(org => ({
+          ...org,
+          member_count: memberCountMap.get(org.id) || 0,
+          course_count: courseCountMap.get(org.id) || 0,
+          is_member: myOrgIds.includes(org.id),
+          user_role: myOrgIds.includes(org.id) 
+            ? memberships?.find(m => m.organization_id === org.id)?.member_role as Organization["user_role"]
+            : undefined,
+        }));
+
+        setAllOrganizations(orgsWithDetails);
+      } else {
+        setAllOrganizations([]);
+      }
 
     } catch (error) {
       console.error("Error loading organizations:", error);
+      toast.error("Failed to load organizations");
     } finally {
       setLoading(false);
     }
   };
 
-  const handleCreateOrganization = () => {
-    router.push('/organizations/propose');
+  const handleRequestToJoin = async (orgId: number, orgName: string) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      toast.error("Please login to request to join");
+      router.push("/login");
+      return;
+    }
+
+    setJoinRequestLoading(orgId);
+    
+    try {
+      // Check if already has a pending request
+      const { data: existingRequest } = await supabase
+        .from("organization_members")
+        .select("id, member_role")
+        .eq("organization_id", orgId)
+        .eq("user_id", user.id)
+        .single();
+
+      if (existingRequest) {
+        if (existingRequest.member_role === "pending") {
+          toast.info(`You already have a pending request to join ${orgName}`);
+        } else {
+          toast.info(`You are already a member of ${orgName}`);
+        }
+        setJoinRequestLoading(null);
+        return;
+      }
+
+      // Create join request
+      const { error } = await supabase
+        .from("organization_members")
+        .insert({
+          organization_id: orgId,
+          user_id: user.id,
+          member_role: "pending",
+        });
+
+      if (error) throw error;
+
+      toast.success(`Join request sent to ${orgName}! The organization admin will review your request.`);
+      
+      // Refresh organizations to update the UI
+      await loadOrganizations();
+      
+    } catch (error) {
+      console.error("Error requesting to join:", error);
+      toast.error("Failed to send join request. Please try again.");
+    } finally {
+      setJoinRequestLoading(null);
+    }
+  };
+
+  const handleViewOrganization = (orgId: number) => {
+    router.push(`/organizations/${orgId}`);
   };
 
   const getRoleDisplay = (role?: string) => {
@@ -129,6 +232,8 @@ export default function OrganizationsPage() {
         return "Sub-Admin";
       case "teacher":
         return "Teacher";
+      case "pending":
+        return "Request Pending";
       default:
         return "Member";
     }
@@ -142,13 +247,16 @@ export default function OrganizationsPage() {
         return "text-indigo-400 bg-indigo-500/20 border-indigo-500/30";
       case "teacher":
         return "text-blue-400 bg-blue-500/20 border-blue-500/30";
+      case "pending":
+        return "text-yellow-400 bg-yellow-500/20 border-yellow-500/30";
       default:
         return "text-green-400 bg-green-500/20 border-green-500/30";
     }
   };
 
-  const totalMembers = organizations.reduce((acc, org) => acc + (org.member_count || 0), 0);
-  const totalCourses = organizations.reduce((acc, org) => acc + (org.course_count || 0), 0);
+  const totalMembers = myOrganizations.reduce((acc, org) => acc + (org.member_count || 0), 0);
+  const totalCourses = myOrganizations.reduce((acc, org) => acc + (org.course_count || 0), 0);
+  const discoverableOrgs = allOrganizations.filter(org => !org.is_member);
 
   if (loading) {
     return (
@@ -167,136 +275,216 @@ export default function OrganizationsPage() {
           animate={{ opacity: 1, x: 0 }}
         >
           <h1 className="text-4xl font-bold text-white tracking-tight mb-2">Organizations</h1>
-          <p className="text-[#A0A0B5] text-lg">Manage your learning communities and institutional roles</p>
+          <p className="text-[#A0A0B5] text-lg">Manage your learning communities and discover new ones</p>
         </motion.div>
         
         <GlowButton 
           variant="primary" 
           className="shadow-lg shadow-purple-500/20"
-          onClick={handleCreateOrganization}
+          onClick={() => router.push('/organizations/propose')}
         >
           <Plus className="w-5 h-5 mr-2" />
           Create Organization
         </GlowButton>
       </div>
-      
-      {/* Stats Dashboard */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <StatCard
-          icon={Building2}
-          label="Your Organizations"
-          value={organizations.length.toString()}
-        />
-        <StatCard
-          icon={Users}
-          label="Community Size"
-          value={totalMembers.toLocaleString()}
-        />
-        <StatCard
-          icon={TrendingUp}
-          label="Total Courses"
-          value={totalCourses.toString()}
-        />
-      </div>
-      
-      {/* Organizations Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-        {organizations.length === 0 ? (
-          <div className="col-span-full">
-            <GlowCard>
-              <div className="p-12 text-center">
-                <Building2 className="w-16 h-16 text-gray-600 mx-auto mb-4" />
-                <h3 className="text-xl font-semibold text-white mb-2">No Organizations Yet</h3>
-                <p className="text-gray-400 mb-6">
-                  You haven't joined any organizations yet. Create one or accept an invitation.
-                </p>
-                <GlowButton onClick={handleCreateOrganization}>
-                  <Plus className="w-4 h-4 mr-2" />
-                  Create Organization
-                </GlowButton>
-              </div>
-            </GlowCard>
+
+      {/* MY ORGANIZATIONS SECTION */}
+      <div>
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h2 className="text-2xl font-bold text-white tracking-tight">My Organizations</h2>
+            <p className="text-[#A0A0B5] text-sm mt-1">Organizations you are a member of</p>
           </div>
+          {myOrganizations.length > 0 && (
+            <div className="flex gap-4">
+              <div className="text-right">
+                <p className="text-sm text-gray-400">Total Members</p>
+                <p className="text-xl font-bold text-white">{totalMembers.toLocaleString()}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-sm text-gray-400">Total Courses</p>
+                <p className="text-xl font-bold text-white">{totalCourses}</p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {myOrganizations.length === 0 ? (
+          <GlowCard>
+            <div className="p-12 text-center">
+              <div className="w-20 h-20 rounded-full bg-purple-500/10 flex items-center justify-center mx-auto mb-4">
+                <Building2 className="w-10 h-10 text-purple-400" />
+              </div>
+              <h3 className="text-xl font-semibold text-white mb-2">No Organizations Yet</h3>
+              <p className="text-gray-400 mb-4 max-w-md mx-auto">
+                You haven't joined any organizations yet. Discover organizations below or create your own!
+              </p>
+              <GlowButton onClick={() => router.push('/organizations/propose')}>
+                <Plus className="w-4 h-4 mr-2" />
+                Create Organization
+              </GlowButton>
+            </div>
+          </GlowCard>
         ) : (
-          organizations.map((org, index) => {
-            const isTeachingOrg = isTeacherOrAdmin && teachingOrgId === org.id;
-            
-            return (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {myOrganizations.map((org, index) => {
+              const isTeachingOrg = isTeacherOrAdmin && teachingOrgId === org.id;
+              
+              return (
+                <motion.div
+                  key={org.id}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.1 }}
+                >
+                  <Link href={`/organizations/${org.id}`} className="block h-full">
+                    <GlowCard className={`h-full transition-all duration-300 group relative overflow-hidden ${
+                      isTeachingOrg 
+                        ? 'ring-2 ring-purple-500/50 shadow-lg shadow-purple-500/20 bg-gradient-to-br from-purple-500/5 to-transparent' 
+                        : 'hover:border-purple-500/50'
+                    }`}>
+                      
+                      {isTeachingOrg && (
+                        <div className="absolute top-3 right-3 z-20">
+                          <span className="px-2 py-1 bg-gradient-to-r from-purple-600 to-purple-500 rounded-md text-xs text-white font-medium shadow-lg">
+                            {roleData.role === "admin" ? "Your Organization" : "Your Teaching Organization"}
+                          </span>
+                        </div>
+                      )}
+                      
+                      <div className="absolute inset-0 bg-gradient-to-br from-purple-600/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                      
+                      <div className="relative z-10">
+                        <div className="text-center mb-6">
+                          <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center mx-auto mb-5 shadow-xl shadow-purple-500/20 text-4xl group-hover:scale-110 transition-transform duration-500">
+                            {org.name.charAt(0).toUpperCase()}
+                          </div>
+                          <h3 className="text-2xl font-bold text-white mb-2 group-hover:text-purple-400 transition-colors">
+                            {org.name}
+                          </h3>
+                          <p className="text-[#A0A0B5] text-sm leading-relaxed mb-5 min-h-[40px]">
+                            {org.description || "No description provided"}
+                          </p>
+                          
+                          <div className={`inline-flex items-center px-4 py-1 rounded-full text-xs font-bold uppercase tracking-widest border ${getRoleColor(org.user_role)}`}>
+                            {getRoleDisplay(org.user_role)}
+                          </div>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-4 pt-6 border-t border-white/5 mt-auto">
+                          <div className="text-center">
+                            <p className="text-xl font-bold text-white">{org.member_count?.toLocaleString() || 0}</p>
+                            <p className="text-[#6B6B80] text-xs uppercase font-medium">Members</p>
+                          </div>
+                          <div className="text-center">
+                            <p className="text-xl font-bold text-white">{org.course_count || 0}</p>
+                            <p className="text-[#6B6B80] text-xs uppercase font-medium">Courses</p>
+                          </div>
+                        </div>
+                      </div>
+                    </GlowCard>
+                  </Link>
+                </motion.div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* DISCOVER ORGANIZATIONS SECTION */}
+      {discoverableOrgs.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className="text-2xl font-bold text-white tracking-tight">Discover Organizations</h2>
+              <p className="text-[#A0A0B5] text-sm mt-1">Join other organizations to access more courses</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {discoverableOrgs.map((org, index) => (
               <motion.div
                 key={org.id}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: index * 0.1 }}
               >
-                <Link href={`/organizations/${org.id}`} className="block h-full">
-                  <GlowCard className={`h-full transition-all duration-300 group relative overflow-hidden ${
-                    isTeachingOrg 
-                      ? 'ring-2 ring-purple-500/50 shadow-lg shadow-purple-500/20 bg-gradient-to-br from-purple-500/5 to-transparent' 
-                      : 'hover:border-purple-500/50'
-                  }`}>
-                    
-                    {/* Badge for teaching/admin organization */}
-                    {isTeachingOrg && (
-                      <div className="absolute top-3 right-3 z-20">
-                        <span className="px-2 py-1 bg-gradient-to-r from-purple-600 to-purple-500 rounded-md text-xs text-white font-medium shadow-lg">
-                          {roleData.role === "admin" ? "Your Organization" : "Your Teaching Organization"}
-                        </span>
+                <GlowCard className="h-full transition-all duration-300 group hover:border-purple-500/50">
+                  <div className="relative z-10">
+                    <div className="text-center mb-6">
+                      <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-gray-600 to-gray-700 flex items-center justify-center mx-auto mb-5 shadow-xl text-4xl group-hover:scale-110 transition-transform duration-500 group-hover:from-purple-500 group-hover:to-violet-600">
+                        {org.name.charAt(0).toUpperCase()}
                       </div>
-                    )}
+                      <h3 className="text-2xl font-bold text-white mb-2 group-hover:text-purple-400 transition-colors">
+                        {org.name}
+                      </h3>
+                      <p className="text-[#A0A0B5] text-sm leading-relaxed mb-5 min-h-[40px]">
+                        {org.description || "No description provided"}
+                      </p>
+                    </div>
                     
-                    {/* Subtle Hover Gradient */}
-                    <div className="absolute inset-0 bg-gradient-to-br from-purple-600/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                    
-                    <div className="relative z-10">
-                      <div className="text-center mb-6">
-                        <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center mx-auto mb-5 shadow-xl shadow-purple-500/20 text-4xl group-hover:scale-110 transition-transform duration-500">
-                          {org.name.charAt(0).toUpperCase()}
-                        </div>
-                        <h3 className="text-2xl font-bold text-white mb-2 group-hover:text-purple-400 transition-colors">
-                          {org.name}
-                        </h3>
-                        <p className="text-[#A0A0B5] text-sm leading-relaxed mb-5 min-h-[40px]">
-                          {org.description || "No description provided"}
-                        </p>
-                        
-                        <div className={`inline-flex items-center px-4 py-1 rounded-full text-xs font-bold uppercase tracking-widest border ${getRoleColor(org.user_role)}`}>
-                          {getRoleDisplay(org.user_role)}
-                        </div>
+                    <div className="grid grid-cols-2 gap-4 pt-6 border-t border-white/5 mb-6">
+                      <div className="text-center">
+                        <p className="text-xl font-bold text-white">{org.member_count?.toLocaleString() || 0}</p>
+                        <p className="text-[#6B6B80] text-xs uppercase font-medium">Members</p>
                       </div>
-                      
-                      <div className="grid grid-cols-2 gap-4 pt-6 border-t border-white/5 mt-auto">
-                        <div className="text-center">
-                          <p className="text-xl font-bold text-white">{org.member_count?.toLocaleString() || 0}</p>
-                          <p className="text-[#6B6B80] text-xs uppercase font-medium">Members</p>
-                        </div>
-                        <div className="text-center">
-                          <p className="text-xl font-bold text-white">{org.course_count || 0}</p>
-                          <p className="text-[#6B6B80] text-xs uppercase font-medium">Courses</p>
-                        </div>
+                      <div className="text-center">
+                        <p className="text-xl font-bold text-white">{org.course_count || 0}</p>
+                        <p className="text-[#6B6B80] text-xs uppercase font-medium">Courses</p>
                       </div>
                     </div>
-                  </GlowCard>
-                </Link>
+
+                    <div className="flex gap-3">
+                      <GlowButton 
+                        variant="outline" 
+                        size="sm"
+                        fullWidth
+                        onClick={() => handleViewOrganization(org.id)}
+                      >
+                        <Eye className="w-4 h-4 mr-2" />
+                        View
+                      </GlowButton>
+                      <GlowButton 
+                        variant="primary" 
+                        size="sm"
+                        fullWidth
+                        onClick={() => handleRequestToJoin(org.id, org.name)}
+                        isLoading={joinRequestLoading === org.id}
+                      >
+                        <LogIn className="w-4 h-4 mr-2" />
+                        Request to Join
+                      </GlowButton>
+                    </div>
+                  </div>
+                </GlowCard>
               </motion.div>
-            );
-          })
-        )}
-        
-        {/* Create New Organization Card - Only show if user is admin of at least one org or always? */}
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Create Organization Card - Always visible at the bottom */}
+      <div>
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h2 className="text-2xl font-bold text-white tracking-tight">Create Your Own</h2>
+            <p className="text-[#A0A0B5] text-sm mt-1">Start a new organization for your institution or company</p>
+          </div>
+        </div>
+
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: organizations.length * 0.1 }}
-          onClick={handleCreateOrganization}
+          onClick={() => router.push('/organizations/propose')}
         >
-          <div className="cursor-pointer h-full">
-            <GlowCard className="h-full border-2 border-dashed border-white/10 hover:border-purple-500/40 hover:bg-purple-500/5 transition-all group flex flex-col items-center justify-center py-12">
-              <div className="w-16 h-16 rounded-2xl bg-[#12121A] flex items-center justify-center mb-5 group-hover:bg-purple-500/20 group-hover:rotate-90 transition-all duration-500">
-                <Plus className="w-8 h-8 text-[#6B6B80] group-hover:text-purple-400" />
+          <div className="cursor-pointer">
+            <GlowCard className="border-2 border-dashed border-white/10 hover:border-purple-500/40 hover:bg-purple-500/5 transition-all group flex flex-col items-center justify-center py-12">
+              <div className="w-20 h-20 rounded-2xl bg-[#12121A] flex items-center justify-center mb-5 group-hover:bg-purple-500/20 group-hover:rotate-90 transition-all duration-500">
+                <Plus className="w-10 h-10 text-[#6B6B80] group-hover:text-purple-400" />
               </div>
-              <h3 className="text-xl font-bold text-white mb-2">Create Organization</h3>
-              <p className="text-[#A0A0B5] text-sm max-w-[200px] text-center">
-                Start a new organization for your institution or company
+              <h3 className="text-2xl font-bold text-white mb-2">Create Organization</h3>
+              <p className="text-[#A0A0B5] text-sm max-w-md text-center">
+                Start a new organization for your institution or company. You'll need to verify your organization domain.
               </p>
             </GlowCard>
           </div>

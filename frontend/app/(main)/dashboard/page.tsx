@@ -1,7 +1,7 @@
 // app/(main)/dashboard/page.tsx
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -129,7 +129,9 @@ export default function UnifiedDashboardPage() {
   const [greeting, setGreeting] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [loading, setLoading] = useState(true);
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
   const [activeTab, setActiveTab] = useState("learning");
+  const [dataLoadError, setDataLoadError] = useState<string | null>(null);
   
   // Student Section State
   const [enrolledCourses, setEnrolledCourses] = useState<EnrolledCourse[]>([]);
@@ -175,25 +177,34 @@ export default function UnifiedDashboardPage() {
   }, []);
 
   useEffect(() => {
-    if (selectedOrgId) {
+    if (selectedOrgId && initialLoadComplete) {
       loadDashboardData();
     }
-  }, [selectedOrgId, activeTab]);
+  }, [selectedOrgId, activeTab, initialLoadComplete]);
 
   const loadUserData = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      setLoading(true);
+      setDataLoadError(null);
+      
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError) throw userError;
+      
       if (!user) {
         router.push("/login");
         return;
       }
 
       // Get user profile
-      const { data: profile } = await supabase
+      const { data: profile, error: profileError } = await supabase
         .from("profiles")
         .select("first_name, last_name, username")
         .eq("id", user.id)
         .single();
+
+      if (profileError) {
+        console.error("Profile fetch error:", profileError);
+      }
 
       if (profile) {
         if (profile.first_name && profile.last_name) {
@@ -205,10 +216,12 @@ export default function UnifiedDashboardPage() {
         } else {
           setDisplayName(user.email?.split('@')[0] || "Learner");
         }
+      } else {
+        setDisplayName(user.email?.split('@')[0] || "Learner");
       }
 
       // Get user's organizations and roles
-      const { data: memberships } = await supabase
+      const { data: memberships, error: membershipsError } = await supabase
         .from("organization_members")
         .select(`
           organization_id,
@@ -217,6 +230,10 @@ export default function UnifiedDashboardPage() {
         `)
         .eq("user_id", user.id)
         .not("member_role", "eq", "pending");
+
+      if (membershipsError) {
+        console.error("Memberships fetch error:", membershipsError);
+      }
 
       const orgs: Organization[] = [];
       const roles = new Set<string>();
@@ -231,12 +248,12 @@ export default function UnifiedDashboardPage() {
         if (role === "admin") roles.add("admin");
         if (role === "sub_admin") roles.add("admin");
         if (role === "teacher") roles.add("teacher");
-        roles.add("student"); // Everyone is a student
+        roles.add("student");
       });
 
       // Also check class_members for student-only orgs
       if (orgs.length === 0) {
-        const { data: classMembers } = await supabase
+        const { data: classMembers, error: classMembersError } = await supabase
           .from("class_members")
           .select(`
             course_class_id,
@@ -251,8 +268,12 @@ export default function UnifiedDashboardPage() {
           .eq("user_id", user.id)
           .limit(1);
 
+        if (classMembersError) {
+          console.error("Class members fetch error:", classMembersError);
+        }
+
         if (classMembers && classMembers.length > 0) {
-          const org = classMembers[0].course_classes?.courses?.organizations;
+          const org = classMembers[0]?.course_classes?.courses?.organizations;
           if (org) {
             orgs.push({ id: org.id, name: org.name, role: "student" });
             roles.add("student");
@@ -278,19 +299,24 @@ export default function UnifiedDashboardPage() {
       } else {
         setActiveTab("learning");
       }
+      
+      setInitialLoadComplete(true);
 
     } catch (error) {
       console.error("Error loading user data:", error);
+      setDataLoadError("Failed to load user data. Please refresh the page.");
       toast.error("Failed to load user data");
+    } finally {
+      setLoading(false);
     }
   };
 
   const loadDashboardData = async () => {
     if (!selectedOrgId) return;
     
-    setLoading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError) throw userError;
       if (!user) return;
 
       // Load based on active tab for better performance
@@ -305,280 +331,334 @@ export default function UnifiedDashboardPage() {
       }
     } catch (error) {
       console.error("Error loading dashboard data:", error);
-    } finally {
-      setLoading(false);
+      toast.error("Failed to load dashboard data");
     }
   };
 
   const loadLearningData = async (userId: string) => {
-    // Get enrolled courses via class_members
-    const { data: classMembers } = await supabase
-      .from("class_members")
-      .select(`
-        id,
-        enrolled_at,
-        course_class_id,
-        course_classes!inner(
-          id,
-          course_id,
-          courses!inner(
-            id,
-            title,
-            description,
-            thumbnail,
-            created_by,
-            profiles!courses_created_by_fkey(first_name, last_name, username)
-          )
-        )
-      `)
-      .eq("user_id", userId)
-      .eq("role", "student");
-
-    // Use a Map to deduplicate courses by ID
-    const coursesMap = new Map<number, EnrolledCourse>();
-    let totalProgress = 0;
-    let completedCount = 0;
-
-    for (const cm of classMembers || []) {
-      const course = cm.course_classes?.courses;
-      if (!course) continue;
-
-      if (course.created_by === userId) {
-        console.log(`Skipping course "${course.title}" because user is the instructor`);
-        continue;
-      }
-
-      // If we already have this course, use the best progress (highest)
-      const existingCourse = coursesMap.get(course.id);
-      
-      // Get total lessons count (do this once per course)
-      let totalLessons = 0;
-      if (!existingCourse) {
-        const { data: modules } = await supabase
-          .from("modules")
-          .select(`
-            classes!inner(
-              lessons!inner(id)
-            )
-          `)
-          .eq("course_id", course.id);
-
-        modules?.forEach((module: any) => {
-          module.classes?.forEach((classItem: any) => {
-            totalLessons += classItem.lessons?.length || 0;
-          });
-        });
-      } else {
-        totalLessons = existingCourse.total_lessons;
-      }
-
-      // Get completed lessons for this specific class member
-      const { data: lessonProgress } = await supabase
-        .from("lesson_progress")
-        .select("id")
-        .eq("class_member_id", cm.id)
-        .eq("status", "completed");
-
-      const completedLessons = lessonProgress?.length || 0;
-      const progress = totalLessons > 0 ? (completedLessons / totalLessons) * 100 : 0;
-
-      // If course already exists, take the higher progress
-      if (existingCourse) {
-        if (progress > existingCourse.progress) {
-          existingCourse.progress = Math.round(progress);
-          existingCourse.completed_lessons = completedLessons;
-          existingCourse.last_accessed_at = cm.enrolled_at;
-        }
-      } else {
-        coursesMap.set(course.id, {
-          id: course.id,
-          title: course.title,
-          description: course.description || "",
-          thumbnail: course.thumbnail || "",
-          instructor_name: course.profiles?.first_name 
-            ? `${course.profiles.first_name} ${course.profiles.last_name || ""}`.trim()
-            : course.profiles?.username || "Instructor",
-          progress: Math.round(progress),
-          completed_lessons: completedLessons,
-          total_lessons: totalLessons,
-          last_accessed_at: cm.enrolled_at,
-          rating: 0,
-          certificate_earned: false,
-        });
-      }
-    }
-
-    // Convert Map to array and calculate stats
-    const coursesData = Array.from(coursesMap.values());
-    
-    // Recalculate totals
-    let totalProgressSum = 0;
-    let completedCourses = 0;
-    for (const course of coursesData) {
-      totalProgressSum += course.progress;
-      if (course.progress === 100) completedCourses++;
-    }
-
-    setEnrolledCourses(coursesData);
-    setStudentStats({
-      total_courses: coursesData.length,
-      completed_courses: completedCourses,
-      average_progress: coursesData.length > 0 ? Math.round(totalProgressSum / coursesData.length) : 0,
-      streak_days: 7,
-      pending_tasks: 0,
-    });
-
-    // Get upcoming deadlines (deduplicated by course ID)
-    const courseIds = coursesData.map(c => c.id);
-    if (courseIds.length > 0) {
-      const { data: assignments } = await supabase
-        .from("assignments")
-        .select("id, title, due_at, courses!inner(title)")
-        .in("course_id", courseIds)
-        .gte("due_at", new Date().toISOString())
-        .order("due_at", { ascending: true })
-        .limit(5);
-
-      setUpcomingDeadlines(assignments || []);
-    }
-
-    // Get recent activity (deduplicated by lesson)
-    const classMemberIds = classMembers?.map(cm => cm.id) || [];
-    if (classMemberIds.length > 0) {
-      const { data: recentProgress } = await supabase
-        .from("lesson_progress")
+    try {
+      // Get enrolled courses via class_members
+      const { data: classMembers, error: classMembersError } = await supabase
+        .from("class_members")
         .select(`
           id,
-          completed_at,
-          lesson_id,
-          lessons!inner(title)
+          enrolled_at,
+          course_class_id,
+          course_classes!inner(
+            id,
+            course_id,
+            courses!inner(
+              id,
+              title,
+              description,
+              thumbnail,
+              created_by,
+              profiles!courses_created_by_fkey(first_name, last_name, username)
+            )
+          )
         `)
-        .in("class_member_id", classMemberIds)
-        .eq("status", "completed")
-        .not("completed_at", "is", null)
-        .order("completed_at", { ascending: false })
-        .limit(10);
+        .eq("user_id", userId)
+        .eq("role", "student");
 
-      // Deduplicate recent activities by lesson_id to avoid duplicates
-      const uniqueActivities = new Map();
-      (recentProgress || []).forEach((p) => {
-        if (!uniqueActivities.has(p.lesson_id)) {
-          uniqueActivities.set(p.lesson_id, {
-            id: `${p.id}-${Date.now()}-${p.lesson_id}`,
-            type: "lesson",
-            title: p.lessons?.title || "Lesson",
-            courseName: coursesData.find(c => c.id.toString() === p.lesson_id?.toString())?.title || "Course",
-            completed_at: p.completed_at,
-            status: "completed",
+      if (classMembersError) {
+        console.error("Error fetching class members:", classMembersError);
+        return;
+      }
+
+      // Use a Map to deduplicate courses by ID
+      const coursesMap = new Map<number, EnrolledCourse>();
+      let totalProgress = 0;
+      let completedCount = 0;
+
+      for (const cm of classMembers || []) {
+        const course = cm.course_classes?.courses;
+        if (!course) continue;
+
+        if (course.created_by === userId) {
+          console.log(`Skipping course "${course.title}" because user is the instructor`);
+          continue;
+        }
+
+        // If we already have this course, use the best progress (highest)
+        const existingCourse = coursesMap.get(course.id);
+        
+        // Get total lessons count (do this once per course)
+        let totalLessons = 0;
+        if (!existingCourse) {
+          const { data: modules, error: modulesError } = await supabase
+            .from("modules")
+            .select(`
+              classes!inner(
+                lessons!inner(id)
+              )
+            `)
+            .eq("course_id", course.id);
+
+          if (modulesError) {
+            console.error("Error fetching modules:", modulesError);
+          }
+
+          modules?.forEach((module: any) => {
+            module.classes?.forEach((classItem: any) => {
+              totalLessons += classItem.lessons?.length || 0;
+            });
+          });
+        } else {
+          totalLessons = existingCourse.total_lessons;
+        }
+
+        // Get completed lessons for this specific class member
+        const { data: lessonProgress, error: progressError } = await supabase
+          .from("lesson_progress")
+          .select("id")
+          .eq("class_member_id", cm.id)
+          .eq("status", "completed");
+
+        if (progressError) {
+          console.error("Error fetching lesson progress:", progressError);
+        }
+
+        const completedLessons = lessonProgress?.length || 0;
+        const progress = totalLessons > 0 ? (completedLessons / totalLessons) * 100 : 0;
+
+        // If course already exists, take the higher progress
+        if (existingCourse) {
+          if (progress > existingCourse.progress) {
+            existingCourse.progress = Math.round(progress);
+            existingCourse.completed_lessons = completedLessons;
+            existingCourse.last_accessed_at = cm.enrolled_at;
+          }
+        } else {
+          coursesMap.set(course.id, {
+            id: course.id,
+            title: course.title,
+            description: course.description || "",
+            thumbnail: course.thumbnail || "",
+            instructor_name: course.profiles?.first_name 
+              ? `${course.profiles.first_name} ${course.profiles.last_name || ""}`.trim()
+              : course.profiles?.username || "Instructor",
+            progress: Math.round(progress),
+            completed_lessons: completedLessons,
+            total_lessons: totalLessons,
+            last_accessed_at: cm.enrolled_at,
+            rating: 0,
+            certificate_earned: false,
           });
         }
+      }
+
+      // Convert Map to array and calculate stats
+      const coursesData = Array.from(coursesMap.values());
+      
+      // Recalculate totals
+      let totalProgressSum = 0;
+      let completedCourses = 0;
+      for (const course of coursesData) {
+        totalProgressSum += course.progress;
+        if (course.progress === 100) completedCourses++;
+      }
+
+      setEnrolledCourses(coursesData);
+      setStudentStats({
+        total_courses: coursesData.length,
+        completed_courses: completedCourses,
+        average_progress: coursesData.length > 0 ? Math.round(totalProgressSum / coursesData.length) : 0,
+        streak_days: 7,
+        pending_tasks: 0,
       });
 
-      setRecentActivity(Array.from(uniqueActivities.values()).slice(0, 5));
+      // Get upcoming deadlines (deduplicated by course ID)
+      const courseIds = coursesData.map(c => c.id);
+      if (courseIds.length > 0) {
+        const { data: assignments, error: assignmentsError } = await supabase
+          .from("assignments")
+          .select("id, title, due_at, courses!inner(title)")
+          .in("course_id", courseIds)
+          .gte("due_at", new Date().toISOString())
+          .order("due_at", { ascending: true })
+          .limit(5);
+
+        if (assignmentsError) {
+          console.error("Error fetching assignments:", assignmentsError);
+        }
+
+        setUpcomingDeadlines(assignments || []);
+      }
+
+      // Get recent activity (deduplicated by lesson)
+      const classMemberIds = classMembers?.map(cm => cm.id) || [];
+      if (classMemberIds.length > 0) {
+        const { data: recentProgress, error: recentError } = await supabase
+          .from("lesson_progress")
+          .select(`
+            id,
+            completed_at,
+            lesson_id,
+            lessons!inner(title)
+          `)
+          .in("class_member_id", classMemberIds)
+          .eq("status", "completed")
+          .not("completed_at", "is", null)
+          .order("completed_at", { ascending: false })
+          .limit(10);
+
+        if (recentError) {
+          console.error("Error fetching recent progress:", recentError);
+        }
+
+        // Deduplicate recent activities by lesson_id to avoid duplicates
+        const uniqueActivities = new Map();
+        (recentProgress || []).forEach((p) => {
+          if (!uniqueActivities.has(p.lesson_id)) {
+            uniqueActivities.set(p.lesson_id, {
+              id: `${p.id}-${Date.now()}-${p.lesson_id}`,
+              type: "lesson",
+              title: p.lessons?.title || "Lesson",
+              courseName: coursesData.find(c => c.id.toString() === p.lesson_id?.toString())?.title || "Course",
+              completed_at: p.completed_at,
+              status: "completed",
+            });
+          }
+        });
+
+        setRecentActivity(Array.from(uniqueActivities.values()).slice(0, 5));
+      }
+    } catch (error) {
+      console.error("Error in loadLearningData:", error);
     }
   };
 
   const loadTeachingData = async (userId: string) => {
-    // Get courses created by this user
-    const { data: courses } = await supabase
-      .from("courses")
-      .select("*")
-      .eq("created_by", userId)
-      .order("created_at", { ascending: false });
+    try {
+      // Get courses created by this user
+      const { data: courses, error: coursesError } = await supabase
+        .from("courses")
+        .select("*")
+        .eq("created_by", userId)
+        .order("created_at", { ascending: false });
 
-    const teacherCoursesData: TeacherCourse[] = [];
-    let totalStudents = 0;
-    let totalRating = 0;
-    let ratingCount = 0;
-
-    for (const course of courses || []) {
-      // Get student count
-      const { data: courseClasses } = await supabase
-        .from("course_classes")
-        .select("id")
-        .eq("course_id", course.id);
-
-      const classIds = courseClasses?.map(cc => cc.id) || [];
-      let studentCount = 0;
-
-      if (classIds.length > 0) {
-        const { count } = await supabase
-          .from("class_members")
-          .select("id", { count: "exact", head: true })
-          .in("course_class_id", classIds)
-          .eq("role", "student");
-        studentCount = count || 0;
-        totalStudents += studentCount;
+      if (coursesError) {
+        console.error("Error fetching teacher courses:", coursesError);
+        return;
       }
 
-      // Get average rating
-      const { data: reviews } = await supabase
-        .from("course_reviews")
-        .select("rating")
-        .eq("course_id", course.id);
+      const teacherCoursesData: TeacherCourse[] = [];
+      let totalStudents = 0;
+      let totalRating = 0;
+      let ratingCount = 0;
 
-      const avgRating = reviews?.length 
-        ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length 
-        : 0;
-      
-      if (reviews && reviews.length > 0) {
-        totalRating += avgRating;
-        ratingCount++;
-      }
+      for (const course of courses || []) {
+        // Get student count
+        const { data: courseClasses, error: classesError } = await supabase
+          .from("course_classes")
+          .select("id")
+          .eq("course_id", course.id);
 
-      teacherCoursesData.push({
-        id: course.id,
-        title: course.title,
-        thumbnail: course.thumbnail || "",
-        students: studentCount,
-        progress: 0,
-        rating: avgRating,
-        status: course.status === "published" ? "published" : "draft",
-      });
-    }
-
-    setTeacherCourses(teacherCoursesData);
-    setTeacherStats({
-      total_students: totalStudents,
-      active_courses: courses?.filter(c => c.status === "published").length || 0,
-      average_rating: ratingCount > 0 ? totalRating / ratingCount : 0,
-      completion_rate: 0,
-    });
-
-    // Get pending grading
-    const courseIds = teacherCoursesData.map(c => c.id);
-    if (courseIds.length > 0) {
-      const { data: assignments } = await supabase
-        .from("assignments")
-        .select(`
-          id,
-          title,
-          due_at,
-          courses(title)
-        `)
-        .in("course_id", courseIds)
-        .order("due_at", { ascending: true })
-        .limit(5);
-
-      const pending: PendingGrading[] = [];
-      for (const assignment of assignments || []) {
-        const { count } = await supabase
-          .from("submissions")
-          .select("id", { count: "exact", head: true })
-          .eq("assignment_id", assignment.id)
-          .is("grade", null);
-
-        if (count && count > 0) {
-          pending.push({
-            id: assignment.id,
-            title: assignment.title,
-            course_name: assignment.courses?.title || "Unknown",
-            submissions: count,
-            due_date: assignment.due_at,
-          });
+        if (classesError) {
+          console.error("Error fetching course classes:", classesError);
         }
+
+        const classIds = courseClasses?.map(cc => cc.id) || [];
+        let studentCount = 0;
+
+        if (classIds.length > 0) {
+          const { count, error: countError } = await supabase
+            .from("class_members")
+            .select("id", { count: "exact", head: true })
+            .in("course_class_id", classIds)
+            .eq("role", "student");
+          
+          if (countError) {
+            console.error("Error counting students:", countError);
+          } else {
+            studentCount = count || 0;
+            totalStudents += studentCount;
+          }
+        }
+
+        // Get average rating
+        const { data: reviews, error: reviewsError } = await supabase
+          .from("course_reviews")
+          .select("rating")
+          .eq("course_id", course.id);
+
+        if (reviewsError) {
+          console.error("Error fetching reviews:", reviewsError);
+        }
+
+        const avgRating = reviews?.length 
+          ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length 
+          : 0;
+        
+        if (reviews && reviews.length > 0) {
+          totalRating += avgRating;
+          ratingCount++;
+        }
+
+        teacherCoursesData.push({
+          id: course.id,
+          title: course.title,
+          thumbnail: course.thumbnail || "",
+          students: studentCount,
+          progress: 0,
+          rating: avgRating,
+          status: course.status === "published" ? "published" : "draft",
+        });
       }
-      setPendingGrading(pending.slice(0, 3));
+
+      setTeacherCourses(teacherCoursesData);
+      setTeacherStats({
+        total_students: totalStudents,
+        active_courses: courses?.filter(c => c.status === "published").length || 0,
+        average_rating: ratingCount > 0 ? totalRating / ratingCount : 0,
+        completion_rate: 0,
+      });
+
+      // Get pending grading
+      const courseIds = teacherCoursesData.map(c => c.id);
+      if (courseIds.length > 0) {
+        const { data: assignments, error: assignmentsError } = await supabase
+          .from("assignments")
+          .select(`
+            id,
+            title,
+            due_at,
+            courses(title)
+          `)
+          .in("course_id", courseIds)
+          .order("due_at", { ascending: true })
+          .limit(5);
+
+        if (assignmentsError) {
+          console.error("Error fetching assignments:", assignmentsError);
+        }
+
+        const pending: PendingGrading[] = [];
+        for (const assignment of assignments || []) {
+          const { count, error: countError } = await supabase
+            .from("submissions")
+            .select("id", { count: "exact", head: true })
+            .eq("assignment_id", assignment.id)
+            .is("grade", null);
+
+          if (countError) {
+            console.error("Error counting submissions:", countError);
+          }
+
+          if (count && count > 0) {
+            pending.push({
+              id: assignment.id,
+              title: assignment.title,
+              course_name: assignment.courses?.title || "Unknown",
+              submissions: count,
+              due_date: assignment.due_at,
+            });
+          }
+        }
+        setPendingGrading(pending.slice(0, 3));
+      }
+    } catch (error) {
+      console.error("Error in loadTeachingData:", error);
     }
   };
 
@@ -587,12 +667,16 @@ export default function UnifiedDashboardPage() {
     
     try {
       // Check if user is admin of this organization
-      const { data: memberCheck } = await supabase
+      const { data: memberCheck, error: memberError } = await supabase
         .from("organization_members")
         .select("member_role")
         .eq("organization_id", selectedOrgId)
         .eq("user_id", userId)
         .single();
+
+      if (memberError) {
+        console.error("Error checking member role:", memberError);
+      }
 
       if (!memberCheck || (memberCheck.member_role !== "admin" && memberCheck.member_role !== "sub_admin")) {
         setAdminStats({
@@ -609,19 +693,27 @@ export default function UnifiedDashboardPage() {
       }
 
       // Get all courses in this organization
-      const { data: courses } = await supabase
+      const { data: courses, error: coursesError } = await supabase
         .from("courses")
         .select("*")
         .eq("organization_id", selectedOrgId);
+
+      if (coursesError) {
+        console.error("Error fetching courses:", coursesError);
+      }
 
       const totalCourses = courses?.length || 0;
       const publishedCourses = courses?.filter(c => c.status === "published").length || 0;
 
       // Get all students in this organization
-      const { data: courseClasses } = await supabase
+      const { data: courseClasses, error: classesError } = await supabase
         .from("course_classes")
         .select("id")
         .in("course_id", courses?.map(c => c.id) || []);
+
+      if (classesError) {
+        console.error("Error fetching course classes:", classesError);
+      }
 
       const classIds = courseClasses?.map(cc => cc.id) || [];
       let totalStudents = 0;
@@ -629,11 +721,15 @@ export default function UnifiedDashboardPage() {
 
       if (classIds.length > 0) {
         // Get unique students
-        const { data: classMembers } = await supabase
+        const { data: classMembers, error: membersError } = await supabase
           .from("class_members")
           .select("user_id, enrolled_at")
           .in("course_class_id", classIds)
           .eq("role", "student");
+
+        if (membersError) {
+          console.error("Error fetching class members:", membersError);
+        }
 
         const uniqueStudents = new Set(classMembers?.map(cm => cm.user_id));
         totalStudents = uniqueStudents.size;
@@ -654,42 +750,58 @@ export default function UnifiedDashboardPage() {
       // Calculate average rating and completion for top courses
       const coursesWithStats = await Promise.all((courses || []).map(async (course) => {
         // Get average rating
-        const { data: reviews } = await supabase
+        const { data: reviews, error: reviewsError } = await supabase
           .from("course_reviews")
           .select("rating")
           .eq("course_id", course.id);
         
+        if (reviewsError) {
+          console.error("Error fetching reviews:", reviewsError);
+        }
+
         const avgRating = reviews?.length 
           ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length 
           : 0;
 
         // Get student count
-        const { data: ccForCourse } = await supabase
+        const { data: ccForCourse, error: ccError } = await supabase
           .from("course_classes")
           .select("id")
           .eq("course_id", course.id);
         
+        if (ccError) {
+          console.error("Error fetching course classes:", ccError);
+        }
+
         const classIdsForCourse = ccForCourse?.map(cc => cc.id) || [];
         let studentCount = 0;
         let completion = 0;
 
         if (classIdsForCourse.length > 0) {
-          const { data: cmForCourse } = await supabase
+          const { data: cmForCourse, error: cmError } = await supabase
             .from("class_members")
             .select("id")
             .in("course_class_id", classIdsForCourse)
             .eq("role", "student");
           
+          if (cmError) {
+            console.error("Error fetching class members:", cmError);
+          }
+
           studentCount = cmForCourse?.length || 0;
 
           // Calculate completion rate
           const cmIds = cmForCourse?.map(cm => cm.id) || [];
           if (cmIds.length > 0) {
-            const { data: progress } = await supabase
+            const { data: progress, error: progressError } = await supabase
               .from("lesson_progress")
               .select("status")
               .in("class_member_id", cmIds);
             
+            if (progressError) {
+              console.error("Error fetching progress:", progressError);
+            }
+
             const total = progress?.length || 0;
             const completed = progress?.filter(p => p.status === "completed").length || 0;
             completion = total > 0 ? (completed / total) * 100 : 0;
@@ -714,7 +826,7 @@ export default function UnifiedDashboardPage() {
         published_courses: publishedCourses,
         average_rating: coursesWithStats.reduce((sum, c) => sum + c.rating, 0) / (coursesWithStats.length || 1),
         completion_rate: coursesWithStats.reduce((sum, c) => sum + c.completion, 0) / (coursesWithStats.length || 1),
-        pending_approvals: 0,  // Set to 0 since you're removing this feature
+        pending_approvals: 0,
       });
 
       setTopCourses(topCoursesSorted);
@@ -738,10 +850,27 @@ export default function UnifiedDashboardPage() {
     { id: "admin", label: "Organization Admin", icon: Crown, show: userRoles.has("admin") },
   ];
 
-  if (loading && organizations.length === 0) {
+  // Show loading only during initial load
+  if (loading && !initialLoadComplete) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-purple-500" />
+      </div>
+    );
+  }
+
+  // Show error if data load failed
+  if (dataLoadError && organizations.length === 0) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center p-4">
+        <GlowCard className="max-w-md w-full p-8 text-center">
+          <AlertCircle className="w-16 h-16 text-red-400 mx-auto mb-4" />
+          <h2 className="text-xl font-bold text-white mb-2">Failed to Load Dashboard</h2>
+          <p className="text-gray-400 mb-6">{dataLoadError}</p>
+          <GlowButton onClick={() => window.location.reload()}>
+            Refresh Page
+          </GlowButton>
+        </GlowCard>
       </div>
     );
   }
@@ -990,70 +1119,61 @@ export default function UnifiedDashboardPage() {
 
           {/* ========== ADMIN / ORGANIZATION ADMIN TAB ========== */}
           <TabsContent value="admin" className="space-y-6">
-            {/* Loading State */}
-            {loading ? (
-              <div className="flex justify-center py-12">
-                <Loader2 className="w-8 h-8 animate-spin text-purple-500" />
-              </div>
-            ) : (
-              <>
-                {/* Admin Stats */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <StatCard icon={Users} label="Total Students" value={adminStats.total_students} />
-                  <StatCard icon={Activity} label="Active Students" value={adminStats.active_students} />
-                  <StatCard icon={BookOpen} label="Published Courses" value={adminStats.published_courses} />
-                </div>
+            {/* Admin Stats (no loading spinner inside) */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <StatCard icon={Users} label="Total Students" value={adminStats.total_students} />
+              <StatCard icon={Activity} label="Active Students" value={adminStats.active_students} />
+              <StatCard icon={BookOpen} label="Published Courses" value={adminStats.published_courses} />
+            </div>
 
-                {/* Quick Actions */}
-                <div className="flex gap-3">
-                  <Link href={`/organizations/${selectedOrgId}/admin`}>
+            {/* Quick Actions */}
+            <div className="flex gap-3">
+              <Link href={`/organizations/${selectedOrgId}/admin`}>
+                <GlowButton variant="primary">
+                  <Settings className="w-4 h-4 mr-2" />
+                  Organization Admin Panel
+                </GlowButton>
+              </Link>
+            </div>
+
+            {/* Top Courses */}
+            {topCourses.length > 0 ? (
+              <GlowCard>
+                <div className="p-6">
+                  <h3 className="text-lg font-semibold text-white mb-4">Top Performing Courses</h3>
+                  <div className="space-y-4">
+                    {topCourses.map(course => (
+                      <div key={course.id} className="flex items-center justify-between">
+                        <div>
+                          <p className="text-white">{course.title}</p>
+                          <p className="text-sm text-gray-400">{course.students} students</p>
+                        </div>
+                        <div className="text-right">
+                          <div className="flex items-center gap-1">
+                            <Star className="w-4 h-4 text-yellow-400" />
+                            <span className="text-white">{course.rating.toFixed(1)}</span>
+                          </div>
+                          <p className="text-sm text-gray-400">{course.completion}% completion</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </GlowCard>
+            ) : (
+              <GlowCard>
+                <div className="p-12 text-center">
+                  <BookOpen className="w-16 h-16 text-gray-600 mx-auto mb-4" />
+                  <h3 className="text-xl font-semibold text-white mb-2">No Courses Yet</h3>
+                  <p className="text-gray-400 mb-6">Create your first course to get started</p>
+                  <Link href="/courses/create">
                     <GlowButton variant="primary">
-                      <Settings className="w-4 h-4 mr-2" />
-                      Organization Admin Panel
+                      <Plus className="w-4 h-4 mr-2" />
+                      Create Course
                     </GlowButton>
                   </Link>
                 </div>
-
-                {/* Top Courses */}
-                {topCourses.length > 0 ? (
-                  <GlowCard>
-                    <div className="p-6">
-                      <h3 className="text-lg font-semibold text-white mb-4">Top Performing Courses</h3>
-                      <div className="space-y-4">
-                        {topCourses.map(course => (
-                          <div key={course.id} className="flex items-center justify-between">
-                            <div>
-                              <p className="text-white">{course.title}</p>
-                              <p className="text-sm text-gray-400">{course.students} students</p>
-                            </div>
-                            <div className="text-right">
-                              <div className="flex items-center gap-1">
-                                <Star className="w-4 h-4 text-yellow-400" />
-                                <span className="text-white">{course.rating.toFixed(1)}</span>
-                              </div>
-                              <p className="text-sm text-gray-400">{course.completion}% completion</p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </GlowCard>
-                ) : (
-                  <GlowCard>
-                    <div className="p-12 text-center">
-                      <BookOpen className="w-16 h-16 text-gray-600 mx-auto mb-4" />
-                      <h3 className="text-xl font-semibold text-white mb-2">No Courses Yet</h3>
-                      <p className="text-gray-400 mb-6">Create your first course to get started</p>
-                      <Link href="/courses/create">
-                        <GlowButton variant="primary">
-                          <Plus className="w-4 h-4 mr-2" />
-                          Create Course
-                        </GlowButton>
-                      </Link>
-                    </div>
-                  </GlowCard>
-                )}
-              </>
+              </GlowCard>
             )}
           </TabsContent>
         </Tabs>

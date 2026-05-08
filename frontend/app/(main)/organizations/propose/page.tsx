@@ -4,13 +4,12 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Building2, Mail, Globe, FileText, AlertCircle, CheckCircle, Send } from 'lucide-react';
+import { Building2, Mail, Globe, AlertCircle, CheckCircle, Send } from 'lucide-react';
 import { GlowCard } from '@/components/lms/Cards';
 import { GlowButton } from '@/components/lms/GlowButton';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { createOrganizationProposal } from '@/lib/organizations';
 import { getSupabaseBrowserClient } from '@/lib/supabase/browser-client';
 import { toast } from 'sonner';
 
@@ -18,6 +17,8 @@ export default function ProposeOrganizationPage() {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [submittedOrgName, setSubmittedOrgName] = useState('');
+  const [submittedAdminEmail, setSubmittedAdminEmail] = useState('');
   const [formData, setFormData] = useState({
     name: '',
     adminEmail: '',
@@ -29,18 +30,14 @@ export default function ProposeOrganizationPage() {
     
     if (!formData.name.trim()) {
       newErrors.name = 'Organization name is required';
-    } else if (formData.name.length < 3) {
-      newErrors.name = 'Name must be at least 3 characters';
+    } else if (formData.name.length < 2) {
+      newErrors.name = 'Name must be at least 2 characters';
     }
     
     if (!formData.adminEmail.trim()) {
       newErrors.adminEmail = 'Admin email is required';
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.adminEmail)) {
       newErrors.adminEmail = 'Please enter a valid email address';
-    }
-    
-    if (formData.domain && !/^[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$/.test(formData.domain)) {
-      newErrors.domain = 'Please enter a valid domain (e.g., example.com)';
     }
     
     setErrors(newErrors);
@@ -54,29 +51,48 @@ export default function ProposeOrganizationPage() {
     
     setIsSubmitting(true);
     
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    // Get current user (mock for now)
-    const supabase = getSupabaseBrowserClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    
-    if (user) {
-      createOrganizationProposal(
-        user.id,
-        user.email?.split('@')[0] || 'User',
-        {
-          name: formData.name,
-          adminEmail: formData.adminEmail,
-          domain: formData.domain || undefined,
-          description: formData.description || undefined,
-        }
-      );
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        toast.error('You must be logged in to propose an organization');
+        router.push('/login');
+        return;
+      }
+      
+      // Call the backend API
+      const response = await fetch('/api/org-service/orgs', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          name: formData.name.trim(),
+          admin_email: formData.adminEmail.trim(),
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to create verification request');
+      }
+      
+      // Store submitted info for display
+      setSubmittedOrgName(formData.name.trim());
+      setSubmittedAdminEmail(formData.adminEmail.trim());
+      
+      toast.success('Verification request submitted! Check the admin email for verification link.');
+      setIsSubmitted(true);
+      
+    } catch (error: any) {
+      console.error('Error submitting proposal:', error);
+      toast.error(error.message || 'Failed to submit proposal. Please try again.');
+    } finally {
+      setIsSubmitting(false);
     }
-    
-    setIsSubmitting(false);
-    setIsSubmitted(true);
-    toast.success('Proposal submitted! We will verify the admin email and contact you.');
   };
 
   const handleChange = (field: string, value: string) => {
@@ -94,24 +110,24 @@ export default function ProposeOrganizationPage() {
             <div className="w-20 h-20 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
               <CheckCircle className="w-10 h-10 text-green-400" />
             </div>
-            <h1 className="text-2xl font-bold text-white mb-3">Proposal Submitted!</h1>
+            <h1 className="text-2xl font-bold text-white mb-3">Verification Request Sent!</h1>
             <p className="text-gray-300 mb-6">
-              Your request to create <strong>{formData.name}</strong> has been submitted.
+              Your request to create <strong>{submittedOrgName}</strong> has been submitted.
             </p>
             <div className="bg-purple-500/10 border border-purple-500/30 rounded-lg p-4 mb-6 text-left">
               <h3 className="font-semibold text-white mb-2">What happens next?</h3>
               <ul className="text-sm text-gray-300 space-y-2">
                 <li className="flex items-start gap-2">
                   <Mail className="w-4 h-4 text-purple-400 mt-0.5" />
-                  <span>We will send a verification email to <strong>{formData.adminEmail}</strong></span>
+                  <span>We've sent a verification email to <strong>{submittedAdminEmail}</strong></span>
                 </li>
                 <li className="flex items-start gap-2">
                   <Building2 className="w-4 h-4 text-purple-400 mt-0.5" />
-                  <span>The admin must verify their email and complete registration</span>
+                  <span>The admin must click the verification link in the email</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <Globe className="w-4 h-4 text-purple-400 mt-0.5" />
-                  <span>Our team will review all information before approving the organization</span>
+                  <span>After verification, the organization will be created immediately</span>
                 </li>
               </ul>
             </div>
@@ -195,9 +211,9 @@ export default function ProposeOrganizationPage() {
               </h3>
               <ul className="text-sm text-gray-300 space-y-1">
                 <li>• The admin email must belong to the actual organization admin</li>
-                <li>• We will verify the email before sending an invitation</li>
-                <li>• The admin will need to complete registration and provide organization details</li>
-                <li>• You will be added as a sub-admin once the organization is created</li>
+                <li>• We will send a verification link to this email</li>
+                <li>• Once verified, the organization will be created immediately</li>
+                <li>• You will be added as a member with appropriate role</li>
               </ul>
             </div>
 

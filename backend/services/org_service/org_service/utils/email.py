@@ -34,7 +34,7 @@ def _parse_host(value: str) -> tuple[str, int]:
 
 def build_org_verification_url(token: str) -> str:
     base_url = os.getenv("ORG_VERIFICATION_URL") or os.getenv("NEXT_PUBLIC_SITE_URL") or "https://localhost"
-    return f"{base_url.rstrip('/')}/org/verify?token={token}"
+    return f"{base_url.rstrip('/')}/organizations/verify?token={token}"
 
 
 def build_org_verification_html(org_name: str, verification_url: str) -> str:

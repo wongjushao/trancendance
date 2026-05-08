@@ -27,7 +27,7 @@ interface Course {
   title: string;
   description: string | null;
   visibility: "public" | "org" | "private";
-  status?: "draft" | "published" | "archived"; // Add status field (optional for existing data)
+  status?: "draft" | "published" | "archived";
   organization_id: number;
   created_by: string;
   created_at: string;
@@ -65,7 +65,6 @@ export default function CoursesPage() {
     fetchData();
   }, []);
 
-  // Replace the entire fetchData function in courses/page.tsx with this simplified version:
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -89,50 +88,41 @@ export default function CoursesPage() {
       // 2. Get unique enrolled course IDs (ONLY as STUDENT)
       const enrolledCourseIds = new Set<number>();
       
-      // 2a. From course_members (direct course enrollment) - ONLY where role is 'student'
+      // 2a. From course_members (direct course enrollment)
       const { data: courseMembers } = await supabase
         .from("course_members")
         .select("course_id")
         .eq("user_id", user.id)
-        .eq("role", "student")  // ← ADD THIS - ONLY students
+        .eq("role", "student")
         .eq("status", "active");
       
       courseMembers?.forEach(cm => {
         enrolledCourseIds.add(cm.course_id);
       });
       
-      // 2b. From class_members (offering-based enrollment) - ONLY where role is 'student'
-      const { data: classMembers } = await supabase
+      // 2b. From class_members (offering-based enrollment)
+      const { data: classMembers, error: classMembersError } = await supabase
         .from("class_members")
         .select(`
           course_class_id,
           course_classes!inner(course_id)
         `)
         .eq("user_id", user.id)
-        .eq("role", "student");  // ← ADD THIS - ONLY students
+        .eq("role", "student");
       
-      console.log("=== CLASS MEMBERS DEBUG ===");
-      console.log("User ID:", user.id);
-      console.log("Class members error:", classMembersError);
-      console.log("Class members found:", classMembers?.length);
-      console.log("Class members data:", JSON.stringify(classMembers, null, 2));
-
-      // Also check all class members regardless of role to see what exists
-      const { data: allClassMembers } = await supabase
-        .from("class_members")
-        .select("*")
-        .eq("user_id", user.id);
-      console.log("ALL class members (any role):", JSON.stringify(allClassMembers, null, 2));
-            
+      if (classMembersError) {
+        console.error("Error fetching class members:", classMembersError);
+      }
+      
       classMembers?.forEach(cm => {
         if (cm.course_classes?.course_id) {
           enrolledCourseIds.add(cm.course_classes.course_id);
         }
       });
       
-      console.log("Unique enrolled course IDs (as student):", Array.from(enrolledCourseIds));
+      console.log("Enrolled course IDs:", Array.from(enrolledCourseIds));
       
-      // 3. Fetch enrolled course details (only as student)
+      // 3. Fetch enrolled course details
       const enrolledCoursesData: EnrolledCourse[] = [];
       
       if (enrolledCourseIds.size > 0) {
@@ -145,7 +135,6 @@ export default function CoursesPage() {
         
         if (coursesData) {
           for (const course of coursesData) {
-            // Calculate progress (same as before)
             let totalLessons = 0;
             const { data: modules } = await supabase
               .from("modules")
@@ -203,13 +192,64 @@ export default function CoursesPage() {
       }
       
       setEnrolledCourses(enrolledCoursesData);
-      console.log("Enrolled courses count:", enrolledCoursesData.length);
       
-      // 4. Get enrolled course IDs for discover filter (still exclude enrolled)
-      const enrolledIds = Array.from(enrolledCourseIds);
+      // 4. Get user's organization memberships for visibility filtering
+      const { data: orgMemberships } = await supabase
+        .from("organization_members")
+        .select("organization_id")
+        .eq("user_id", user.id)
+        .not("member_role", "eq", "pending");
       
-      // 5. Get user's courses where they are instructor/creator (for created tab)
-      // This is separate from enrolled courses
+      const userOrgIds = orgMemberships?.map(m => m.organization_id) || [];
+      console.log("User organization IDs:", userOrgIds);
+      
+      // 5. Fetch discoverable courses
+      let discoverQuery = supabase
+        .from("courses")
+        .select("*")
+        .eq("status", "published");
+      
+      // Exclude enrolled courses
+      if (enrolledCourseIds.size > 0) {
+        const idsArray = Array.from(enrolledCourseIds);
+        discoverQuery = discoverQuery.not("id", "in", `(${idsArray.join(",")})`);
+      }
+      
+      // Exclude user's own created courses
+      discoverQuery = discoverQuery.neq("created_by", user.id);
+      
+      // Apply visibility filter - SHOW public courses OR org courses for orgs user is in
+      if (userOrgIds.length > 0) {
+        discoverQuery = discoverQuery.or(
+          `visibility.eq.public,` +
+          `and(visibility.eq.org,organization_id.in.(${userOrgIds.join(",")}))`
+        );
+      } else {
+        // User is in no organizations - only show public courses
+        discoverQuery = discoverQuery.eq("visibility", "public");
+      }
+      
+      const { data: discoverData, error: discoverError } = await discoverQuery;
+      
+      if (discoverError) {
+        console.error("Error fetching discover courses:", discoverError);
+      }
+      
+      if (discoverData && discoverData.length > 0) {
+        const formattedCourses = discoverData.map(course => ({
+          ...course,
+          instructor_name: getInstructorName(course.created_by, profileMap),
+          instructor_avatar: getInstructorAvatar(course.created_by, profileMap),
+          enrolled: false,
+        }));
+        setDiscoverCourses(formattedCourses);
+        console.log("Discover courses count:", formattedCourses.length);
+      } else {
+        console.log("No discover courses found - check if any published public courses exist");
+        setDiscoverCourses([]);
+      }
+      
+      // 6. Get user's courses where they are instructor/creator
       if (roleData.role === "teacher" || roleData.role === "admin") {
         const { data: createdData } = await supabase
           .from("courses")
@@ -224,9 +264,10 @@ export default function CoursesPage() {
             enrolled: false,
           }));
           setCreatedCourses(formattedCreated);
+          console.log("Created courses count:", formattedCreated.length);
         }
         
-        // 8. Fetch archived courses for teachers
+        // Fetch archived courses
         const { data: archivedData } = await supabase
           .from("courses")
           .select("*")
@@ -240,59 +281,13 @@ export default function CoursesPage() {
             enrolled: false,
           }));
           setArchivedCourses(formattedArchived);
+          console.log("Archived courses count:", formattedArchived.length);
         }
-      }
-      
-      // 6. Get user's organization memberships for visibility filtering
-      const { data: orgMemberships } = await supabase
-        .from("organization_members")
-        .select("organization_id")
-        .eq("user_id", user.id)
-        .not("member_role", "eq", "pending");
-      
-      const userOrgIds = orgMemberships?.map(m => m.organization_id) || [];
-      
-      // 7. Fetch discoverable courses
-      // Don't exclude created courses from discover - they should be discoverable by others
-      let discoverQuery = supabase
-        .from("courses")
-        .select("*")
-        .eq("status", "published");
-      
-      // Exclude enrolled courses (as student) from discover
-      if (enrolledIds.length > 0) {
-        discoverQuery = discoverQuery.not("id", "in", `(${enrolledIds.join(",")})`);
-      }
-      
-      // Also exclude courses created by the user? Optional - they can see their own courses in "My Created Courses" tab
-      // For discover, we typically don't show your own courses
-      discoverQuery = discoverQuery.neq("created_by", user.id);
-      
-      // Apply visibility filter
-      if (userOrgIds.length > 0) {
-        discoverQuery = discoverQuery.or(
-          `visibility.eq.public,` +
-          `and(visibility.eq.org,organization_id.in.(${userOrgIds.join(",")}))`
-        );
-      } else {
-        discoverQuery = discoverQuery.eq("visibility", "public");
-      }
-      
-      const { data: discoverData } = await discoverQuery;
-      
-      if (discoverData) {
-        const formattedCourses = discoverData.map(course => ({
-          ...course,
-          instructor_name: getInstructorName(course.created_by, profileMap),
-          instructor_avatar: getInstructorAvatar(course.created_by, profileMap),
-          enrolled: false,
-        }));
-        setDiscoverCourses(formattedCourses);
-        console.log("Discover courses count:", formattedCourses.length);
       }
       
     } catch (error) {
       console.error("Error fetching courses:", error);
+      toast.error("Failed to load courses");
     } finally {
       setLoading(false);
     }
@@ -315,7 +310,6 @@ export default function CoursesPage() {
   const filterCourses = (courses: Course[]) => {
     let filtered = courses;
     
-    // Apply search filter
     if (searchQuery) {
       filtered = filtered.filter(course => 
         course.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -332,7 +326,6 @@ export default function CoursesPage() {
   const filteredArchivedCourses = filterCourses(archivedCourses);
 
   const handleCreateCourse = async () => {
-    // Pre-check if user has organization before navigating
     const supabase = getSupabaseBrowserClient();
     const { data: { user } } = await supabase.auth.getUser();
     
@@ -341,10 +334,8 @@ export default function CoursesPage() {
       return;
     }
     
-    // Remove the toast.loading - just do the check silently
     try {
-      // Quick check for organization membership
-      const { data: memberships, error } = await supabase
+      const { data: memberships } = await supabase
         .from('organization_members')
         .select('organization_id')
         .eq('user_id', user.id)
@@ -352,10 +343,8 @@ export default function CoursesPage() {
         .limit(1);
       
       if (memberships && memberships.length > 0) {
-        // Has organization, navigate to create page
         router.push('/courses/create');
       } else {
-        // No organization, redirect to organization request page
         router.push('/organizations/propose');
       }
     } catch (error) {
@@ -380,40 +369,20 @@ export default function CoursesPage() {
     const supabase = getSupabaseBrowserClient();
     
     try {
-      // Get the first available offering (prefer ongoing, then upcoming)
       const { data: offerings, error } = await supabase
         .from('course_classes')
         .select('id, name, status')
         .eq('course_id', courseId)
-        .in('status', ['ongoing', 'upcoming'])  // Prioritize ongoing, then upcoming
-        .order('status', { ascending: false })  // 'ongoing' comes before 'upcoming' alphabetically? Actually 'ongoing' < 'upcoming' in string compare
+        .in('status', ['ongoing', 'upcoming'])
         .order('start_date', { ascending: true })
         .limit(1);
       
       if (error) throw error;
       
       if (offerings && offerings.length > 0) {
-        const offering = offerings[0];
-        console.log(`Redirecting to offering ${offering.id} (${offering.status}) for course ${courseId}`);
-        router.push(`/courses/${courseId}/offerings/${offering.id}/students`);
+        router.push(`/courses/${courseId}/offerings/${offerings[0].id}/students`);
       } else {
-        // Also check for completed offerings as fallback
-        const { data: completedOfferings, error: completedError } = await supabase
-          .from('course_classes')
-          .select('id, name, status')
-          .eq('course_id', courseId)
-          .eq('status', 'completed')
-          .limit(1);
-        
-        if (completedError) throw completedError;
-        
-        if (completedOfferings && completedOfferings.length > 0) {
-          toast.info('This course only has completed offerings. Students cannot be enrolled in completed offerings.');
-        } else {
-          toast.error('No course offerings found. Please create an offering first.');
-        }
-        
-        // Offer to create an offering
+        toast.error('No active course offerings found. Please create an offering first.');
         const shouldCreate = confirm('Would you like to create an offering for this course?');
         if (shouldCreate) {
           router.push(`/courses/${courseId}/edit?tab=offerings`);
@@ -425,7 +394,6 @@ export default function CoursesPage() {
     }
   };
 
-  // Replace the handleArchiveCourse function
   const handleArchiveCourse = async () => {
     if (!selectedCourse) return;
     
@@ -442,24 +410,13 @@ export default function CoursesPage() {
       setArchiveModalOpen(false);
       setSelectedCourse(null);
       
-      // Clear all existing data first
-      setEnrolledCourses([]);
-      setDiscoverCourses([]);
-      setCreatedCourses([]);
-      setArchivedCourses([]);
-      
-      // Then refetch fresh data
       await fetchData();
-      
-      // If user was on created tab, stay there; if on archived tab, stay there
-      // The lists will update automatically
     } catch (error) {
       console.error("Error archiving course:", error);
       toast.error("Failed to archive course");
     }
   };
 
-  // Replace the handleUnarchiveCourse function
   const handleUnarchiveCourse = async () => {
     if (!selectedCourse) return;
     
@@ -476,18 +433,8 @@ export default function CoursesPage() {
       setUnarchiveModalOpen(false);
       setSelectedCourse(null);
       
-      // Clear all existing data first
-      setEnrolledCourses([]);
-      setDiscoverCourses([]);
-      setCreatedCourses([]);
-      setArchivedCourses([]);
-      
-      // Then refetch fresh data
       await fetchData();
-      
-      // After restore, switch to the "created" tab to show the restored course
       setActiveTab("created");
-      
     } catch (error) {
       console.error("Error unarchiving course:", error);
       toast.error("Failed to restore course");
@@ -495,7 +442,6 @@ export default function CoursesPage() {
   };
 
   const getOrgName = (orgId: number): string => {
-    // Since teachers/admins are only in one org, we can use roleData
     if ((roleData.role === 'teacher' || roleData.role === 'admin') && roleData.organizationId === orgId) {
       return roleData.organizationName || `Org ${orgId}`;
     }
@@ -505,6 +451,9 @@ export default function CoursesPage() {
   const isTeacher = roleData.role === "teacher" || roleData.role === "admin";
   const isStudent = roleData.role === "student";
   const hasArchivedCourses = archivedCourses.length > 0;
+
+  // Determine if My Courses tab should show (user has enrollments OR is teacher/admin)
+  const showMyCoursesTab = enrolledCourses.length > 0;
 
   return (
     <div className="space-y-8">
@@ -548,31 +497,26 @@ export default function CoursesPage() {
       ) : (
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)} className="w-full">
           <TabsList className="bg-gray-900/50 border border-gray-800">
-          // Change the tab visibility condition:
-          <TabsList className="bg-gray-900/50 border border-gray-800">
-            {/* Show My Courses if user has ANY student enrollments, regardless of current role */}
-            {enrolledCourses.length > 0 && (
+            {showMyCoursesTab && (
               <TabsTrigger value="my">My Courses ({enrolledCourses.length})</TabsTrigger>
             )}
-            <TabsTrigger value="discover">Discover</TabsTrigger>
+            <TabsTrigger value="discover">Discover ({discoverCourses.length})</TabsTrigger>
             {isTeacher && createdCourses.length > 0 && (
-              <TabsTrigger value="created">My Created Courses</TabsTrigger>
+              <TabsTrigger value="created">My Created Courses ({createdCourses.length})</TabsTrigger>
             )}
             {isTeacher && hasArchivedCourses && (
-              <TabsTrigger value="archived">Archived</TabsTrigger>
+              <TabsTrigger value="archived">Archived ({archivedCourses.length})</TabsTrigger>
             )}
           </TabsList>
 
-
-          {/* My Courses Tab - UNCHANGED */}
-          {isStudent && (
+          {/* My Courses Tab */}
+          {showMyCoursesTab && (
             <TabsContent value="my" className="mt-6">
               {filteredEnrolledCourses.length > 0 ? (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {filteredEnrolledCourses.map((course) => (
                     <GlowCard key={course.id} className="overflow-hidden group cursor-pointer hover:scale-[1.02] transition-all">
                       <div className="flex flex-col md:flex-row">
-                        {/* Thumbnail Placeholder */}
                         <div className="relative md:w-48 h-48 md:h-auto overflow-hidden bg-gradient-to-br from-purple-500/20 to-pink-500/20 flex items-center justify-center">
                           <BookOpen className="w-12 h-12 text-gray-500" />
                           <div className="absolute top-3 left-3 px-2 py-1 bg-purple-500/90 backdrop-blur-sm rounded text-xs text-white">
@@ -580,7 +524,6 @@ export default function CoursesPage() {
                           </div>
                         </div>
                         
-                        {/* Content */}
                         <div className="flex-1 p-5">
                           <div>
                             <h3 className="text-xl font-semibold text-white mb-1 group-hover:text-purple-400 transition-colors">
@@ -591,7 +534,6 @@ export default function CoursesPage() {
                           
                           <p className="text-gray-400 text-sm mb-4 line-clamp-2">{course.description}</p>
                           
-                          {/* Progress Bar */}
                           <div className="mb-4">
                             <div className="flex justify-between text-xs text-gray-400 mb-1">
                               <span>Your Progress</span>
@@ -605,7 +547,6 @@ export default function CoursesPage() {
                             </div>
                           </div>
                           
-                          {/* Stats */}
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3 text-sm text-gray-400">
                               <span className="flex items-center gap-1">
@@ -644,7 +585,7 @@ export default function CoursesPage() {
             </TabsContent>
           )}
 
-          {/* Discover Courses Tab - UNCHANGED */}
+          {/* Discover Courses Tab */}
           <TabsContent value="discover" className="mt-6">
             {filteredDiscoverCourses.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -691,16 +632,18 @@ export default function CoursesPage() {
               <div className="text-center py-12">
                 <BookOpen className="w-16 h-16 text-gray-600 mx-auto mb-4" />
                 <h3 className="text-xl font-semibold text-white mb-2">No courses found</h3>
-                <p className="text-gray-400">Try adjusting your search</p>
+                <p className="text-gray-400">
+                  {searchQuery 
+                    ? "Try adjusting your search" 
+                    : "There are no public courses available yet. Check back later!"}
+                </p>
               </div>
             )}
           </TabsContent>
 
-          {/* Created Courses Tab - ADD Archive Button ONLY */}
+          {/* Created Courses Tab */}
           {isTeacher && (
             <TabsContent value="created" className="mt-6">
-  
-              {/* Show organization name as info instead - ADD THIS */}
               {roleData.organizationId && (
                 <div className="mb-4 p-3 bg-purple-500/10 border border-purple-500/30 rounded-lg flex items-center gap-2">
                   <Building2 className="w-4 h-4 text-purple-400" />
@@ -709,7 +652,6 @@ export default function CoursesPage() {
                   </span>
                 </div>
               )}
-
 
               {filteredCreatedCourses.length > 0 ? (
                 <div className="space-y-4">
@@ -726,7 +668,6 @@ export default function CoursesPage() {
                                 <h3 className="text-xl font-semibold text-white">
                                   {course.title}
                                 </h3>
-                                {/* Show organization badge */}
                                 {course.organization_id && (
                                   <Badge variant="outline" className="text-xs">
                                     {getOrgName(course.organization_id)}
@@ -780,7 +721,6 @@ export default function CoursesPage() {
                                 <Users className="w-4 h-4 mr-1" />
                                 Students
                               </GlowButton>
-                              {/* Archive button */}
                               <GlowButton 
                                 size="sm" 
                                 variant="ghost"
@@ -813,7 +753,7 @@ export default function CoursesPage() {
             </TabsContent>
           )}
 
-          {/* ADDED: Archived Courses Tab - New tab for archived courses */}
+          {/* Archived Courses Tab */}
           {isTeacher && hasArchivedCourses && (
             <TabsContent value="archived" className="mt-6">
               <div className="space-y-4">

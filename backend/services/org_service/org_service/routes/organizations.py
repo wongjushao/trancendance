@@ -1,3 +1,5 @@
+# backend/services/org_service/org_service/routes/organizations.py
+
 import hashlib
 import secrets
 import uuid
@@ -8,7 +10,7 @@ from flask import current_app, jsonify, request
 from flask_restx import Namespace, Resource, fields
 from sqlalchemy.exc import SQLAlchemyError
 
-from backend.common.models import Organization, OrganizationMember, OrganizationVerificationRequest
+from backend.common.models import Organization, OrganizationMember, OrganizationVerificationRequest, Profile
 from backend.services.org_service.org_service.utils.email import (
     EmailConfigurationError,
     EmailDeliveryError,
@@ -223,33 +225,81 @@ class OrganizationVerificationResource(Resource):
 
             if verification_request is None:
                 return jsonify({"error": "Invalid verification token"}), 404
+            
             if verification_request.status != "pending":
                 return jsonify({"error": "Verification request is not pending"}), 409
+            
             if verification_request.expires_at <= now:
                 verification_request.status = "expired"
                 session.commit()
                 return jsonify({"error": "Verification token has expired"}), 400
+            
+            # Check if the logged-in user's email matches the invited admin email
             if verification_request.admin_email != admin_email:
-                return jsonify({"error": "Bearer user email does not match the invited admin email"}), 403
+                return jsonify({
+                    "error": "Bearer user email does not match the invited admin email",
+                    "expected_email": verification_request.admin_email
+                }), 403
 
-            organization = Organization(
-                name=verification_request.org_name,
-                created_by=admin_user_id,
-            )
-            session.add(organization)
-            session.flush()
+            # Check if organization already exists (by name)
+            existing_organization = session.query(Organization).filter(
+                Organization.name == verification_request.org_name
+            ).first()
 
-            session.add(
-                OrganizationMember(
-                    organization_id=organization.id,
-                    user_id=admin_user_id,
-                    member_role="admin",
+            if existing_organization:
+                # Organization already exists, just add/update user membership
+                organization = existing_organization
+                
+                # Check if user is already a member
+                existing_member = session.query(OrganizationMember).filter(
+                    OrganizationMember.organization_id == organization.id,
+                    OrganizationMember.user_id == admin_user_id
+                ).first()
+                
+                if existing_member:
+                    # Update existing member to admin
+                    existing_member.member_role = "admin"
+                else:
+                    # Add user as admin member
+                    session.add(
+                        OrganizationMember(
+                            organization_id=organization.id,
+                            user_id=admin_user_id,
+                            member_role="admin",
+                        )
+                    )
+            else:
+                # Create new organization
+                organization = Organization(
+                    name=verification_request.org_name,
+                    created_by=admin_user_id,
                 )
-            )
+                session.add(organization)
+                session.flush()
 
+                # Add creator as admin member
+                session.add(
+                    OrganizationMember(
+                        organization_id=organization.id,
+                        user_id=admin_user_id,
+                        member_role="admin",
+                    )
+                )
+
+            # Update verification request
             verification_request.status = "verified"
             verification_request.verified_at = now
             verification_request.organization_id = organization.id
+
+            # Ensure user profile exists and is marked as onboarded
+            profile = session.query(Profile).filter(Profile.id == admin_user_id).first()
+            if profile:
+                if not profile.onboarded:
+                    profile.onboarded = True
+            else:
+                # Create minimal profile if it doesn't exist
+                profile = Profile(id=admin_user_id, onboarded=True)
+                session.add(profile)
 
             session.commit()
             session.refresh(organization)
@@ -259,6 +309,7 @@ class OrganizationVerificationResource(Resource):
                 {
                     "organization": serialize_organization(organization),
                     "verification_request": serialize_verification_request(verification_request),
+                    "message": f"Organization {organization.name} verified successfully! You are now an admin."
                 }
             )
         except SQLAlchemyError as exc:
