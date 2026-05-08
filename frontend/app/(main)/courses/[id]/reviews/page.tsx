@@ -1,4 +1,3 @@
-// frontend/app/(main)/courses/[id]/reviews/page.tsx
 "use client";
 
 import { useState, useEffect } from "react";
@@ -7,25 +6,23 @@ import Link from "next/link";
 import {
   ArrowLeft,
   Star,
-  StarHalf,
   Users,
   Calendar,
   MessageSquare,
-  ThumbsUp,
-  Flag,
   Loader2,
   ChevronLeft,
   ChevronRight,
+  Crown,
+  Shield,
 } from "lucide-react";
 import { GlowCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
-import { isEnrolled } from "@/lib/supabase/enrollment";
+import { useRole } from "@/components/providers/RoleProvider";
 
 interface Review {
   id: number;
@@ -58,7 +55,9 @@ export default function CourseReviewsPage() {
   const params = useParams();
   const router = useRouter();
   const courseId = parseInt(params.id as string);
-  
+  const supabase = getSupabaseBrowserClient();
+  const { roleData } = useRole();
+
   const [loading, setLoading] = useState(true);
   const [course, setCourse] = useState<any>(null);
   const [reviews, setReviews] = useState<Review[]>([]);
@@ -67,93 +66,121 @@ export default function CourseReviewsPage() {
     total: 0,
     distribution: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
   });
-  const [isEnrolledState, setIsEnrolledState] = useState(false);
-  const [user, setUser] = useState<any>(null);
-  const [currentPage, setCurrentPage] = useState(1);
+  const [canReview, setCanReview] = useState(false);
   const [hasUserReviewed, setHasUserReviewed] = useState(false);
+  const [userRole, setUserRole] = useState<string | null>(null);
+  const [isCourseInstructor, setIsCourseInstructor] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
-  
+
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        setLoading(true);
-        const supabase = getSupabaseBrowserClient();
-        
-        // Get current user
-        const { data: { user: authUser } } = await supabase.auth.getUser();
-        setUser(authUser);
-        
-        // Get course details
-        const { data: courseData } = await supabase
-          .from("courses")
-          .select("id, title, description, thumbnail, level, category, organization_id")
-          .eq("id", courseId)
-          .single();
-        setCourse(courseData);
-        
-        // Check if user is enrolled
-        if (authUser && courseData) {
-          const { data: classMembers } = await supabase
-            .from("class_members")
-            .select("id")
-            .eq("user_id", authUser.id);
-          
-          if (classMembers && classMembers.length > 0) {
-            setIsEnrolledState(true);
-            
-            // Check if user has already reviewed
-            const { data: existingReview } = await supabase
-              .from("course_reviews")
-              .select("id")
-              .eq("course_id", courseId)
-              .eq("user_id", authUser.id)
-              .single();
-            setHasUserReviewed(!!existingReview);
-          }
-        }
-        
-        // Get all reviews with user profiles
-        const { data: reviewsData } = await supabase
-          .from("course_reviews")
-          .select(`
-            *,
-            user:profiles!user_id (
-              id,
-              first_name,
-              last_name,
-              username,
-              avatar_url
-            )
-          `)
-          .eq("course_id", courseId)
-          .order("created_at", { ascending: false });
-        
-        if (reviewsData) {
-          setReviews(reviewsData);
-          
-          // Calculate stats
-          const total = reviewsData.length;
-          const sum = reviewsData.reduce((acc, r) => acc + r.rating, 0);
-          const average = total > 0 ? sum / total : 0;
-          
-          const distribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
-          reviewsData.forEach(r => {
-            distribution[r.rating as keyof typeof distribution]++;
-          });
-          
-          setStats({ average, total, distribution });
-        }
-        
-      } catch (error) {
-        console.error("Error loading reviews:", error);
-        toast.error("Failed to load reviews");
-      } finally {
-        setLoading(false);
-      }
-    };
-    
     loadData();
   }, [courseId]);
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      
+      // Get current user
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      
+      // Get course details
+      const { data: courseData } = await supabase
+        .from("courses")
+        .select("id, title, description, thumbnail, level, category, organization_id, created_by")
+        .eq("id", courseId)
+        .single();
+      setCourse(courseData);
+      
+      // Check if user is the course instructor/creator
+      if (authUser && courseData) {
+        const isInstructor = courseData.created_by === authUser.id;
+        setIsCourseInstructor(isInstructor);
+        
+        // Get user's role in this specific course context (if any)
+        // Check if user is a teacher in the organization
+        const { data: orgMembership } = await supabase
+          .from("organization_members")
+          .select("member_role")
+          .eq("organization_id", courseData.organization_id)
+          .eq("user_id", authUser.id)
+          .single();
+        
+        setUserRole(orgMembership?.member_role || null);
+        
+        // Check if user is enrolled as a STUDENT (not as instructor)
+        const { data: classMembers } = await supabase
+          .from("class_members")
+          .select(`
+            id,
+            role,
+            course_classes!inner (
+              course_id
+            )
+          `)
+          .eq("user_id", authUser.id)
+          .eq("course_classes.course_id", courseId)
+          .eq("role", "student");  // Only student role counts for enrollment
+        
+        const isEnrolledAsStudent = (classMembers?.length || 0) > 0;
+        
+        // Check if user has already reviewed
+        const { data: existingReview } = await supabase
+          .from("course_reviews")
+          .select("id")
+          .eq("course_id", courseId)
+          .eq("user_id", authUser.id)
+          .single();
+        setHasUserReviewed(!!existingReview);
+        
+        // User can review if:
+        // 1. They are enrolled as a STUDENT (not instructor)
+        // 2. They have NOT already reviewed
+        // 3. They are NOT the course creator
+        // 4. They are NOT an instructor for this course (through any offering)
+        const canUserReview = isEnrolledAsStudent && !existingReview && !isInstructor;
+        setCanReview(canUserReview);
+      }
+      
+      // Get all reviews with user profiles
+      const { data: reviewsData } = await supabase
+        .from("course_reviews")
+        .select(`
+          *,
+          user:user_id (
+            id,
+            first_name,
+            last_name,
+            username,
+            avatar_url
+          )
+        `)
+        .eq("course_id", courseId)
+        .order("created_at", { ascending: false });
+      
+      if (reviewsData) {
+        setReviews(reviewsData);
+        
+        // Calculate stats
+        const total = reviewsData.length;
+        const sum = reviewsData.reduce((acc, r) => acc + r.rating, 0);
+        const average = total > 0 ? sum / total : 0;
+        
+        const distribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+        reviewsData.forEach(r => {
+          distribution[r.rating as keyof typeof distribution]++;
+        });
+        
+        setStats({ average, total, distribution });
+      }
+      
+    } catch (error) {
+      console.error("Error loading reviews:", error);
+      toast.error("Failed to load reviews");
+    } finally {
+      setLoading(false);
+    }
+  };
   
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString("en-US", {
@@ -192,6 +219,26 @@ export default function CourseReviewsPage() {
     return "U";
   };
   
+  const getUserRoleBadge = () => {
+    if (isCourseInstructor) {
+      return (
+        <Badge className="bg-purple-500/20 text-purple-400">
+          <Crown className="w-3 h-3 mr-1" />
+          Instructor
+        </Badge>
+      );
+    }
+    if (userRole === "teacher") {
+      return (
+        <Badge className="bg-blue-500/20 text-blue-400">
+          <Shield className="w-3 h-3 mr-1" />
+          Teacher
+        </Badge>
+      );
+    }
+    return null;
+  };
+  
   const paginatedReviews = reviews.slice(
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
@@ -222,14 +269,33 @@ export default function CourseReviewsPage() {
               <h1 className="text-3xl font-bold text-white">Course Reviews</h1>
               <p className="text-gray-400 mt-1">{course?.title}</p>
             </div>
+            {getUserRoleBadge()}
           </div>
-          {isEnrolledState && !hasUserReviewed && (
+          
+          {/* Write Review Button - Only shows for eligible students */}
+          {canReview && (
             <Link href={`/courses/${courseId}/reviews/create`}>
               <GlowButton variant="primary">
                 <MessageSquare className="w-4 h-4 mr-2" />
                 Write a Review
               </GlowButton>
             </Link>
+          )}
+          
+          {/* Message for instructors/teachers */}
+          {(isCourseInstructor || userRole === "teacher") && !canReview && (
+            <div className="text-sm text-gray-400 bg-gray-800/30 px-4 py-2 rounded-lg">
+              {isCourseInstructor 
+                ? "As the course instructor, you cannot review your own course" 
+                : "Teachers cannot review courses they are associated with"}
+            </div>
+          )}
+          
+          {/* Message for enrolled but already reviewed */}
+          {!canReview && hasUserReviewed && (
+            <div className="text-sm text-green-400 bg-green-500/10 px-4 py-2 rounded-lg">
+              Thanks for reviewing this course!
+            </div>
           )}
         </div>
         
@@ -256,7 +322,7 @@ export default function CourseReviewsPage() {
                       <div className="w-12 text-sm text-gray-400">{star} stars</div>
                       <div className="flex-1">
                         <Progress
-                          value={(stats.distribution[star as keyof typeof stats.distribution] / stats.total) * 100}
+                          value={stats.total > 0 ? (stats.distribution[star as keyof typeof stats.distribution] / stats.total) * 100 : 0}
                           className="h-2"
                         />
                       </div>
@@ -285,7 +351,7 @@ export default function CourseReviewsPage() {
                 <p className="text-gray-400 mb-6">
                   Be the first to share your experience with this course!
                 </p>
-                {isEnrolledState && !hasUserReviewed && (
+                {canReview && (
                   <Link href={`/courses/${courseId}/reviews/create`}>
                     <GlowButton variant="primary">
                       Write a Review

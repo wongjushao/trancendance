@@ -110,7 +110,6 @@ const MenuBar = ({ editor }: { editor: any }) => {
         onClick={() => {
           const url = window.prompt("Enter URL:");
           if (url) {
-            // Check if it's a valid URL
             try {
               new URL(url);
               editor.chain().focus().setLink({ href: url }).run();
@@ -155,6 +154,8 @@ export function RichTextEditor({ value, onChange, placeholder, className = "" }:
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
+        // Configure StarterKit to NOT include link since we're adding it separately
+        link: false,  // ← This is the key fix - disable link in StarterKit
         bulletList: {
           keepMarks: true,
           keepAttributes: false,
@@ -193,13 +194,6 @@ export function RichTextEditor({ value, onChange, placeholder, className = "" }:
     }
   }, [editor, value]);
 
-  // Check if content is empty (just an empty paragraph)
-  const isEmpty = () => {
-    if (!editor) return true;
-    const html = editor.getHTML();
-    return !html || html === "<p></p>" || html === "<p><br></p>";
-  };
-
   // Don't render anything during SSR
   if (!mounted) {
     return (
@@ -214,7 +208,7 @@ export function RichTextEditor({ value, onChange, placeholder, className = "" }:
       <MenuBar editor={editor} />
       <div className="relative">
         <EditorContent editor={editor} />
-        {placeholder && isEmpty() && (
+        {placeholder && editor?.isEmpty && (
           <div className="absolute top-4 left-4 text-gray-500 text-sm pointer-events-none">
             {placeholder}
           </div>

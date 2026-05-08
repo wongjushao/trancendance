@@ -2062,6 +2062,11 @@ const getDayName = (day: number): string => {
             <DialogTitle className="text-white">
               {editingModule ? "Edit Module" : "Add Module"}
             </DialogTitle>
+            <DialogDescription className="text-gray-400">
+              {editingModule 
+                ? "Update the module title for this course" 
+                : "Create a new module to organize your course content"}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div>
@@ -2088,6 +2093,11 @@ const getDayName = (day: number): string => {
             <DialogTitle className="text-white">
               {editingClass?.class.id ? "Edit Class" : "Add Class"}
             </DialogTitle>
+            <DialogDescription className="text-gray-400">
+              {editingClass?.class.id 
+                ? "Update the class title" 
+                : "Add a new class to organize your lessons"}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div>
@@ -2114,6 +2124,11 @@ const getDayName = (day: number): string => {
             <DialogTitle className="text-white">
               {editingLesson?.lesson.id ? "Edit Lesson" : "Add Lesson"}
             </DialogTitle>
+            <DialogDescription className="text-gray-400">
+              {editingLesson?.lesson.id 
+                ? "Modify the lesson content, video, or quiz" 
+                : "Create a new lesson for your students"}
+            </DialogDescription>
           </DialogHeader>
           
           <div className="space-y-6">
@@ -2825,6 +2840,11 @@ const getDayName = (day: number): string => {
             <DialogTitle className="text-white">
               {editingOffering ? "Edit Offering" : "Add Offering"}
             </DialogTitle>
+            <DialogDescription className="text-gray-400">
+              {editingOffering 
+                ? "Update the course offering details" 
+                : "Create a new course offering (session/cohort)"}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 max-h-[60vh] overflow-y-auto">
             <div>
@@ -3042,6 +3062,9 @@ const getDayName = (day: number): string => {
         <DialogContent className="bg-slate-800 border-slate-700 max-w-md">
           <DialogHeader>
             <DialogTitle className="text-white text-xl">Delete Module?</DialogTitle>
+            <DialogDescription className="text-gray-400">
+              This action cannot be undone. This will permanently delete the module and all its contents.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-gray-300">
@@ -3068,6 +3091,9 @@ const getDayName = (day: number): string => {
         <DialogContent className="bg-slate-800 border-slate-700 max-w-md">
           <DialogHeader>
             <DialogTitle className="text-white text-xl">Delete Class?</DialogTitle>
+            <DialogDescription className="text-gray-400">
+              This action cannot be undone. This will permanently delete the class and all its lessons.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-gray-300">
@@ -3094,6 +3120,9 @@ const getDayName = (day: number): string => {
         <DialogContent className="bg-slate-800 border-slate-700 max-w-md">
           <DialogHeader>
             <DialogTitle className="text-white text-xl">Delete Lesson?</DialogTitle>
+            <DialogDescription className="text-gray-400">
+              This action cannot be undone. This will permanently delete the lesson and any attached assignments.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-gray-300">
@@ -3120,6 +3149,9 @@ const getDayName = (day: number): string => {
         <DialogContent className="bg-slate-800 border-slate-700">
           <DialogHeader>
             <DialogTitle className="text-white">Publish Course</DialogTitle>
+            <DialogDescription className="text-gray-400">
+              Publishing will make this course available to students.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-gray-300">

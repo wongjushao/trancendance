@@ -616,14 +616,22 @@ export default function CoursesPage() {
                         </div>
                         <span className="text-gray-400">{course.instructor_name || "Instructor"}</span>
                       </div>
-                      
+                    </div>  {/* ← CLOSE the space-y-3 div */}
+                    
+                    <div className="flex gap-2 mt-4">
                       <GlowButton 
                         variant="outline" 
-                        fullWidth
+                        className="flex-1"
                         onClick={() => handleViewCourse(course.id)}
                       >
                         View Course
                       </GlowButton>
+                      <Link href={`/courses/${course.id}/preview`} className="flex-1">
+                        <GlowButton variant="outline" fullWidth>
+                          <Eye className="w-4 h-4 mr-2" />
+                          Preview
+                        </GlowButton>
+                      </Link>
                     </div>
                   </GlowCard>
                 ))}
