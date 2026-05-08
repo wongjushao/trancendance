@@ -16,7 +16,6 @@ const protectedRoutes = [
   "/teacher",
   "/admin",
   "/organizations",
-  "/organization-setup",
   "/teacher-request",
 ];
 
@@ -46,19 +45,20 @@ const publicRoutes = [
   "/auth/confirm",
   "/auth/error",
   "/accept-invite",
-  "/invite/accept", // Add this for invite acceptance
+  "/invite/accept",
+];
+
+// Routes that should bypass setup check
+const bypassSetupRoutes = [
+  "/setup",
+  "/onboarding", 
+  "/auth/mfa-verify",
+  "/admin",  // ADDED - bypass setup check for admin panel
 ];
 
 async function checkOnboardingStatus(token: string): Promise<boolean> {
   try {
-    // Don't call back into the Next server via NEXT_PUBLIC_SITE_URL here.
-    // In Docker, that value is for *browser* redirects (often localhost/https) and
-    // can be unreachable from inside the runtime (leading to ECONNREFUSED).
-    // Call the auth service directly on the Docker network instead.
-    const backendUrl = (process.env.NEXT_PUBLIC_BACKEND_URL || "https://auth-service:5001").replace(
-      /\/$/,
-      ""
-    );
+    const backendUrl = (process.env.NEXT_PUBLIC_BACKEND_URL || "https://auth-service:5001").replace(/\/$/, "");
     const response = await fetch(
       `${backendUrl}/api/auth-service/onboarding-status`,
       {
@@ -79,6 +79,121 @@ async function checkOnboardingStatus(token: string): Promise<boolean> {
   }
 }
 
+async function checkOrganizationSetupStatus(orgId: string, token: string): Promise<boolean> {
+  try {
+    const backendUrl = (process.env.NEXT_PUBLIC_BACKEND_URL || "https://org-service:5003").replace(/\/$/, "");
+    const response = await fetch(
+      `${backendUrl}/api/org-service/orgs/${orgId}/setup-status`,
+      {
+        cache: "no-store",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+    if (!response.ok) {
+      console.error("[proxy] Setup status check failed:", response.status);
+      return true; // Assume complete on error to avoid infinite redirects
+    }
+    const data = await response.json();
+    return data.is_setup_complete === true;
+  } catch (error) {
+    console.error("[proxy] Error checking organization setup status:", error);
+    return true; // Assume complete on error to avoid infinite redirects
+  }
+}
+
+async function checkUserCanPromote(orgId: string, token: string): Promise<boolean> {
+  try {
+    const backendUrl = (process.env.NEXT_PUBLIC_BACKEND_URL || "https://org-service:5003").replace(/\/$/, "");
+    
+    // Add timeout to prevent hanging
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    
+    const response = await fetch(
+      `${backendUrl}/api/org-service/orgs/${orgId}/can-promote`,
+      {
+        cache: "no-store",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        signal: controller.signal,
+      }
+    );
+    
+    clearTimeout(timeoutId);
+    
+    if (!response.ok) {
+      console.error(`[proxy] can-promote check failed with status: ${response.status}`);
+      // If the endpoint doesn't exist or fails, default to checking via database directly
+      return await checkUserIsAdminViaDB(orgId, token);
+    }
+    const data = await response.json();
+    console.log(`[proxy] can-promote result for org ${orgId}:`, data);
+    return data.can_promote === true;
+  } catch (error) {
+    console.error("[proxy] Error checking promotion permission:", error);
+    // Fallback: check directly via database
+    return await checkUserIsAdminViaDB(orgId, token);
+  }
+}
+
+// Fallback function to check admin status directly from database
+async function checkUserIsAdminViaDB(orgId: string, token: string): Promise<boolean> {
+  try {
+    // Get user info from the token
+    const backendUrl = (process.env.NEXT_PUBLIC_BACKEND_URL || "https://auth-service:5001").replace(/\/$/, "");
+    
+    // First, get user ID from auth service
+    const userResponse = await fetch(
+      `${backendUrl}/api/auth-service/profile`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+    
+    if (!userResponse.ok) {
+      console.error("[proxy] Failed to get user profile");
+      return false;
+    }
+    
+    const userData = await userResponse.json();
+    const userId = userData.id;
+    
+    if (!userId) {
+      console.error("[proxy] No user ID found");
+      return false;
+    }
+    
+    // Check organization membership directly via org-service
+    const orgResponse = await fetch(
+      `${backendUrl.replace("auth-service", "org-service")}/api/org-service/orgs/${orgId}/members/${userId}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+    
+    if (!orgResponse.ok) {
+      console.error("[proxy] Failed to check membership");
+      return false;
+    }
+    
+    const memberData = await orgResponse.json();
+    const isAdmin = memberData.member_role === "admin" || memberData.member_role === "sub_admin";
+    console.log(`[proxy] User ${userId} is admin: ${isAdmin}`);
+    return isAdmin;
+    
+  } catch (error) {
+    console.error("[proxy] Error in fallback admin check:", error);
+    return false;
+  }
+}
+
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   
@@ -92,7 +207,7 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Allow public routes without any checks (including accept-invite)
+  // Allow public routes without any checks
   if (publicRoutes.some(route => pathname === route || pathname.startsWith(route + "/"))) {
     console.log("[proxy] Public route, allowing access:", pathname);
     return NextResponse.next();
@@ -140,6 +255,9 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
+  // Check if this is a route that should bypass setup check
+  const shouldBypassSetup = bypassSetupRoutes.some(route => pathname.includes(route));
+  
   // For protected pages, check onboarding
   const isProtected = protectedRoutes.some(route => pathname === route || pathname.startsWith(route + "/"));
   const isAuthOnly = authOnlyRoutes.some(route => pathname === route || pathname.startsWith(route + "/"));
@@ -162,7 +280,43 @@ export async function proxy(request: NextRequest) {
     }
     
     console.log("[proxy] Onboarded user, allowing access");
-    return NextResponse.next();
+  }
+
+  // Check organization setup status for admin panel access
+  // Extract organization ID from path patterns
+  const orgMatch = pathname.match(/\/organizations\/(\d+)\/(admin|setup|members|courses|settings)/);
+  
+  if (orgMatch && !shouldBypassSetup) {
+    const orgId = orgMatch[1];
+    const subpath = orgMatch[2];
+    const accessToken = session.access_token;
+    
+    console.log(`[proxy] Checking organization access for org ${orgId}, subpath: ${subpath}`);
+    
+    // For admin panel, check if user has admin permission
+    if (subpath === "admin") {
+      // Check if user is admin via the can-promote endpoint or fallback
+      const canPromote = await checkUserCanPromote(orgId, accessToken);
+      
+      if (!canPromote) {
+        console.log(`[proxy] User is not admin for org ${orgId}, redirecting to org page`);
+        return NextResponse.redirect(new URL(`/organizations/${orgId}`, request.url));
+      }
+      
+      console.log(`[proxy] User is admin for org ${orgId}, allowing access to admin panel`);
+      // Skip setup check for admin panel - allow access even if setup incomplete
+      return NextResponse.next();
+    }
+    
+    // For non-admin organization pages, check if setup is complete
+    if (subpath !== "setup") {
+      const isSetupComplete = await checkOrganizationSetupStatus(orgId, accessToken);
+      
+      if (!isSetupComplete) {
+        console.log(`[proxy] Organization ${orgId} setup incomplete, redirecting to setup page`);
+        return NextResponse.redirect(new URL(`/organizations/${orgId}/setup`, request.url));
+      }
+    }
   }
 
   return NextResponse.next();

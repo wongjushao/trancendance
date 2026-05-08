@@ -6,7 +6,6 @@ import { TrendingUp, Award, Clock, CheckCircle, BookOpen, ChevronRight, Trophy }
 import { GlowCard } from "@/components/lms/Cards";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 import { getCourseProgress } from "@/lib/course-progress";
-import { getCertificatesForUser, downloadCertificate, printCertificate } from "@/lib/certificate";
 
 interface CourseStats {
   courseId: number;
@@ -15,25 +14,16 @@ interface CourseStats {
   completedLessons: number;
   progress: number;
   lastAccessed: string;
-  hasCertificate: boolean;
 }
 
 export function StudentProgress() {
   const [stats, setStats] = useState<CourseStats[]>([]);
   const [loading, setLoading] = useState(true);
   const [totalProgress, setTotalProgress] = useState(0);
-  const [certificates, setCertificates] = useState<any[]>([]);
-  const [showCertificates, setShowCertificates] = useState(false);
 
   useEffect(() => {
     fetchProgress();
-    fetchCertificates();
   }, []);
-
-  const fetchCertificates = async () => {
-    const userCertificates = getCertificatesForUser();
-    setCertificates(userCertificates);
-  };
 
   const fetchProgress = async () => {
     setLoading(true);
@@ -69,17 +59,13 @@ export function StudentProgress() {
 
         const { totalLessons, completedLessons, progressPercentage } = await getCourseProgress(membership.course_id);
 
-        // Check if certificate exists (mock check - in real implementation, check certificates table)
-        const hasCertificate = certificates.some(c => c.courseId === membership.course_id);
-
         courseStats.push({
           courseId: membership.course_id,
           courseTitle: course?.title || "Unknown Course",
           totalLessons,
           completedLessons,
           progress: progressPercentage,
-          lastAccessed: new Date().toISOString(),
-          hasCertificate,
+          lastAccessed: new Date().toISOString()
         });
 
         totalProgressSum += progressPercentage;
@@ -91,18 +77,6 @@ export function StudentProgress() {
       console.error("Error fetching progress:", error);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleGenerateCertificate = async (courseId: number, courseTitle: string) => {
-    try {
-      const { generateCertificate } = await import("@/lib/certificate");
-      const certId = await generateCertificate(courseId, courseTitle);
-      alert(`Certificate generated! You can download it from the Certificates tab.`);
-      fetchCertificates();
-      fetchProgress();
-    } catch (error: any) {
-      alert(error.message);
     }
   };
 
@@ -179,21 +153,6 @@ export function StudentProgress() {
                     {course.completedLessons} of {course.totalLessons} lessons completed
                   </p>
                 </div>
-                {course.progress === 100 && !course.hasCertificate && (
-                  <button
-                    onClick={() => handleGenerateCertificate(course.courseId, course.courseTitle)}
-                    className="px-3 py-1.5 text-xs bg-green-600/20 hover:bg-green-600/30 text-green-400 rounded-lg transition-colors flex items-center gap-1"
-                  >
-                    <Award className="w-3 h-3" />
-                    Get Certificate
-                  </button>
-                )}
-                {course.hasCertificate && (
-                  <span className="px-3 py-1.5 text-xs bg-purple-600/20 text-purple-400 rounded-lg flex items-center gap-1">
-                    <Award className="w-3 h-3" />
-                    Certified
-                  </span>
-                )}
               </div>
               <div className="w-full bg-gray-800 rounded-full h-2 mb-3">
                 <div
@@ -223,54 +182,6 @@ export function StudentProgress() {
           </GlowCard>
         ))}
       </div>
-
-      {/* Certificates Section */}
-      {certificates.length > 0 && (
-        <GlowCard>
-          <div className="p-5">
-            <button
-              onClick={() => setShowCertificates(!showCertificates)}
-              className="w-full flex items-center justify-between"
-            >
-              <div className="flex items-center gap-2">
-                <Award className="w-5 h-5 text-yellow-400" />
-                <h4 className="font-semibold text-white">Your Certificates</h4>
-                <span className="px-2 py-0.5 text-xs bg-purple-500/20 text-purple-400 rounded-full">
-                  {certificates.length}
-                </span>
-              </div>
-              <ChevronRight className={`w-4 h-4 text-gray-400 transition-transform ${showCertificates ? 'rotate-90' : ''}`} />
-            </button>
-            
-            {showCertificates && (
-              <div className="mt-4 space-y-2">
-                {certificates.map((cert) => (
-                  <div key=cert.id className="flex items-center justify-between p-3 bg-gray-800/30 rounded-lg">
-                    <div>
-                      <p className="text-white font-medium">{cert.courseTitle}</p>
-                      <p className="text-xs text-gray-500">Issued: {new Date(cert.issuedAt).toLocaleDateString()}</p>
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => downloadCertificate(cert.id)}
-                        className="px-2 py-1 text-xs bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 rounded transition-colors"
-                      >
-                        Download
-                      </button>
-                      <button
-                        onClick={() => printCertificate(cert.id)}
-                        className="px-2 py-1 text-xs bg-purple-600/20 hover:bg-purple-600/30 text-purple-400 rounded transition-colors"
-                      >
-                        Print
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </GlowCard>
-      )}
     </div>
   );
 }

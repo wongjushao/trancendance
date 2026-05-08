@@ -2214,7 +2214,7 @@ export default function SettingsPage() {
         onClose={() => setShowDeleteAccount(false)}
         onConfirm={handleDeleteAccount}
         title="Delete your account?"
-        message="This action cannot be undone. All your data, courses, and certificates will be permanently deleted."
+        message="This action cannot be undone. All your data and courses will be permanently deleted."
         danger={true}
       />
 

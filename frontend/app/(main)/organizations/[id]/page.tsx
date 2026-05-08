@@ -3,10 +3,12 @@
 import { useState, useEffect } from "react";
 import { use } from "react";
 import Link from "next/link";
-import { Users, BookOpen, Settings, UserPlus, Crown, Home, Loader2 } from "lucide-react";
+import { Users, BookOpen, Crown, Loader2, Calendar, Award, TrendingUp, MapPin, Mail, Globe } from "lucide-react";
 import { GlowCard, StatCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
 import { useRole } from "@/components/providers/RoleProvider";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 import { toast } from "sonner";
@@ -19,6 +21,7 @@ interface Member {
   role: string;
   joinDate: string;
   courses: number;
+  avatar_url?: string;
 }
 
 interface Course {
@@ -26,35 +29,41 @@ interface Course {
   title: string;
   instructor: string;
   students: number;
+  thumbnail?: string;
+  level?: string;
+}
+
+interface OrganizationData {
+  id: number;
+  name: string;
+  description: string | null;
+  slug: string | null;
+  created_by: string;
+  created_at: string;
 }
 
 interface PageProps {
   params: Promise<{ id: string }>;
 }
 
-export default function OrganizationDetailPage({ params }: PageProps) {
+export default function OrganizationPublicPage({ params }: PageProps) {
   const { id } = use(params);
   const organizationId = parseInt(id);
   const supabase = getSupabaseBrowserClient();
   const { roleData } = useRole();
-  const isAdminOfThisOrg = (): boolean => {
-    return (roleData.role === 'admin' || roleData.role === 'sub_admin') && 
-          roleData.organizationId === organizationId;
-  };
   
   const [loading, setLoading] = useState(true);
-  const [orgName, setOrgName] = useState("");
-  const [orgLogo, setOrgLogo] = useState("🎓");
-  const [orgDescription, setOrgDescription] = useState("");
-  const [orgMembersCount, setOrgMembersCount] = useState(0);
-  const [orgCoursesCount, setOrgCoursesCount] = useState(0);
-  const [userRole, setUserRole] = useState("");
-  const [orgCreatedDate, setOrgCreatedDate] = useState("");
-  
+  const [organization, setOrganization] = useState<OrganizationData | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
-  
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [userRole, setUserRole] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [stats, setStats] = useState({
+    totalMembers: 0,
+    totalCourses: 0,
+    totalStudents: 0,
+    avgRating: 0,
+  });
 
   useEffect(() => {
     loadOrganizationData();
@@ -64,7 +73,9 @@ export default function OrganizationDetailPage({ params }: PageProps) {
     setLoading(true);
     
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    if (user) {
+      setCurrentUserId(user.id);
+    }
 
     try {
       // 1. Get organization details
@@ -80,28 +91,21 @@ export default function OrganizationDetailPage({ params }: PageProps) {
         return;
       }
 
-      setOrgName(org.name);
-      setOrgDescription(org.description || "No description provided");
-      setOrgLogo(org.name.charAt(0).toUpperCase());
-      setOrgCreatedDate(new Date(org.created_at).toLocaleDateString("en-US", { 
-        year: "numeric", 
-        month: "short", 
-        day: "numeric" 
-      }));
+      setOrganization(org);
 
-      // 2. Check user's role in this organization
-      const { data: memberRole } = await supabase
-        .from("organization_members")
-        .select("member_role")
-        .eq("organization_id", organizationId)
-        .eq("user_id", user.id)
-        .single();
+      // 2. Get user's role in this organization (if logged in)
+      if (user) {
+        const { data: memberRole } = await supabase
+          .from("organization_members")
+          .select("member_role")
+          .eq("organization_id", organizationId)
+          .eq("user_id", user.id)
+          .single();
 
-      const role = memberRole?.member_role || "Student";
-      setUserRole(role.charAt(0).toUpperCase() + role.slice(1));
-      setIsAdmin(role === "admin" || role === "sub_admin");
+        setUserRole(memberRole?.member_role || null);
+      }
 
-      // 3. Get organization members
+      // 3. Get organization members (limit to recent for public view)
       const { data: memberData } = await supabase
         .from("organization_members")
         .select(`
@@ -114,12 +118,12 @@ export default function OrganizationDetailPage({ params }: PageProps) {
             first_name,
             last_name,
             username,
-            email,
             avatar_url
           )
         `)
         .eq("organization_id", organizationId)
-        .eq("member_role", "active");
+        .order("created_at", { ascending: false })
+        .limit(12);
 
       // Get member course counts
       const formattedMembers: Member[] = await Promise.all((memberData || []).map(async (m: any) => {
@@ -141,48 +145,46 @@ export default function OrganizationDetailPage({ params }: PageProps) {
         
         const name = m.user?.first_name 
           ? `${m.user.first_name} ${m.user.last_name || ""}`.trim()
-          : m.user?.username || m.user?.email || "Unknown";
-        const avatar = m.user?.first_name?.[0] || m.user?.username?.[0] || "U";
+          : m.user?.username || "Member";
+        const avatarInitial = m.user?.first_name?.[0] || m.user?.username?.[0] || "U";
         
         return {
           id: m.id,
           user_id: m.user_id,
           name,
-          avatar: avatar.toUpperCase(),
-          role: m.member_role.charAt(0).toUpperCase() + m.member_role.slice(1),
+          avatar: avatarInitial.toUpperCase(),
+          avatar_url: m.user?.avatar_url,
+          role: m.member_role,
           joinDate: new Date(m.created_at).toISOString().split("T")[0],
           courses: courseCount,
         };
       }));
 
       setMembers(formattedMembers);
-      setOrgMembersCount(formattedMembers.length);
 
-      // 4. Get organization courses
+      // 4. Get published courses
       const { data: courseData } = await supabase
         .from("courses")
-        .select("*")
+        .select(`
+          *,
+          profiles:created_by (
+            first_name,
+            last_name,
+            username
+          )
+        `)
         .eq("organization_id", organizationId)
-        .eq("status", "published");
+        .eq("status", "published")
+        .order("created_at", { ascending: false })
+        .limit(6);
 
       // Get instructor names and student counts
       const formattedCourses: Course[] = await Promise.all((courseData || []).map(async (c: any) => {
-        let instructorName = "Unknown Instructor";
-        if (c.created_by) {
-          const { data: instructor } = await supabase
-            .from("profiles")
-            .select("first_name, last_name, username")
-            .eq("id", c.created_by)
-            .single();
-          
-          if (instructor) {
-            instructorName = instructor.first_name 
-              ? `${instructor.first_name} ${instructor.last_name || ""}`.trim()
-              : instructor.username || "Instructor";
-          }
-        }
+        const instructorName = c.profiles?.first_name 
+          ? `${c.profiles.first_name} ${c.profiles.last_name || ""}`.trim()
+          : c.profiles?.username || "Instructor";
 
-        // Get student count
+        // Get student count through course_classes
         const { data: courseClasses } = await supabase
           .from("course_classes")
           .select("id")
@@ -197,17 +199,57 @@ export default function OrganizationDetailPage({ params }: PageProps) {
             .in("course_class_id", classIds);
           studentCount = count || 0;
         }
+
+        // Get average rating
+        const { data: reviews } = await supabase
+          .from("course_reviews")
+          .select("rating")
+          .eq("course_id", c.id);
         
+        const avgRating = reviews?.length 
+          ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length 
+          : 0;
+
         return {
           id: c.id,
           title: c.title,
           instructor: instructorName,
           students: studentCount,
+          thumbnail: c.thumbnail,
+          level: c.level,
         };
       }));
 
       setCourses(formattedCourses);
-      setOrgCoursesCount(formattedCourses.length);
+
+      // 5. Calculate stats
+      const totalMembers = formattedMembers.length;
+      const totalCoursesCount = formattedCourses.length;
+      
+      // Get total students across all courses
+      const totalStudents = formattedCourses.reduce((sum, c) => sum + c.students, 0);
+      
+      // Get average rating across courses
+      let totalRating = 0;
+      let ratingCount = 0;
+      for (const course of courseData || []) {
+        const { data: reviews } = await supabase
+          .from("course_reviews")
+          .select("rating")
+          .eq("course_id", course.id);
+        if (reviews && reviews.length > 0) {
+          totalRating += reviews.reduce((sum, r) => sum + r.rating, 0);
+          ratingCount += reviews.length;
+        }
+      }
+      const avgRating = ratingCount > 0 ? totalRating / ratingCount : 0;
+
+      setStats({
+        totalMembers,
+        totalCourses: totalCoursesCount,
+        totalStudents,
+        avgRating,
+      });
 
     } catch (error) {
       console.error("Error loading organization:", error);
@@ -217,6 +259,21 @@ export default function OrganizationDetailPage({ params }: PageProps) {
     }
   };
 
+  const getRoleBadge = (role: string) => {
+    switch (role) {
+      case "admin":
+        return <Badge className="bg-purple-500/20 text-purple-400">Admin</Badge>;
+      case "sub_admin":
+        return <Badge className="bg-indigo-500/20 text-indigo-400">Sub-Admin</Badge>;
+      case "teacher":
+        return <Badge className="bg-blue-500/20 text-blue-400">Teacher</Badge>;
+      default:
+        return <Badge variant="secondary">Member</Badge>;
+    }
+  };
+
+  const isAdminOrTeacher = userRole === "admin" || userRole === "sub_admin" || userRole === "teacher";
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -225,51 +282,62 @@ export default function OrganizationDetailPage({ params }: PageProps) {
     );
   }
 
+  if (!organization) {
+    return (
+      <div className="text-center py-12">
+        <h1 className="text-2xl font-bold text-white mb-2">Organization Not Found</h1>
+        <Link href="/organizations" className="text-purple-400 hover:text-purple-300">
+          Back to Organizations
+        </Link>
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-8 pb-10">
+    <div className="space-y-8 pb-12">
       {/* Organization Header */}
       <GlowCard className="bg-white/[0.02]">
         <div className="flex flex-col md:flex-row items-center md:items-start gap-8">
           <div className="w-24 h-24 sm:w-32 sm:h-32 rounded-3xl bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center text-5xl sm:text-6xl shadow-2xl shadow-purple-500/20 shrink-0">
-            {orgLogo}
+            {organization.name.charAt(0).toUpperCase()}
           </div>
           
           <div className="flex-1 text-center md:text-left">
             <div className="flex flex-col md:flex-row items-center md:items-start justify-between gap-6 mb-6">
               <div>
                 <h1 className="text-3xl sm:text-4xl font-bold text-white mb-3 tracking-tight">
-                  {orgName}
+                  {organization.name}
                 </h1>
                 <p className="text-[#A0A0B5] max-w-xl mb-4 leading-relaxed">
-                  {orgDescription}
+                  {organization.description || "No description provided"}
                 </p>
-                <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-purple-500/10 border border-purple-500/20 rounded-full text-purple-400 text-sm font-medium">
-                  <div className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse" />
-                  Your role: {userRole}
-                </div>
+                {userRole && (
+                  <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-purple-500/10 border border-purple-500/20 rounded-full text-purple-400 text-sm font-medium">
+                    <div className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse" />
+                    Your role: {userRole}
+                  </div>
+                )}
               </div>
               
-              <div className="flex gap-3 shrink-0">
-                <GlowButton variant="primary" className="h-11">
-                  <UserPlus className="w-4 h-4" />
-                  Invite
-                </GlowButton>
-                <Link href={`/organizations/${organizationId}/admin`}>
-                  <GlowButton variant="secondary" className="px-3 h-11">
-                    <Settings className="w-4 h-4" />
+              {isAdminOrTeacher && (
+                <Link href={`/organizations/${organization.id}/admin`}>
+                  <GlowButton variant="secondary" className="px-4 h-11">
+                    <Crown className="w-4 h-4 mr-2" />
+                    Admin Settings
                   </GlowButton>
                 </Link>
-              </div>
+              )}
             </div>
           </div>
         </div>
       </GlowCard>
       
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-        <StatCard icon={Users} label="Total Members" value={orgMembersCount.toLocaleString()} />
-        <StatCard icon={BookOpen} label="Active Courses" value={orgCoursesCount.toString()} />
-        <StatCard icon={Crown} label="Active Since" value={orgCreatedDate} />
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <StatCard icon={Users} label="Total Members" value={stats.totalMembers.toLocaleString()} />
+        <StatCard icon={BookOpen} label="Active Courses" value={stats.totalCourses.toString()} />
+        <StatCard icon={Award} label="Total Students" value={stats.totalStudents.toLocaleString()} />
+        <StatCard icon={Star} label="Avg. Rating" value={stats.avgRating.toFixed(1)} />
       </div>
       
       {/* Content Tabs */}
@@ -280,59 +348,51 @@ export default function OrganizationDetailPage({ params }: PageProps) {
             className="rounded-xl px-6 py-2.5 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-500 data-[state=active]:to-violet-600 data-[state=active]:text-white transition-all"
           >
             <Users className="w-4 h-4 mr-2" />
-            Members
+            Members ({stats.totalMembers})
           </TabsTrigger>
           <TabsTrigger 
             value="courses" 
             className="rounded-xl px-6 py-2.5 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-500 data-[state=active]:to-violet-600 data-[state=active]:text-white transition-all"
           >
             <BookOpen className="w-4 h-4 mr-2" />
-            Courses
-          </TabsTrigger>
-          <TabsTrigger 
-            value="settings" 
-            className="rounded-xl px-6 py-2.5 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-500 data-[state=active]:to-violet-600 data-[state=active]:text-white transition-all"
-          >
-            <Settings className="w-4 h-4 mr-2" />
-            Settings
+            Courses ({stats.totalCourses})
           </TabsTrigger>
         </TabsList>
         
-        {/* Members Tab */}
+        {/* Members Tab - Read-only view */}
         <TabsContent value="members" className="outline-none focus:ring-0">
           <GlowCard className="border-white/5">
             <div className="flex items-center justify-between mb-8">
-              <h2 className="text-2xl font-bold text-white tracking-tight">Community</h2>
+              <h2 className="text-2xl font-bold text-white tracking-tight">Community Members</h2>
               <span className="text-sm text-[#6B6B80] bg-white/5 px-3 py-1 rounded-lg">
                 {members.length} members
               </span>
             </div>
             
-            <div className="grid grid-cols-1 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {members.length === 0 ? (
-                <div className="text-center py-12">
+                <div className="col-span-full text-center py-12">
                   <Users className="w-12 h-12 text-gray-600 mx-auto mb-3" />
-                  <p className="text-gray-400">No members found</p>
+                  <p className="text-gray-400">No members yet</p>
                 </div>
               ) : (
                 members.map((member) => (
-                  <div key={member.id} className="flex items-center justify-between p-5 bg-white/[0.01] border border-white/5 rounded-2xl hover:bg-white/[0.03] hover:border-white/10 transition-all group">
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-500/20 to-violet-600/20 border border-purple-500/30 flex items-center justify-center text-purple-400 font-bold group-hover:scale-105 transition-transform">
+                  <div key={member.id} className="flex items-center gap-4 p-4 bg-white/[0.01] border border-white/5 rounded-2xl hover:bg-white/[0.03] transition-all group">
+                    <Avatar className="w-12 h-12">
+                      <AvatarImage src={member.avatar_url || ""} />
+                      <AvatarFallback className="bg-gradient-to-br from-purple-500 to-violet-600 text-white font-bold">
                         {member.avatar}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-white font-semibold group-hover:text-purple-400 transition-colors truncate">
+                        {member.name}
+                      </p>
+                      <div className="flex items-center gap-2 mt-1">
+                        {getRoleBadge(member.role)}
+                        <span className="text-xs text-[#6B6B80]">{member.courses} courses</span>
                       </div>
-                      <div>
-                        <p className="text-white font-semibold group-hover:text-purple-400 transition-colors">{member.name}</p>
-                        <p className="text-[#6B6B80] text-xs">Joined {member.joinDate}</p>
-                      </div>
-                    </div>
-                    
-                    <div className="flex items-center gap-6">
-                      <div className="hidden sm:block text-right">
-                        <p className="text-white text-sm font-medium">{member.courses} courses</p>
-                        <p className="text-[#6B6B80] text-xs uppercase tracking-wider">{member.role}</p>
-                      </div>
-                      <GlowButton variant="ghost" className="text-xs">Profile</GlowButton>
+                      <p className="text-xs text-[#6B6B80] mt-1">Joined {member.joinDate}</p>
                     </div>
                   </div>
                 ))
@@ -341,88 +401,76 @@ export default function OrganizationDetailPage({ params }: PageProps) {
           </GlowCard>
         </TabsContent>
         
-        {/* Courses Tab */}
+        {/* Courses Tab - Read-only view */}
         <TabsContent value="courses" className="outline-none focus:ring-0">
           <GlowCard className="border-white/5">
-            <h2 className="text-2xl font-bold text-white mb-8 tracking-tight">Active Curriculum</h2>
-            <div className="grid grid-cols-1 gap-4">
-              {courses.length === 0 ? (
-                <div className="text-center py-12">
-                  <BookOpen className="w-12 h-12 text-gray-600 mx-auto mb-3" />
-                  <p className="text-gray-400">No published courses yet</p>
-                </div>
-              ) : (
-                courses.map((course) => (
-                  <div key={course.id} className="flex items-center justify-between p-5 bg-white/[0.01] border border-white/5 rounded-2xl hover:border-purple-500/30 transition-all group">
-                    <div>
-                      <p className="text-lg font-bold text-white mb-1 group-hover:text-purple-400 transition-colors">{course.title}</p>
-                      <p className="text-[#6B6B80] text-sm">Lead Instructor: <span className="text-[#A0A0B5]">{course.instructor}</span></p>
+            <h2 className="text-2xl font-bold text-white mb-8 tracking-tight">Available Courses</h2>
+            {courses.length === 0 ? (
+              <div className="text-center py-12">
+                <BookOpen className="w-12 h-12 text-gray-600 mx-auto mb-3" />
+                <p className="text-gray-400">No published courses yet</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {courses.map((course) => (
+                  <Link key={course.id} href={`/courses/${course.id}`} className="group">
+                    <div className="bg-white/[0.01] border border-white/5 rounded-2xl overflow-hidden hover:border-purple-500/30 transition-all hover:scale-[1.02]">
+                      <div className="aspect-video bg-gradient-to-br from-purple-500/20 to-violet-600/20 flex items-center justify-center">
+                        {course.thumbnail ? (
+                          <img src={course.thumbnail} alt={course.title} className="w-full h-full object-cover" />
+                        ) : (
+                          <BookOpen className="w-12 h-12 text-gray-500" />
+                        )}
+                      </div>
+                      <div className="p-5">
+                        <h3 className="text-lg font-bold text-white mb-2 group-hover:text-purple-400 transition-colors line-clamp-1">
+                          {course.title}
+                        </h3>
+                        <p className="text-sm text-gray-400 mb-3 line-clamp-2">{course.instructor}</p>
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-gray-400">{course.students} students</span>
+                          {course.level && (
+                            <Badge variant="secondary" className="text-xs">
+                              {course.level}
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-6">
-                      <span className="hidden sm:inline-block text-[#6B6B80] text-sm">{course.students} enrolled</span>
-                      <Link href={`/courses/${course.id}`}>
-                        <GlowButton variant="outline" className="text-xs">Course Details</GlowButton>
-                      </Link>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </GlowCard>
-        </TabsContent>
-
-        {/* Settings Tab */}
-        <TabsContent value="settings" className="outline-none focus:ring-0">
-          <GlowCard className="border-white/5">
-            <h2 className="text-2xl font-bold text-white mb-8 tracking-tight">Organization Identity</h2>
-            <div className="space-y-6 max-w-2xl">
-              
-              {isAdminOfThisOrg() ? (
-                // Editable version for admins of this org
-                <>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-[#A0A0B5] ml-1">Official Name</label>
-                    <input
-                      type="text"
-                      defaultValue={orgName}
-                      className="w-full px-5 py-3.5 bg-[#12121A] border border-white/10 rounded-2xl text-white focus:border-purple-500/50 outline-none transition-all"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-[#A0A0B5] ml-1">About the Institution</label>
-                    <textarea
-                      defaultValue={orgDescription}
-                      rows={4}
-                      className="w-full px-5 py-3.5 bg-[#12121A] border border-white/10 rounded-2xl text-white focus:border-purple-500/50 outline-none transition-all resize-none"
-                    />
-                  </div>
-                  <div className="pt-4 flex gap-4">
-                    <GlowButton variant="primary">Save Identity</GlowButton>
-                  </div>
-                </>
-              ) : (
-                // Read-only version for non-admins
-                <>
-                  <div>
-                    <label className="text-sm font-medium text-[#A0A0B5] block mb-1">Organization Name</label>
-                    <p className="text-white px-5 py-3.5 bg-[#12121A] border border-white/5 rounded-2xl">{orgName}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-[#A0A0B5] block mb-1">Description</label>
-                    <p className="text-gray-400 px-5 py-3.5 bg-[#12121A] border border-white/5 rounded-2xl whitespace-pre-wrap">
-                      {orgDescription}
-                    </p>
-                  </div>
-                  <div className="pt-4 text-sm text-gray-500">
-                    Only organization admins can edit these settings.
-                  </div>
-                </>
-              )}
-              
-            </div>
+                  </Link>
+                ))}
+              </div>
+            )}
+            {courses.length === 6 && (
+              <div className="mt-6 text-center">
+                <Link href={`/organizations/${organization.id}/courses`}>
+                  <GlowButton variant="outline">View All Courses →</GlowButton>
+                </Link>
+              </div>
+            )}
           </GlowCard>
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+// Missing Star icon import
+function Star(props: any) {
+  return (
+    <svg
+      {...props}
+      xmlns="http://www.w3.org/2000/svg"
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+    </svg>
   );
 }

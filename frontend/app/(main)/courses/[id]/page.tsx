@@ -3,13 +3,20 @@
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { Play, FileText, Users, MessageSquare, BookOpen, Clock, Star, Award, CheckCircle, Loader2, ArrowLeft } from "lucide-react";
+import { 
+  Play, FileText, Users, MessageSquare, BookOpen, Clock, Star, 
+  Award, CheckCircle, Loader2, ArrowLeft, Eye, Shield, 
+  Target, Sparkles, Heart, ThumbsUp, Quote, ChevronRight, 
+  GraduationCap, Calendar, TrendingUp, StarHalf, Send, X 
+} from "lucide-react";
 import { GlowCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Progress } from "@/components/ui/progress";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 import { toast } from "sonner";
 
@@ -20,6 +27,7 @@ interface CourseData {
   instructor_id: string;
   instructor_name: string;
   instructor_avatar: string | null;
+  instructor_bio?: string | null;
   thumbnail: string | null;
   level: string;
   category: string;
@@ -33,6 +41,9 @@ interface CourseData {
   status: string;
   organization_id: number;
   organization_name: string;
+  learning_objectives?: string[];
+  prerequisites?: string[];
+  tags?: string[];
 }
 
 interface Module {
@@ -76,6 +87,32 @@ interface Student {
   progress: number;
 }
 
+interface Review {
+  id: number;
+  rating: number;
+  review: string | null;
+  created_at: string;
+  user: {
+    id: string;
+    first_name: string;
+    last_name: string;
+    username: string;
+    avatar_url: string | null;
+  };
+}
+
+interface ReviewStats {
+  average: number;
+  total: number;
+  distribution: {
+    1: number;
+    2: number;
+    3: number;
+    4: number;
+    5: number;
+  };
+}
+
 export default function CourseDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -90,6 +127,21 @@ export default function CourseDetailPage() {
   const [enrolling, setEnrolling] = useState(false);
   const [classMemberId, setClassMemberId] = useState<number | null>(null);
   const [courseClassId, setCourseClassId] = useState<number | null>(null);
+  
+  // Review state
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [reviewStats, setReviewStats] = useState<ReviewStats>({
+    average: 0,
+    total: 0,
+    distribution: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+  });
+  const [userReview, setUserReview] = useState<Review | null>(null);
+  const [showReviewModal, setShowReviewModal] = useState(false);
+  const [ratingValue, setRatingValue] = useState(0);
+  const [hoverRating, setHoverRating] = useState(0);
+  const [reviewText, setReviewText] = useState("");
+  const [submittingReview, setSubmittingReview] = useState(false);
+  const [activeTab, setActiveTab] = useState("overview");
 
   useEffect(() => {
     loadCourseData();
@@ -115,7 +167,9 @@ export default function CourseDetailPage() {
             first_name,
             last_name,
             username,
-            avatar_url
+            avatar_url,
+            bio,
+            job_title
           )
         `)
         .eq("id", courseId)
@@ -123,6 +177,23 @@ export default function CourseDetailPage() {
 
       if (courseError) throw courseError;
       if (!courseData) throw new Error("Course not found");
+
+      // Get instructor bio
+      const instructorBio = courseData.created_by_profile?.bio;
+      const instructorJobTitle = courseData.created_by_profile?.job_title;
+
+      // Parse JSON fields
+      let learningObjectives: string[] = [];
+      let prerequisites: string[] = [];
+      let tags: string[] = [];
+
+      try {
+        learningObjectives = courseData.learning_objectives || [];
+        prerequisites = courseData.prerequisites || [];
+        tags = courseData.tags || [];
+      } catch (e) {
+        console.error("Error parsing JSON fields:", e);
+      }
 
       // Calculate total duration from lessons
       let totalDurationSeconds = 0;
@@ -156,7 +227,6 @@ export default function CourseDetailPage() {
       let userProgressMap = new Map<number, { status: string; progress_percent: number }>();
 
       if (user) {
-        // Get user's class member for this course (find any offering)
         const { data: classMember } = await supabase
           .from("class_members")
           .select(`
@@ -186,7 +256,6 @@ export default function CourseDetailPage() {
           setClassMemberId(classMember.id);
           setCourseClassId(classMember.course_class_id);
           
-          // Build progress map
           classMember.lesson_progress?.forEach((progress: any) => {
             userProgressMap.set(progress.lesson_id, {
               status: progress.status,
@@ -245,18 +314,59 @@ export default function CourseDetailPage() {
       // Get enrollment status
       const isEnrolled = userClassMemberId !== null;
 
-      // 3. Get course reviews stats
+      // 3. Load reviews and stats
       const { data: reviewsData } = await supabase
         .from("course_reviews")
-        .select("rating")
-        .eq("course_id", courseId);
+        .select(`
+          *,
+          user:user_id (
+            id,
+            first_name,
+            last_name,
+            username,
+            avatar_url
+          )
+        `)
+        .eq("course_id", courseId)
+        .order("created_at", { ascending: false });
 
-      const averageRating = reviewsData?.length 
-        ? reviewsData.reduce((sum, r) => sum + r.rating, 0) / reviewsData.length 
+      const allReviews: Review[] = (reviewsData || []).map(r => ({
+        id: r.id,
+        rating: r.rating,
+        review: r.review,
+        created_at: r.created_at,
+        user: r.user,
+      }));
+
+      setReviews(allReviews.slice(0, 5));
+
+      // Calculate stats
+      const avgRating = allReviews.length > 0
+        ? allReviews.reduce((sum, r) => sum + r.rating, 0) / allReviews.length
         : 0;
-      const reviewsCount = reviewsData?.length || 0;
+      
+      const distribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+      allReviews.forEach(r => {
+        distribution[r.rating as keyof typeof distribution]++;
+      });
 
-      // 4. Get student count
+      setReviewStats({
+        average: avgRating,
+        total: allReviews.length,
+        distribution,
+      });
+
+      // Check if user has reviewed
+      if (user) {
+        const userExistingReview = allReviews.find(r => r.user.id === user.id);
+        if (userExistingReview) {
+          setUserReview(userExistingReview);
+          setRatingValue(userExistingReview.rating);
+          setReviewText(userExistingReview.review || "");
+        }
+      }
+
+      // 4. Get student count (using existing query)
       const { count: studentCount } = await supabase
         .from("class_members")
         .select("id", { count: "exact", head: true })
@@ -268,7 +378,7 @@ export default function CourseDetailPage() {
         : courseData.created_by_profile?.username || "Unknown Instructor";
       const instructorAvatar = courseData.created_by_profile?.avatar_url;
 
-      // 6. Get assignments for this course with submissions
+      // 6. Get assignments
       let userAssignments: Assignment[] = [];
       if (user && isEnrolled) {
         const { data: assignmentsData } = await supabase
@@ -348,8 +458,8 @@ export default function CourseDetailPage() {
             const completedLessons = member.user?.lesson_progress?.filter(
               (p: any) => p.status === "completed"
             ).length || 0;
-            const totalLessons = totalLessons;
-            const progress = totalLessons > 0 ? (completedLessons / totalLessons) * 100 : 0;
+            const totalLessonsCount = totalLessons;
+            const progress = totalLessonsCount > 0 ? (completedLessons / totalLessonsCount) * 100 : 0;
 
             return {
               id: member.user_id,
@@ -371,12 +481,13 @@ export default function CourseDetailPage() {
         instructor_id: courseData.created_by,
         instructor_name: instructorName,
         instructor_avatar: instructorAvatar,
+        instructor_bio: instructorBio || instructorJobTitle || null,
         thumbnail: courseData.thumbnail,
         level: courseData.level,
         category: courseData.category,
         students_count: studentCount || 0,
-        rating: averageRating,
-        reviews_count: reviewsCount,
+        rating: avgRating,
+        reviews_count: allReviews.length,
         duration: durationString,
         enrolled: isEnrolled,
         progress: Math.round(progressPercent),
@@ -384,6 +495,9 @@ export default function CourseDetailPage() {
         status: courseData.status,
         organization_id: courseData.organization_id,
         organization_name: courseData.organization?.name || "",
+        learning_objectives: learningObjectives,
+        prerequisites,
+        tags,
       });
 
       setModules(formattedModules);
@@ -409,7 +523,6 @@ export default function CourseDetailPage() {
     setEnrolling(true);
 
     try {
-      // Find an available course offering
       const { data: courseClass } = await supabase
         .from("course_classes")
         .select("id, max_students")
@@ -424,7 +537,6 @@ export default function CourseDetailPage() {
         return;
       }
 
-      // Check capacity
       const { count: currentStudents } = await supabase
         .from("class_members")
         .select("id", { count: "exact", head: true })
@@ -435,7 +547,6 @@ export default function CourseDetailPage() {
         return;
       }
 
-      // Enroll student
       const { error: enrollError } = await supabase
         .from("class_members")
         .insert({
@@ -447,8 +558,6 @@ export default function CourseDetailPage() {
       if (enrollError) throw enrollError;
 
       toast.success("Successfully enrolled in course!");
-      
-      // Reload course data to reflect enrollment
       await loadCourseData();
 
     } catch (error) {
@@ -460,20 +569,110 @@ export default function CourseDetailPage() {
   };
 
   const handleContinueLearning = () => {
-    // Find first incomplete lesson
     for (const module of modules) {
       for (const classItem of module.classes) {
         const incompleteLesson = classItem.lessons.find(l => !l.is_completed);
         if (incompleteLesson) {
-          router.push(`/courses/${courseId}/learn/lesson/${incompleteLesson.id}`);
+          router.push(`/courses/${courseId}/learn`);
           return;
         }
       }
     }
-    // If all completed, go to first lesson
     if (modules[0]?.classes[0]?.lessons[0]) {
-      router.push(`/courses/${courseId}/learn/lesson/${modules[0].classes[0].lessons[0].id}`);
+      router.push(`/courses/${courseId}/learn`);
     }
+  };
+
+  const handleSubmitReview = async () => {
+    if (ratingValue === 0) {
+      toast.error("Please select a rating");
+      return;
+    }
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      toast.error("Please login to leave a review");
+      router.push("/login");
+      return;
+    }
+
+    if (!course?.enrolled) {
+      toast.error("You must be enrolled in this course to leave a review");
+      return;
+    }
+
+    setSubmittingReview(true);
+
+    try {
+      if (userReview) {
+        // Update existing review
+        const { error } = await supabase
+          .from("course_reviews")
+          .update({
+            rating: ratingValue,
+            review: reviewText.trim() || null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", userReview.id);
+
+        if (error) throw error;
+        toast.success("Review updated successfully!");
+      } else {
+        // Create new review
+        const { error } = await supabase
+          .from("course_reviews")
+          .insert({
+            course_id: courseId,
+            user_id: user.id,
+            rating: ratingValue,
+            review: reviewText.trim() || null,
+          });
+
+        if (error) throw error;
+        toast.success("Review submitted successfully! Thank you for your feedback.");
+      }
+
+      setShowReviewModal(false);
+      await loadCourseData();
+
+    } catch (error) {
+      console.error("Error submitting review:", error);
+      toast.error("Failed to submit review. Please try again.");
+    } finally {
+      setSubmittingReview(false);
+    }
+  };
+
+  const renderStars = (rating: number, size: "sm" | "md" | "lg" = "md") => {
+    const sizes = { sm: "w-3 h-3", md: "w-4 h-4", lg: "w-5 h-5" };
+    const sizeClass = sizes[size];
+    
+    return (
+      <div className="flex items-center gap-0.5">
+        {[1, 2, 3, 4, 5].map((star) => (
+          <Star
+            key={star}
+            className={`${sizeClass} ${
+              star <= rating
+                ? "text-yellow-400 fill-yellow-400"
+                : "text-gray-600"
+            }`}
+          />
+        ))}
+      </div>
+    );
+  };
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  };
+
+  const getInitials = (name: string) => {
+    return name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
   };
 
   const formatDuration = (seconds: number | null) => {
@@ -483,8 +682,9 @@ export default function CourseDetailPage() {
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
-  const getInitials = (name: string) => {
-    return name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
+  // Calculate rating distribution percentages
+  const getPercentage = (count: number) => {
+    return reviewStats.total > 0 ? (count / reviewStats.total) * 100 : 0;
   };
 
   if (loading) {
@@ -523,9 +723,9 @@ export default function CourseDetailPage() {
         </div>
         
         <div className="relative p-8">
-          <div className="flex items-start justify-between mb-6">
+          <div className="flex items-start justify-between mb-6 flex-wrap gap-4">
             <div className="flex-1">
-              <div className="flex items-center gap-3 mb-4">
+              <div className="flex flex-wrap items-center gap-3 mb-4">
                 <Badge className="bg-purple-500/20 text-purple-400 border-0">
                   {course.level}
                 </Badge>
@@ -537,6 +737,11 @@ export default function CourseDetailPage() {
                     Published
                   </Badge>
                 )}
+                {course.tags?.slice(0, 3).map((tag) => (
+                  <Badge key={tag} variant="secondary" className="text-xs">
+                    {tag}
+                  </Badge>
+                ))}
               </div>
               <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">{course.title}</h1>
               <p className="text-lg md:text-xl text-gray-400 mb-6 max-w-3xl">{course.description}</p>
@@ -557,8 +762,8 @@ export default function CourseDetailPage() {
                 
                 {course.rating > 0 && (
                   <div className="flex items-center gap-1">
-                    <Star className="w-5 h-5 fill-yellow-500 text-yellow-500" />
-                    <span className="text-white font-medium">{course.rating.toFixed(1)}</span>
+                    {renderStars(Math.round(course.rating), "sm")}
+                    <span className="text-white font-medium ml-1">{course.rating.toFixed(1)}</span>
                     <span>({course.reviews_count} reviews)</span>
                   </div>
                 )}
@@ -592,14 +797,22 @@ export default function CourseDetailPage() {
             
             <div className="flex gap-3">
               {!course.enrolled ? (
-                <GlowButton 
-                  variant="primary" 
-                  className="text-lg px-8"
-                  onClick={handleEnroll}
-                  isLoading={enrolling}
-                >
-                  Enroll Now
-                </GlowButton>
+                <>
+                  <GlowButton 
+                    variant="primary" 
+                    className="text-lg px-8"
+                    onClick={handleEnroll}
+                    isLoading={enrolling}
+                  >
+                    Enroll Now
+                  </GlowButton>
+                  <Link href={`/courses/${courseId}/preview`}>
+                    <GlowButton variant="outline">
+                      <Eye className="w-4 h-4 mr-2" />
+                      Preview Course
+                    </GlowButton>
+                  </Link>
+                </>
               ) : (
                 <>
                   <GlowButton variant="primary" onClick={handleContinueLearning}>
@@ -607,12 +820,10 @@ export default function CourseDetailPage() {
                     Continue Learning
                   </GlowButton>
                   {course.progress === 100 && (
-                    <Link href={`/certificates/generate?courseId=${course.id}`}>
-                      <GlowButton variant="secondary">
-                        <Award className="w-5 h-5 mr-2" />
-                        Get Certificate
-                      </GlowButton>
-                    </Link>
+                    <GlowButton variant="secondary">
+                      <Award className="w-5 h-5 mr-2" />
+                      Get Certificate
+                    </GlowButton>
                   )}
                 </>
               )}
@@ -621,16 +832,24 @@ export default function CourseDetailPage() {
         </div>
       </div>
       
-      {/* Course Content */}
-      <Tabs defaultValue="lessons" className="w-full">
-        <TabsList className="bg-gray-800/50 border border-gray-700 p-1 rounded-xl">
+      {/* Course Content Tabs - Updated to include Overview as default */}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="bg-gray-800/50 border border-gray-700 p-1 rounded-xl flex-wrap h-auto">
+          <TabsTrigger value="overview" className="rounded-lg">
+            <Target className="w-4 h-4 mr-2" />
+            Overview
+          </TabsTrigger>
           <TabsTrigger value="lessons" className="rounded-lg">
             <BookOpen className="w-4 h-4 mr-2" />
-            Lessons
+            Curriculum
           </TabsTrigger>
           <TabsTrigger value="assignments" className="rounded-lg">
             <FileText className="w-4 h-4 mr-2" />
-            Assignments
+            Assignments ({assignments.length})
+          </TabsTrigger>
+          <TabsTrigger value="reviews" className="rounded-lg">
+            <Star className="w-4 h-4 mr-2" />
+            Reviews ({course.reviews_count})
           </TabsTrigger>
           {course.instructor_id && students.length > 0 && (
             <TabsTrigger value="students" className="rounded-lg">
@@ -643,6 +862,120 @@ export default function CourseDetailPage() {
             Discussion
           </TabsTrigger>
         </TabsList>
+
+        {/* OVERVIEW TAB - New! Combines learning objectives, prerequisites, instructor bio */}
+        <TabsContent value="overview" className="mt-6 space-y-6">
+          {/* Learning Objectives */}
+          {course.learning_objectives && course.learning_objectives.length > 0 && (
+            <GlowCard>
+              <div className="p-6">
+                <div className="flex items-center gap-2 mb-4">
+                  <Target className="w-6 h-6 text-purple-400" />
+                  <h2 className="text-xl font-semibold text-white">What You'll Learn</h2>
+                </div>
+                <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {course.learning_objectives.map((objective, idx) => (
+                    <li key={idx} className="flex items-start gap-3 text-gray-300">
+                      <CheckCircle className="w-5 h-5 text-green-400 mt-0.5 flex-shrink-0" />
+                      <span>{objective}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </GlowCard>
+          )}
+
+          {/* Prerequisites */}
+          {course.prerequisites && course.prerequisites.length > 0 && (
+            <GlowCard>
+              <div className="p-6">
+                <div className="flex items-center gap-2 mb-4">
+                  <Shield className="w-6 h-6 text-yellow-400" />
+                  <h2 className="text-xl font-semibold text-white">Prerequisites</h2>
+                </div>
+                <ul className="space-y-2">
+                  {course.prerequisites.map((prerequisite, idx) => (
+                    <li key={idx} className="flex items-start gap-3 text-gray-300">
+                      <div className="w-1.5 h-1.5 rounded-full bg-yellow-400 mt-2" />
+                      <span>{prerequisite}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </GlowCard>
+          )}
+
+          {/* Course Features / Stats */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <GlowCard>
+              <div className="p-4 text-center">
+                <GraduationCap className="w-8 h-8 text-purple-400 mx-auto mb-2" />
+                <p className="text-2xl font-bold text-white">{modules.length}</p>
+                <p className="text-sm text-gray-400">Modules</p>
+              </div>
+            </GlowCard>
+            <GlowCard>
+              <div className="p-4 text-center">
+                <Clock className="w-8 h-8 text-purple-400 mx-auto mb-2" />
+                <p className="text-2xl font-bold text-white">{course.duration}</p>
+                <p className="text-sm text-gray-400">Total Duration</p>
+              </div>
+            </GlowCard>
+            <GlowCard>
+              <div className="p-4 text-center">
+                <Award className="w-8 h-8 text-purple-400 mx-auto mb-2" />
+                <p className="text-2xl font-bold text-white">Certificate</p>
+                <p className="text-sm text-gray-400">Upon Completion</p>
+              </div>
+            </GlowCard>
+          </div>
+
+          {/* Instructor Bio */}
+          {course.instructor_bio && (
+            <GlowCard>
+              <div className="p-6">
+                <div className="flex items-center gap-4 mb-4">
+                  <Avatar className="w-16 h-16">
+                    <AvatarImage src={course.instructor_avatar || ""} />
+                    <AvatarFallback className="bg-gradient-to-br from-purple-500 to-violet-600 text-white text-xl">
+                      {getInitials(course.instructor_name)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <h2 className="text-xl font-semibold text-white">{course.instructor_name}</h2>
+                    <p className="text-sm text-gray-400">Course Instructor</p>
+                  </div>
+                </div>
+                <p className="text-gray-300 leading-relaxed">{course.instructor_bio}</p>
+              </div>
+            </GlowCard>
+          )}
+
+          {/* What's Included section */}
+          <GlowCard>
+            <div className="p-6">
+              <h2 className="text-xl font-semibold text-white mb-4">What's Included</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="flex items-center gap-3 text-gray-300">
+                  <Play className="w-5 h-5 text-purple-400" />
+                  <span>{modules.reduce((sum, m) => sum + m.classes.reduce((s, c) => s + c.lessons.length, 0), 0)} on-demand lessons</span>
+                </div>
+                <div className="flex items-center gap-3 text-gray-300">
+                  <Award className="w-5 h-5 text-purple-400" />
+                  <span>Certificate of completion</span>
+                </div>
+                <div className="flex items-center gap-3 text-gray-300">
+                  <MessageSquare className="w-5 h-5 text-purple-400" />
+                  <span>Course discussion forum</span>
+                </div>
+                <div className="flex items-center gap-3 text-gray-300">
+                  <Clock className="w-5 h-5 text-purple-400" />
+                  <span>Full lifetime access</span>
+                </div>
+              </div>
+            </div>
+          </GlowCard>
+        </TabsContent>
         
         {/* Lessons Tab */}
         <TabsContent value="lessons" className="mt-6">
@@ -787,6 +1120,141 @@ export default function CourseDetailPage() {
             )}
           </div>
         </TabsContent>
+
+        {/* REVIEWS TAB - Enhanced with write review functionality */}
+        <TabsContent value="reviews" className="mt-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Rating Summary - Left Column */}
+            <div className="lg:col-span-1">
+              <GlowCard>
+                <div className="p-6 text-center">
+                  <div className="text-5xl font-bold text-white mb-2">
+                    {reviewStats.average.toFixed(1)}
+                  </div>
+                  <div className="flex justify-center mb-3">
+                    {renderStars(Math.round(reviewStats.average), "lg")}
+                  </div>
+                  <div className="text-gray-400 text-sm">
+                    Based on {reviewStats.total} {reviewStats.total === 1 ? "review" : "reviews"}
+                  </div>
+
+                  {/* Rating Distribution */}
+                  <div className="mt-6 space-y-2 text-left">
+                    {[5, 4, 3, 2, 1].map((star) => (
+                      <div key={star} className="flex items-center gap-2">
+                        <div className="w-12 text-sm text-gray-400">{star} stars</div>
+                        <div className="flex-1 h-2 bg-gray-700 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-yellow-400 rounded-full"
+                            style={{ width: `${getPercentage(reviewStats.distribution[star as keyof typeof reviewStats.distribution])}%` }}
+                          />
+                        </div>
+                        <div className="w-8 text-xs text-gray-400">
+                          {reviewStats.distribution[star as keyof typeof reviewStats.distribution]}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Write Review Button */}
+                  {course.enrolled && (
+                    <div className="mt-6">
+                      {userReview ? (
+                        <button
+                          onClick={() => {
+                            setRatingValue(userReview.rating);
+                            setReviewText(userReview.review || "");
+                            setShowReviewModal(true);
+                          }}
+                          className="w-full px-4 py-2 rounded-lg bg-purple-500/20 border border-purple-500/30 text-purple-400 hover:bg-purple-500/30 transition-colors"
+                        >
+                          Edit Your Review
+                        </button>
+                      ) : (
+                        <GlowButton
+                          variant="primary"
+                          fullWidth
+                          onClick={() => setShowReviewModal(true)}
+                        >
+                          <ThumbsUp className="w-4 h-4 mr-2" />
+                          Write a Review
+                        </GlowButton>
+                      )}
+                    </div>
+                  )}
+                  {!course.enrolled && (
+                    <div className="mt-6 p-3 bg-gray-800/30 rounded-lg text-center">
+                      <p className="text-sm text-gray-400">
+                        Enroll to leave a review
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </GlowCard>
+            </div>
+
+            {/* Reviews List - Right Column */}
+            <div className="lg:col-span-2">
+              <GlowCard>
+                <div className="p-6">
+                  <h3 className="text-lg font-semibold text-white mb-4">
+                    Student Reviews
+                  </h3>
+                  {reviews.length === 0 ? (
+                    <div className="text-center py-8">
+                      <MessageSquare className="w-12 h-12 text-gray-600 mx-auto mb-3" />
+                      <p className="text-gray-400">No reviews yet. Be the first to review!</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {reviews.map((review) => (
+                        <div key={review.id} className="border-b border-gray-800 pb-4 last:border-0">
+                          <div className="flex items-start justify-between">
+                            <div className="flex items-center gap-3">
+                              <Avatar className="w-10 h-10">
+                                <AvatarImage src={review.user.avatar_url || undefined} />
+                                <AvatarFallback className="bg-purple-600 text-white">
+                                  {getInitials(`${review.user.first_name} ${review.user.last_name}`)}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div>
+                                <p className="font-medium text-white">
+                                  {review.user.first_name} {review.user.last_name}
+                                </p>
+                                <div className="flex items-center gap-2 mt-1">
+                                  {renderStars(review.rating, "sm")}
+                                  <span className="text-xs text-gray-500">
+                                    {formatDate(review.created_at)}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                          {review.review && (
+                            <div className="mt-3 pl-13">
+                              <p className="text-gray-300 text-sm leading-relaxed">
+                                {review.review}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {course.reviews_count > 5 && (
+                    <div className="mt-4 text-center">
+                      <Link href={`/courses/${courseId}/reviews`}>
+                        <GlowButton variant="outline" size="sm">
+                          View All {course.reviews_count} Reviews
+                        </GlowButton>
+                      </Link>
+                    </div>
+                  )}
+                </div>
+              </GlowCard>
+            </div>
+          </div>
+        </TabsContent>
         
         {/* Students Tab */}
         <TabsContent value="students" className="mt-6">
@@ -853,6 +1321,90 @@ export default function CourseDetailPage() {
           </GlowCard>
         </TabsContent>
       </Tabs>
+
+      {/* Write Review Modal */}
+      {showReviewModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+          <div className="bg-gray-900 rounded-xl max-w-md w-full border border-gray-700 shadow-2xl">
+            <div className="flex justify-between items-center p-4 border-b border-gray-800">
+              <h3 className="text-xl font-semibold text-white">
+                {userReview ? "Edit Your Review" : "Write a Review"}
+              </h3>
+              <button
+                onClick={() => setShowReviewModal(false)}
+                className="p-1 rounded-lg hover:bg-gray-800 transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-400" />
+              </button>
+            </div>
+            
+            <div className="p-6 space-y-4">
+              {/* Star Rating */}
+              <div>
+                <Label className="text-gray-300 mb-2 block">Your Rating</Label>
+                <div className="flex gap-2">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <button
+                      key={star}
+                      onMouseEnter={() => setHoverRating(star)}
+                      onMouseLeave={() => setHoverRating(0)}
+                      onClick={() => setRatingValue(star)}
+                      className="focus:outline-none transition-transform hover:scale-110"
+                    >
+                      <Star
+                        className={`w-8 h-8 ${
+                          star <= (hoverRating || ratingValue)
+                            ? "text-yellow-400 fill-yellow-400"
+                            : "text-gray-600"
+                        }`}
+                      />
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  {ratingValue > 0 && `${ratingValue} ${ratingValue === 1 ? "star" : "stars"}`}
+                </p>
+              </div>
+
+              {/* Review Text */}
+              <div>
+                <Label htmlFor="review" className="text-gray-300 mb-2 block">
+                  Your Review (Optional)
+                </Label>
+                <Textarea
+                  id="review"
+                  value={reviewText}
+                  onChange={(e) => setReviewText(e.target.value)}
+                  placeholder="Share your experience with this course. What did you like? What could be improved?"
+                  rows={5}
+                  className="bg-gray-800 border-gray-700 resize-none"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  {reviewText.length}/2000 characters
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-3 p-4 border-t border-gray-800">
+              <GlowButton
+                variant="outline"
+                onClick={() => setShowReviewModal(false)}
+                fullWidth
+              >
+                Cancel
+              </GlowButton>
+              <GlowButton
+                onClick={handleSubmitReview}
+                isLoading={submittingReview}
+                fullWidth
+              >
+                <Send className="w-4 h-4 mr-2" />
+                {userReview ? "Update Review" : "Submit Review"}
+              </GlowButton>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

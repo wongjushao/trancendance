@@ -1,4 +1,3 @@
-// frontend/app/(main)/courses/[id]/reviews/create/page.tsx
 "use client";
 
 import { useState, useEffect } from "react";
@@ -10,20 +9,25 @@ import {
   Send,
   AlertCircle,
   Loader2,
+  Crown,
+  Shield,
 } from "lucide-react";
 import { GlowCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
-import { isEnrolled } from "@/lib/supabase/enrollment";
+import { useRole } from "@/components/providers/RoleProvider";
 
 export default function CreateReviewPage() {
   const params = useParams();
   const router = useRouter();
   const courseId = parseInt(params.id as string);
-  
+  const supabase = getSupabaseBrowserClient();
+  const { roleData } = useRole();
+
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [course, setCourse] = useState<any>(null);
@@ -31,61 +35,121 @@ export default function CreateReviewPage() {
   const [hoverRating, setHoverRating] = useState(0);
   const [review, setReview] = useState("");
   const [error, setError] = useState("");
-  
+  const [canReview, setCanReview] = useState(false);
+  const [isCourseInstructor, setIsCourseInstructor] = useState(false);
+  const [userRole, setUserRole] = useState<string | null>(null);
+  const [blockReason, setBlockReason] = useState<string | null>(null);
+
   useEffect(() => {
-    const checkAccess = async () => {
-      try {
-        setLoading(true);
-        const supabase = getSupabaseBrowserClient();
-        
-        // Get current user
-        const { data: { user } } = await supabase.auth.getUser();
-        
-        if (!user) {
-          router.push("/login");
-          return;
-        }
-        
-        // Get course details
-        const { data: courseData } = await supabase
-          .from("courses")
-          .select("id, title")
-          .eq("id", courseId)
-          .single();
-        setCourse(courseData);
-        
-        // Check if enrolled
-        const isEnrolledFlag = await isEnrolled(courseId, user.id);
-        if (!isEnrolledFlag) {
-          toast.error("You must be enrolled in this course to leave a review");
-          router.push(`/courses/${courseId}`);
-          return;
-        }
-        
-        // Check if already reviewed
-        const { data: existingReview } = await supabase
-          .from("course_reviews")
+    checkAccess();
+  }, [courseId]);
+
+  const checkAccess = async () => {
+    try {
+      setLoading(true);
+      
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        router.push("/login");
+        return;
+      }
+      
+      // Get course details
+      const { data: courseData } = await supabase
+        .from("courses")
+        .select("id, title, created_by, organization_id")
+        .eq("id", courseId)
+        .single();
+      setCourse(courseData);
+      
+      // Check if user is the course instructor/creator
+      const isInstructor = courseData.created_by === user.id;
+      setIsCourseInstructor(isInstructor);
+      
+      // Check user's role in the organization
+      const { data: orgMembership } = await supabase
+        .from("organization_members")
+        .select("member_role")
+        .eq("organization_id", courseData.organization_id)
+        .eq("user_id", user.id)
+        .single();
+      
+      const orgRole = orgMembership?.member_role || null;
+      setUserRole(orgRole);
+      
+      // Check if already reviewed
+      const { data: existingReview } = await supabase
+        .from("course_reviews")
+        .select("id")
+        .eq("course_id", courseId)
+        .eq("user_id", user.id)
+        .single();
+      
+      if (existingReview) {
+        setBlockReason("You have already reviewed this course");
+        setCanReview(false);
+        setLoading(false);
+        return;
+      }
+      
+      // Check if enrolled as STUDENT (not as instructor/teacher)
+      const { data: classMembers } = await supabase
+        .from("class_members")
+        .select(`
+          id,
+          role,
+          course_classes!inner (
+            course_id
+          )
+        `)
+        .eq("user_id", user.id)
+        .eq("course_classes.course_id", courseId)
+        .eq("role", "student");
+      
+      const isEnrolledAsStudent = (classMembers?.length || 0) > 0;
+      
+      // Determine if user can review
+      if (isInstructor) {
+        setBlockReason("Course instructors cannot review their own courses");
+        setCanReview(false);
+      } else if (orgRole === "teacher") {
+        // Check if this teacher is associated with this course
+        const { data: teacherCourses } = await supabase
+          .from("course_classes")
           .select("id")
           .eq("course_id", courseId)
-          .eq("user_id", user.id)
-          .single();
+          .eq("instructor_id", user.id);
         
-        if (existingReview) {
-          toast.error("You have already reviewed this course");
-          router.push(`/courses/${courseId}/reviews`);
-          return;
+        const isTeacherForCourse = (teacherCourses?.length || 0) > 0;
+        
+        if (isTeacherForCourse) {
+          setBlockReason("Teachers cannot review courses they are assigned to");
+          setCanReview(false);
+        } else if (!isEnrolledAsStudent) {
+          setBlockReason("You must be enrolled as a student to review this course");
+          setCanReview(false);
+        } else {
+          setCanReview(true);
+          setBlockReason(null);
         }
-        
-      } catch (error) {
-        console.error("Error checking access:", error);
-        toast.error("Failed to verify access");
-      } finally {
-        setLoading(false);
+      } else if (!isEnrolledAsStudent) {
+        setBlockReason("You must be enrolled in this course to leave a review");
+        setCanReview(false);
+      } else {
+        setCanReview(true);
+        setBlockReason(null);
       }
-    };
-    
-    checkAccess();
-  }, [courseId, router]);
+      
+    } catch (error) {
+      console.error("Error checking access:", error);
+      toast.error("Failed to verify access");
+      setCanReview(false);
+    } finally {
+      setLoading(false);
+    }
+  };
   
   const handleSubmit = async () => {
     if (rating === 0) {
@@ -93,15 +157,36 @@ export default function CreateReviewPage() {
       return;
     }
     
+    if (!canReview) {
+      setError(blockReason || "You are not eligible to review this course");
+      return;
+    }
+    
     setSubmitting(true);
     setError("");
     
     try {
-      const supabase = getSupabaseBrowserClient();
       const { data: { user } } = await supabase.auth.getUser();
       
       if (!user) {
         router.push("/login");
+        return;
+      }
+      
+      // Double-check eligibility before submitting
+      const { data: classMembers } = await supabase
+        .from("class_members")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("course_classes.course_id", courseId)
+        .eq("role", "student");
+      
+      const isStillEnrolled = (classMembers?.length || 0) > 0;
+      
+      if (!isStillEnrolled) {
+        setError("You are no longer enrolled in this course");
+        setCanReview(false);
+        setSubmitting(false);
         return;
       }
       
@@ -155,10 +240,75 @@ export default function CreateReviewPage() {
     );
   };
   
+  const getUserRoleBadge = () => {
+    if (isCourseInstructor) {
+      return (
+        <Badge className="bg-purple-500/20 text-purple-400">
+          <Crown className="w-3 h-3 mr-1" />
+          Instructor
+        </Badge>
+      );
+    }
+    if (userRole === "teacher") {
+      return (
+        <Badge className="bg-blue-500/20 text-blue-400">
+          <Shield className="w-3 h-3 mr-1" />
+          Teacher
+        </Badge>
+      );
+    }
+    return null;
+  };
+  
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-purple-500" />
+      </div>
+    );
+  }
+  
+  // Show blocking message if user cannot review
+  if (!canReview && blockReason) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 py-8 px-4">
+        <div className="max-w-3xl mx-auto">
+          <div className="flex items-center gap-4 mb-8">
+            <Link href={`/courses/${courseId}/reviews`}>
+              <GlowButton variant="ghost" size="sm">
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                Back to Reviews
+              </GlowButton>
+            </Link>
+            <div>
+              <h1 className="text-3xl font-bold text-white">Cannot Write Review</h1>
+              <p className="text-gray-400 mt-1">{course?.title}</p>
+            </div>
+            {getUserRoleBadge()}
+          </div>
+          
+          <GlowCard>
+            <div className="p-8 text-center">
+              <div className="w-20 h-20 rounded-full bg-yellow-500/20 flex items-center justify-center mx-auto mb-4">
+                <AlertCircle className="w-10 h-10 text-yellow-400" />
+              </div>
+              <h2 className="text-xl font-semibold text-white mb-2">Review Not Available</h2>
+              <p className="text-gray-400 mb-4">{blockReason}</p>
+              <div className="flex gap-3 justify-center">
+                <Link href={`/courses/${courseId}/reviews`}>
+                  <GlowButton variant="primary">
+                    Back to Reviews
+                  </GlowButton>
+                </Link>
+                <Link href={`/courses/${courseId}`}>
+                  <GlowButton variant="outline">
+                    View Course
+                  </GlowButton>
+                </Link>
+              </div>
+            </div>
+          </GlowCard>
+        </div>
       </div>
     );
   }
@@ -174,10 +324,11 @@ export default function CreateReviewPage() {
               Back to Reviews
             </GlowButton>
           </Link>
-          <div>
+          <div className="flex-1">
             <h1 className="text-3xl font-bold text-white">Write a Review</h1>
             <p className="text-gray-400 mt-1">{course?.title}</p>
           </div>
+          {getUserRoleBadge()}
         </div>
         
         <GlowCard>
@@ -227,6 +378,7 @@ export default function CreateReviewPage() {
                 <li>• Focus on the course content, instructor, and learning experience</li>
                 <li>• Keep reviews constructive and respectful</li>
                 <li>• Avoid sharing personal information</li>
+                <li>• Reviews cannot be edited after submission</li>
               </ul>
             </div>
             

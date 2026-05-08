@@ -1,4 +1,3 @@
-// frontend/app/(main)/organizations/[id]/admin/page.tsx
 "use client";
 
 import { useState, useEffect } from "react";
@@ -8,13 +7,9 @@ import Link from "next/link";
 import { 
   Users, 
   UserPlus, 
-  Clock, 
   Settings, 
-  CheckCircle, 
-  XCircle,
   Mail,
   Shield,
-  MoreVertical,
   BarChart3,
   BookOpen,
   TrendingUp,
@@ -22,16 +17,12 @@ import {
   Star,
   Filter,
   Search,
-  Download,
-  Send,
   Trash2,
   Edit2,
   Crown,
   AlertCircle,
   Calendar,
-  MessageSquare,
   Copy,
-  Link as LinkIcon,
   Plus,
   Globe,
   Save,
@@ -40,7 +31,8 @@ import {
   Check,
   ChevronDown,
   Building2,
-  MessageCircle
+  MessageCircle,
+  Clock
 } from "lucide-react";
 import { GlowCard, StatCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
@@ -68,7 +60,6 @@ import { InviteMemberModal } from "@/components/organization/InviteMemberModal";
 import { toast } from "sonner";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 
-// Types for organization data from database
 interface OrganizationData {
   id: number;
   name: string;
@@ -94,7 +85,6 @@ interface Member {
   avatar: string;
   joinedAt: string;
   courses: number;
-  lastActive: string;
   status: "active" | "inactive";
 }
 
@@ -123,7 +113,7 @@ interface PageProps {
   params: Promise<{ id: string }>;
 }
 
-export default function OrganizationAdminPage({ params }: PageProps) {
+export default function OrganizationSettingsPage({ params }: PageProps) {
   const { id } = use(params);
   const router = useRouter();
   const { roleData, setRole } = useRole();
@@ -131,7 +121,6 @@ export default function OrganizationAdminPage({ params }: PageProps) {
   
   const organizationId = parseInt(id);
   
-  // State for organization data
   const [organization, setOrganization] = useState<OrganizationData | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
@@ -139,7 +128,6 @@ export default function OrganizationAdminPage({ params }: PageProps) {
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
   
-  // UI state
   const [searchQuery, setSearchQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -147,7 +135,6 @@ export default function OrganizationAdminPage({ params }: PageProps) {
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [activeTab, setActiveTab] = useState("members");
   
-  // Settings form state
   const [settingsForm, setSettingsForm] = useState({
     name: "",
     description: "",
@@ -159,8 +146,6 @@ export default function OrganizationAdminPage({ params }: PageProps) {
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [copied, setCopied] = useState(false);
 
-
-  // Add these state variables (no userOrganizations array needed)
   const [deleteCooldown, setDeleteCooldown] = useState<{
     organizationId: number;
     requestedAt: string;
@@ -170,7 +155,6 @@ export default function OrganizationAdminPage({ params }: PageProps) {
   const [deletionStep, setDeletionStep] = useState<'select' | 'confirm' | 'cooldown' | 'recovery-request'>('select');
   const [recoveryReason, setRecoveryReason] = useState('');
 
-  // Add these helper functions that use the organizationId from params
   const startOrganizationDeletion = () => {
     if (!organizationId || !organization?.name) {
       toast.error("No organization found");
@@ -259,7 +243,6 @@ export default function OrganizationAdminPage({ params }: PageProps) {
     }
   };
 
-  // Check for existing pending deletion on component mount
   useEffect(() => {
     if (!organizationId) return;
     
@@ -289,7 +272,6 @@ export default function OrganizationAdminPage({ params }: PageProps) {
     }
   }, [organizationId]);
 
-  // Load organization data
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
@@ -360,20 +342,18 @@ export default function OrganizationAdminPage({ params }: PageProps) {
         `)
         .eq("organization_id", organizationId);
 
-      // Get all courses in this organization for course count
+      // Get all courses in this organization
       const { data: orgCourses } = await supabase
         .from("courses")
         .select("id, created_by, title, description, thumbnail, status, created_at")
         .eq("organization_id", organizationId);
 
       if (memberData && orgCourses) {
-        // Create a map of course counts by instructor
         const instructorCourseCount = new Map<string, number>();
         orgCourses.forEach(course => {
           instructorCourseCount.set(course.created_by, (instructorCourseCount.get(course.created_by) || 0) + 1);
         });
 
-        // Get student course counts
         const { data: classMembers } = await supabase
           .from("class_members")
           .select("user_id, role");
@@ -411,25 +391,21 @@ export default function OrganizationAdminPage({ params }: PageProps) {
             id: m.user_id,
             user_id: m.user_id,
             name: name,
-            email: "", // Email not available in profiles, using empty string
+            email: "",
             role: m.member_role as Member["role"],
             avatar: m.user?.avatar_url || avatar,
             joinedAt: new Date(m.created_at).toISOString().split("T")[0],
             courses: courseCount,
-            lastActive: new Date(m.created_at).toISOString().split("T")[0],
             status: "active",
           };
         });
         
         setMembers(membersWithCourses);
         
-        // Calculate analytics with proper role separation
         const totalStudents = membersWithCourses.filter(m => m.role === "student").length;
         const totalTeachers = membersWithCourses.filter(m => m.role === "teacher" || m.role === "admin" || m.role === "sub_admin").length;
         const totalCoursesCount = orgCourses?.length || 0;
-        const publishedCourses = orgCourses?.filter(c => c.status === "published").length || 0;
         
-        // Calculate average rating across all courses
         let totalRatingSum = 0;
         let totalRatingCount = 0;
         for (const course of orgCourses || []) {
@@ -445,11 +421,9 @@ export default function OrganizationAdminPage({ params }: PageProps) {
         }
         const averageRating = totalRatingCount > 0 ? totalRatingSum / totalRatingCount : 0;
         
-        // Calculate completion rate from lesson_progress
         let totalProgress = 0;
         let totalProgressCount = 0;
         
-        // Get all course classes for this organization's courses
         const courseIds = orgCourses?.map(c => c.id) || [];
         if (courseIds.length > 0) {
           const { data: courseClassesData } = await supabase
@@ -481,7 +455,6 @@ export default function OrganizationAdminPage({ params }: PageProps) {
         }
         const completionRate = totalProgressCount > 0 ? (totalProgress / totalProgressCount) * 100 : 0;
         
-        // Calculate monthly growth
         const thirtyDaysAgo = new Date();
         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
         
@@ -502,17 +475,14 @@ export default function OrganizationAdminPage({ params }: PageProps) {
         });
       }
 
-      // Get organization domains
       const { data: domainData } = await supabase
         .from("organization_domains")
         .select("*")
         .eq("organization_id", organizationId);
       setDomains(domainData || []);
 
-      // Load courses for this organization with real stats
       if (orgCourses) {
         const formattedCourses: Course[] = await Promise.all(orgCourses.map(async (c: any) => {
-          // Get instructor name
           let instructorName = "Unknown Instructor";
           if (c.created_by) {
             const instructorProfile = members.find(m => m.user_id === c.created_by);
@@ -533,7 +503,6 @@ export default function OrganizationAdminPage({ params }: PageProps) {
             }
           }
 
-          // Get student count (through course_classes and class_members)
           const { data: courseClassesData } = await supabase
             .from("course_classes")
             .select("id")
@@ -548,12 +517,10 @@ export default function OrganizationAdminPage({ params }: PageProps) {
               .in("course_class_id", classIds)
               .eq("role", "student");
             
-            // Count unique students
             const uniqueStudents = new Set(classMembersData?.map(cm => cm.user_id));
             studentCount = uniqueStudents.size;
           }
 
-          // Get average rating
           const { data: reviews } = await supabase
             .from("course_reviews")
             .select("rating")
@@ -584,7 +551,46 @@ export default function OrganizationAdminPage({ params }: PageProps) {
     loadData();
   }, [organizationId, router]);
 
-  // Member management
+  useEffect(() => {
+    const checkSetupStatus = async () => {
+      console.log('[AdminPage] Checking setup status for org:', organizationId);
+      const supabase = getSupabaseBrowserClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        console.log('[AdminPage] No session found');
+        return;
+      }
+      
+      try {
+        console.log('[AdminPage] Fetching setup status...');
+        const response = await fetch(`/api/org-service/orgs/${organizationId}/setup-status`, {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        });
+        
+        console.log('[AdminPage] Setup status response:', response.status);
+        
+        if (response.ok) {
+          const data = await response.json();
+          console.log('[AdminPage] Setup status data:', data);
+          if (!data.is_setup_complete) {
+            console.log('[AdminPage] Setup incomplete, redirecting to setup page');
+            router.push(`/organizations/${organizationId}/setup`);
+            return;
+          }
+        } else {
+          console.log('[AdminPage] Setup status check failed:', response.status);
+        }
+      } catch (error) {
+        console.error('[AdminPage] Error checking setup status:', error);
+      }
+    };
+    
+    checkSetupStatus();
+  }, [organizationId]);
+
   const handleRemoveMember = async (memberId: string, memberName: string, memberRole: string) => {
     if (memberRole === "admin") {
       toast.error("Cannot remove admin members");
@@ -651,7 +657,6 @@ export default function OrganizationAdminPage({ params }: PageProps) {
     toast.success("Course published successfully!");
   };
 
-  // Settings management
   const handleSaveSettings = async () => {
     setSavingSettings(true);
     
@@ -731,13 +736,11 @@ export default function OrganizationAdminPage({ params }: PageProps) {
       return;
     }
 
-    // First, delete all organization members
     await supabase
       .from("organization_members")
       .delete()
       .eq("organization_id", organizationId);
 
-    // Then delete the organization
     const { error } = await supabase
       .from("organizations")
       .delete()
@@ -794,19 +797,22 @@ export default function OrganizationAdminPage({ params }: PageProps) {
 
   return (
     <div className="space-y-8 pb-12">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-4xl font-bold text-white mb-2">
-            {organization.name} - Admin Panel
+            {organization.name} - Settings
           </h1>
           <p className="text-gray-400">
             Manage your organization's members, courses, and settings.
           </p>
-        </div>  
+        </div>
+        <Link href={`/organizations/${organization.id}`}>
+          <GlowButton variant="outline">
+            View Public Page
+          </GlowButton>
+        </Link>
       </div>
 
-      {/* Stats Grid */}
       {analytics && (
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -822,543 +828,528 @@ export default function OrganizationAdminPage({ params }: PageProps) {
         </>
       )}
 
-      {/* Admin Tabs */}
-      <div className="tabs-content-wrapper">
-        <Tabs defaultValue="members" value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="bg-gray-800/50 border border-gray-700 p-1 rounded-2xl mb-8 flex-wrap h-auto">
-            <TabsTrigger value="members" className="rounded-xl px-6 py-2.5">
-              <Users className="w-4 h-4 mr-2" />
-              Members ({members.length})
-            </TabsTrigger>
-            <TabsTrigger value="courses" className="rounded-xl px-6 py-2.5">
-              <BookOpen className="w-4 h-4 mr-2" />
-              Courses ({courses.length})
-            </TabsTrigger>
-            <TabsTrigger value="analytics" className="rounded-xl px-6 py-2.5">
-              <BarChart3 className="w-4 h-4 mr-2" />
-              Analytics
-            </TabsTrigger>
-            <TabsTrigger value="settings" className="rounded-xl px-6 py-2.5">
-              <Settings className="w-4 h-4 mr-2" />
-              Settings
-            </TabsTrigger>
-          </TabsList>
+      <Tabs defaultValue="members" value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="bg-gray-800/50 border border-gray-700 p-1 rounded-2xl mb-8 flex-wrap h-auto">
+          <TabsTrigger value="members" className="rounded-xl px-6 py-2.5">
+            <Users className="w-4 h-4 mr-2" />
+            Members ({members.length})
+          </TabsTrigger>
+          <TabsTrigger value="courses" className="rounded-xl px-6 py-2.5">
+            <BookOpen className="w-4 h-4 mr-2" />
+            Courses ({courses.length})
+          </TabsTrigger>
+          <TabsTrigger value="analytics" className="rounded-xl px-6 py-2.5">
+            <BarChart3 className="w-4 h-4 mr-2" />
+            Analytics
+          </TabsTrigger>
+          <TabsTrigger value="settings" className="rounded-xl px-6 py-2.5">
+            <Settings className="w-4 h-4 mr-2" />
+            Settings
+          </TabsTrigger>
+        </TabsList>
 
-          {/* Members Tab */}
-          <TabsContent value="members">
-            <GlowCard>
-              <div className="min-h-[400px]">
-                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-6">
-                  <h2 className="text-2xl font-bold text-white">Organization Members</h2>
-                  <div className="flex gap-3">
-                    <div className="relative flex-1 sm:flex-none">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                      <Input
-                        type="text"
-                        placeholder="Search members..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        className="pl-10 bg-gray-800/50 border-gray-700 rounded-xl h-10 w-full sm:w-64"
-                      />
-                    </div>
-                    <GlowButton onClick={() => setShowInviteModal(true)} className="h-10">
-                      <UserPlus className="w-4 h-4 mr-2" />
-                      Invite Member
-                    </GlowButton>
+        <TabsContent value="members">
+          <GlowCard>
+            <div className="min-h-[400px]">
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-6">
+                <h2 className="text-2xl font-bold text-white">Organization Members</h2>
+                <div className="flex gap-3">
+                  <div className="relative flex-1 sm:flex-none">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <Input
+                      type="text"
+                      placeholder="Search members..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="pl-10 bg-gray-800/50 border-gray-700 rounded-xl h-10 w-full sm:w-64"
+                    />
                   </div>
-                </div>
-
-                {/* Filters */}
-                <div className="flex gap-2 mb-6">
-                  <select
-                    value={roleFilter}
-                    onChange={(e) => setRoleFilter(e.target.value)}
-                    className="px-3 py-2 bg-gray-800/50 border border-gray-700 text-white rounded-lg text-sm h-10"
-                  >
-                    <option value="all">All Roles</option>
-                    <option value="admin">Admin</option>
-                    <option value="sub_admin">Sub Admin</option>
-                    <option value="teacher">Teacher</option>
-                    <option value="student">Student</option>
-                  </select>
-                  <select
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                    className="px-3 py-2 bg-gray-800/50 border border-gray-700 text-white rounded-lg text-sm h-10"
-                  >
-                    <option value="all">All Status</option>
-                    <option value="active">Active</option>
-                    <option value="inactive">Inactive</option>
-                  </select>
-                </div>
-
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-gray-700">
-                        <th className="text-left text-gray-400 font-medium py-3 px-4">Member</th>
-                        <th className="text-left text-gray-400 font-medium py-3 px-4">Role</th>
-                        <th className="text-left text-gray-400 font-medium py-3 px-4">Status</th>
-                        <th className="text-left text-gray-400 font-medium py-3 px-4">Joined</th>
-                        <th className="text-left text-gray-400 font-medium py-3 px-4">Courses</th>
-                        <th className="text-left text-gray-400 font-medium py-3 px-4">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredMembers.map((member) => (
-                        <tr key={member.id} className="border-b border-gray-700 hover:bg-gray-800/30">
-                          <td className="py-3 px-4">
-                            <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center">
-                                <span className="text-white font-semibold text-sm">{member.avatar}</span>
-                              </div>
-                              <div>
-                                <p className="text-white font-medium">{member.name}</p>
-                                <p className="text-sm text-gray-400">{member.email || "No email"}</p>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="py-3 px-4">
-                            <span className={`px-2 py-1 rounded-full text-xs ${
-                              member.role === "admin" 
-                                ? "bg-purple-500/20 text-purple-400" 
-                                : member.role === "sub_admin"
-                                ? "bg-indigo-500/20 text-indigo-400"
-                                : member.role === "teacher"
-                                ? "bg-blue-500/20 text-blue-400"
-                                : "bg-green-500/20 text-green-400"
-                            }`}>
-                              {member.role === "sub_admin" ? "Sub Admin" : member.role.charAt(0).toUpperCase() + member.role.slice(1)}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4">
-                            <span className={`px-2 py-1 rounded-full text-xs ${
-                              member.status === "active" 
-                                ? "bg-green-500/20 text-green-400" 
-                                : "bg-gray-500/20 text-gray-400"
-                            }`}>
-                              {member.status}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4 text-gray-400 text-sm">{member.joinedAt}</td>
-                          <td className="py-3 px-4 text-white">{member.courses}</td>
-                          <td className="py-3 px-4">
-                            <div className="flex gap-2">
-                              <button 
-                                onClick={() => setEditingMember(member)}
-                                className="p-1 hover:bg-gray-700 rounded-lg transition-colors"
-                              >
-                                <Edit2 className="w-4 h-4 text-gray-400" />
-                              </button>
-                              {member.role !== "admin" && (
-                                <button 
-                                  onClick={() => handleRemoveMember(member.user_id, member.name, member.role)}
-                                  className="p-1 hover:bg-gray-700 rounded-lg transition-colors"
-                                >
-                                  <Trash2 className="w-4 h-4 text-red-400" />
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <GlowButton onClick={() => setShowInviteModal(true)} className="h-10">
+                    <UserPlus className="w-4 h-4 mr-2" />
+                    Invite Member
+                  </GlowButton>
                 </div>
               </div>
-            </GlowCard>
-          </TabsContent>
 
-          {/* Courses Tab */}
-          <TabsContent value="courses">
-            <GlowCard>
-              <div className="min-h-[400px]">
-                <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-2xl font-bold text-white">Organization Courses</h2>
-                  <Link href="/courses/create">
-                    <GlowButton>
-                      <Plus className="w-4 h-4 mr-2" />
-                      Create Course
-                    </GlowButton>
-                  </Link>
-                </div>
-                <div className="space-y-4">
-                  {courses.map((course) => (
-                    <div key={course.id} className="p-4 bg-gray-800/30 rounded-xl border border-gray-700">
-                      <div className="flex gap-4">
-                        <img src={course.thumbnail} alt={course.title} className="w-32 h-24 rounded-lg object-cover" />
-                        <div className="flex-1">
-                          <div className="flex items-start justify-between">
+              <div className="flex gap-2 mb-6">
+                <select
+                  value={roleFilter}
+                  onChange={(e) => setRoleFilter(e.target.value)}
+                  className="px-3 py-2 bg-gray-800/50 border border-gray-700 text-white rounded-lg text-sm h-10"
+                >
+                  <option value="all">All Roles</option>
+                  <option value="admin">Admin</option>
+                  <option value="sub_admin">Sub Admin</option>
+                  <option value="teacher">Teacher</option>
+                  <option value="student">Student</option>
+                </select>
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="px-3 py-2 bg-gray-800/50 border border-gray-700 text-white rounded-lg text-sm h-10"
+                >
+                  <option value="all">All Status</option>
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-gray-700">
+                      <th className="text-left text-gray-400 font-medium py-3 px-4">Member</th>
+                      <th className="text-left text-gray-400 font-medium py-3 px-4">Role</th>
+                      <th className="text-left text-gray-400 font-medium py-3 px-4">Status</th>
+                      <th className="text-left text-gray-400 font-medium py-3 px-4">Joined</th>
+                      <th className="text-left text-gray-400 font-medium py-3 px-4">Courses</th>
+                      <th className="text-left text-gray-400 font-medium py-3 px-4">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredMembers.map((member) => (
+                      <tr key={member.id} className="border-b border-gray-700 hover:bg-gray-800/30">
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center">
+                              <span className="text-white font-semibold text-sm">{member.avatar}</span>
+                            </div>
                             <div>
-                              <h3 className="text-lg font-bold text-white">{course.title}</h3>
-                              <p className="text-sm text-gray-400">{course.description}</p>
-                              <div className="flex items-center gap-4 mt-2 text-sm text-gray-400">
-                                <span className="flex items-center gap-1">
-                                  <Users className="w-4 h-4" />
-                                  {course.students} students
-                                </span>
-                                <span className="flex items-center gap-1">
-                                  <Star className="w-4 h-4 fill-yellow-500 text-yellow-500" />
-                                  {course.rating.toFixed(1)}
-                                </span>
-                                <span className="flex items-center gap-1">
-                                  <BookOpen className="w-4 h-4" />
-                                  {course.instructor}
-                                </span>
-                              </div>
+                              <p className="text-white font-medium">{member.name}</p>
+                              <p className="text-sm text-gray-400">{member.email || "No email"}</p>
                             </div>
-                            <div className="flex gap-2">
-                              {course.status === "draft" && (
-                                <GlowButton size="sm" onClick={() => handlePublishCourse(course.id)}>
-                                  Publish
-                                </GlowButton>
-                              )}
-                              <Link href={`/courses/${course.id}/edit`}>
-                                <GlowButton variant="outline" size="sm">
-                                  Edit
-                                </GlowButton>
-                              </Link>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className={`px-2 py-1 rounded-full text-xs ${
+                            member.role === "admin" 
+                              ? "bg-purple-500/20 text-purple-400" 
+                              : member.role === "sub_admin"
+                              ? "bg-indigo-500/20 text-indigo-400"
+                              : member.role === "teacher"
+                              ? "bg-blue-500/20 text-blue-400"
+                              : "bg-green-500/20 text-green-400"
+                          }`}>
+                            {member.role === "sub_admin" ? "Sub Admin" : member.role.charAt(0).toUpperCase() + member.role.slice(1)}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className={`px-2 py-1 rounded-full text-xs ${
+                            member.status === "active" 
+                              ? "bg-green-500/20 text-green-400" 
+                              : "bg-gray-500/20 text-gray-400"
+                          }`}>
+                            {member.status}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-gray-400 text-sm">{member.joinedAt}</td>
+                        <td className="py-3 px-4 text-white">{member.courses}</td>
+                        <td className="py-3 px-4">
+                          <div className="flex gap-2">
+                            <button 
+                              onClick={() => setEditingMember(member)}
+                              className="p-1 hover:bg-gray-700 rounded-lg transition-colors"
+                            >
+                              <Edit2 className="w-4 h-4 text-gray-400" />
+                            </button>
+                            {member.role !== "admin" && (
+                              <button 
+                                onClick={() => handleRemoveMember(member.user_id, member.name, member.role)}
+                                className="p-1 hover:bg-gray-700 rounded-lg transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4 text-red-400" />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </GlowCard>
+        </TabsContent>
+
+        <TabsContent value="courses">
+          <GlowCard>
+            <div className="min-h-[400px]">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-bold text-white">Organization Courses</h2>
+                <Link href="/courses/create">
+                  <GlowButton>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Create Course
+                  </GlowButton>
+                </Link>
+              </div>
+              <div className="space-y-4">
+                {courses.map((course) => (
+                  <div key={course.id} className="p-4 bg-gray-800/30 rounded-xl border border-gray-700">
+                    <div className="flex gap-4">
+                      <img src={course.thumbnail} alt={course.title} className="w-32 h-24 rounded-lg object-cover" />
+                      <div className="flex-1">
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <h3 className="text-lg font-bold text-white">{course.title}</h3>
+                            <p className="text-sm text-gray-400">{course.description}</p>
+                            <div className="flex items-center gap-4 mt-2 text-sm text-gray-400">
+                              <span className="flex items-center gap-1">
+                                <Users className="w-4 h-4" />
+                                {course.students} students
+                              </span>
+                              <span className="flex items-center gap-1">
+                                <Star className="w-4 h-4 fill-yellow-500 text-yellow-500" />
+                                {course.rating.toFixed(1)}
+                              </span>
+                              <span className="flex items-center gap-1">
+                                <BookOpen className="w-4 h-4" />
+                                {course.instructor}
+                              </span>
                             </div>
+                          </div>
+                          <div className="flex gap-2">
+                            {course.status === "draft" && (
+                              <GlowButton size="sm" onClick={() => handlePublishCourse(course.id)}>
+                                Publish
+                              </GlowButton>
+                            )}
+                            <Link href={`/courses/${course.id}/edit`}>
+                              <GlowButton variant="outline" size="sm">
+                                Edit
+                              </GlowButton>
+                            </Link>
                           </div>
                         </div>
                       </div>
                     </div>
-                  ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </GlowCard>
+        </TabsContent>
+
+        <TabsContent value="analytics">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <GlowCard>
+              <h2 className="text-xl font-bold text-white mb-6">Top Courses</h2>
+              <div className="space-y-4">
+                {courses.slice(0, 5).map((course) => (
+                  <div key={course.id} className="p-3 bg-gray-800/30 rounded-xl">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-white font-medium">{course.title}</span>
+                      <span className="text-purple-400">{course.students} students</span>
+                    </div>
+                    <div className="w-full bg-gray-700 rounded-full h-2">
+                      <div 
+                        className="bg-purple-500 h-2 rounded-full" 
+                        style={{ width: `${Math.min(100, (course.students / 100) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </GlowCard>
+
+            <GlowCard>
+              <h2 className="text-xl font-bold text-white mb-6">Member Growth</h2>
+              <div className="text-center py-12">
+                <TrendingUp className="w-16 h-16 text-purple-400 mx-auto mb-4" />
+                <p className="text-3xl font-bold text-white mb-2">{analytics?.totalStudents}</p>
+                <p className="text-gray-400">Total students</p>
+                <p className="text-sm text-green-400 mt-2">+{analytics?.monthlyGrowth}% growth rate</p>
+              </div>
+            </GlowCard>
+
+            <GlowCard>
+              <h2 className="text-xl font-bold text-white mb-6">Engagement Metrics</h2>
+              <div className="space-y-4">
+                <div>
+                  <div className="flex items-center justify-between text-sm mb-1">
+                    <span className="text-gray-400">Course Completion Rate</span>
+                    <span className="text-purple-400">{analytics?.completionRate}%</span>
+                  </div>
+                  <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
+                    <div className="h-full bg-purple-500 rounded-full" style={{ width: `${analytics?.completionRate}%` }} />
+                  </div>
+                </div>
+                <div>
+                  <div className="flex items-center justify-between text-sm mb-1">
+                    <span className="text-gray-400">Average Rating</span>
+                    <span className="text-purple-400">{analytics?.averageRating}/5.0</span>
+                  </div>
+                  <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
+                    <div className="h-full bg-purple-500 rounded-full" style={{ width: `${((analytics?.averageRating || 0) / 5) * 100}%` }} />
+                  </div>
                 </div>
               </div>
             </GlowCard>
-          </TabsContent>
+          </div>
+        </TabsContent>
 
-          {/* Analytics Tab */}
-          <TabsContent value="analytics">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <GlowCard>
-                <h2 className="text-xl font-bold text-white mb-6">Top Courses</h2>
+        <TabsContent value="settings">
+          <GlowCard>
+            <div className="min-h-[400px]">
+              <h2 className="text-2xl font-bold text-white mb-6">Organization Settings</h2>
+              <div className="space-y-6 max-w-2xl">
                 <div className="space-y-4">
-                  {courses.slice(0, 5).map((course) => (
-                    <div key={course.id} className="p-3 bg-gray-800/30 rounded-xl">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-white font-medium">{course.title}</span>
-                        <span className="text-purple-400">{course.students} students</span>
-                      </div>
-                      <div className="w-full bg-gray-700 rounded-full h-2">
-                        <div 
-                          className="bg-purple-500 h-2 rounded-full" 
-                          style={{ width: `${Math.min(100, (course.students / 100) * 100)}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </GlowCard>
-
-              <GlowCard>
-                <h2 className="text-xl font-bold text-white mb-6">Member Growth</h2>
-                <div className="text-center py-12">
-                  <TrendingUp className="w-16 h-16 text-purple-400 mx-auto mb-4" />
-                  <p className="text-3xl font-bold text-white mb-2">{analytics?.totalStudents}</p>
-                  <p className="text-gray-400">Total students</p>
-                  <p className="text-sm text-green-400 mt-2">+{analytics?.monthlyGrowth}% growth rate</p>
-                </div>
-              </GlowCard>
-
-              <GlowCard>
-                <h2 className="text-xl font-bold text-white mb-6">Engagement Metrics</h2>
-                <div className="space-y-4">
+                  <h3 className="text-lg font-semibold text-white border-b border-gray-700 pb-2">Basic Information</h3>
                   <div>
-                    <div className="flex items-center justify-between text-sm mb-1">
-                      <span className="text-gray-400">Course Completion Rate</span>
-                      <span className="text-purple-400">{analytics?.completionRate}%</span>
-                    </div>
-                    <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
-                      <div className="h-full bg-purple-500 rounded-full" style={{ width: `${analytics?.completionRate}%` }} />
-                    </div>
+                    <Label className="text-sm font-medium text-gray-400 mb-2 block">
+                      Organization Name
+                    </Label>
+                    <Input
+                      value={settingsForm.name}
+                      onChange={(e) => setSettingsForm({ ...settingsForm, name: e.target.value })}
+                      className="bg-gray-800/50 border-gray-700 text-white"
+                    />
                   </div>
                   <div>
-                    <div className="flex items-center justify-between text-sm mb-1">
-                      <span className="text-gray-400">Average Rating</span>
-                      <span className="text-purple-400">{analytics?.averageRating}/5.0</span>
-                    </div>
-                    <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
-                      <div className="h-full bg-purple-500 rounded-full" style={{ width: `${((analytics?.averageRating || 0) / 5) * 100}%` }} />
-                    </div>
-                  </div>
-                </div>
-              </GlowCard>
-            </div>
-          </TabsContent>
-
-          {/* Settings Tab */}
-          <TabsContent value="settings">
-            <GlowCard>
-              <div className="min-h-[400px]">
-                <h2 className="text-2xl font-bold text-white mb-6">Organization Settings</h2>
-                <div className="space-y-6 max-w-2xl">
-                  {/* Basic Information */}
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-semibold text-white border-b border-gray-700 pb-2">Basic Information</h3>
-                    <div>
-                      <Label className="text-sm font-medium text-gray-400 mb-2 block">
-                        Organization Name
-                      </Label>
-                      <Input
-                        value={settingsForm.name}
-                        onChange={(e) => setSettingsForm({ ...settingsForm, name: e.target.value })}
-                        className="bg-gray-800/50 border-gray-700 text-white"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-sm font-medium text-gray-400 mb-2 block">
-                        Slug (URL identifier)
-                      </Label>
-                      <Input
-                        value={settingsForm.slug || ""}
-                        onChange={(e) => setSettingsForm({ ...settingsForm, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-") })}
-                        placeholder="organization-slug"
-                        className="bg-gray-800/50 border-gray-700 text-white"
-                      />
-                      <p className="text-xs text-gray-500 mt-1">
-                        Used in URLs: /organizations/{settingsForm.slug || "slug"}/...
-                      </p>
-                    </div>
-                    <div>
-                      <Label className="text-sm font-medium text-gray-400 mb-2 block">
-                        Description
-                      </Label>
-                      <Textarea
-                        value={settingsForm.description}
-                        onChange={(e) => setSettingsForm({ ...settingsForm, description: e.target.value })}
-                        rows={4}
-                        className="bg-gray-800/50 border-gray-700 text-white resize-none"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Domain Management */}
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-semibold text-white border-b border-gray-700 pb-2">Domain Management</h3>
-                    <p className="text-sm text-gray-400">
-                      Add email domains to automatically assign users to the correct role during onboarding.
+                    <Label className="text-sm font-medium text-gray-400 mb-2 block">
+                      Slug (URL identifier)
+                    </Label>
+                    <Input
+                      value={settingsForm.slug || ""}
+                      onChange={(e) => setSettingsForm({ ...settingsForm, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-") })}
+                      placeholder="organization-slug"
+                      className="bg-gray-800/50 border-gray-700 text-white"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Used in URLs: /organizations/{settingsForm.slug || "slug"}/...
                     </p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-400 mb-2 block">
+                      Description
+                    </Label>
+                    <Textarea
+                      value={settingsForm.description}
+                      onChange={(e) => setSettingsForm({ ...settingsForm, description: e.target.value })}
+                      rows={4}
+                      className="bg-gray-800/50 border-gray-700 text-white resize-none"
+                    />
+                  </div>
+                </div>
 
-                    <div className="flex gap-3">
-                      <Input
-                        placeholder="e.g., university.edu"
-                        value={newDomain}
-                        onChange={(e) => setNewDomain(e.target.value)}
-                        className="flex-1 bg-gray-800/50 border-gray-700 text-white"
-                      />
-                      <GlowButton onClick={handleAddDomain}>
-                        Add Domain
+                <div className="space-y-4">
+                  <h3 className="text-lg font-semibold text-white border-b border-gray-700 pb-2">Domain Management</h3>
+                  <p className="text-sm text-gray-400">
+                    Add email domains to automatically assign users to the correct role during onboarding.
+                  </p>
+
+                  <div className="flex gap-3">
+                    <Input
+                      placeholder="e.g., university.edu"
+                      value={newDomain}
+                      onChange={(e) => setNewDomain(e.target.value)}
+                      className="flex-1 bg-gray-800/50 border-gray-700 text-white"
+                    />
+                    <GlowButton onClick={handleAddDomain}>
+                      Add Domain
+                    </GlowButton>
+                  </div>
+
+                  {domains.length === 0 ? (
+                    <div className="text-center py-8 bg-gray-800/30 rounded-lg">
+                      <Globe className="w-12 h-12 text-gray-600 mx-auto mb-3" />
+                      <p className="text-gray-400">No domains added yet</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {domains.map((domain) => (
+                        <div key={domain.id} className="flex items-center justify-between p-3 bg-gray-800/50 rounded-lg border border-gray-700">
+                          <div className="flex items-center gap-3">
+                            <Globe className="w-4 h-4 text-gray-400" />
+                            <span className="text-white">{domain.domain}</span>
+                          </div>
+                          <button
+                            onClick={() => handleRemoveDomain(domain.id, domain.domain)}
+                            className="text-red-400 hover:text-red-300 transition-colors"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-4">
+                  <h3 className="text-lg font-semibold text-red-400 border-b border-gray-700 pb-2">Danger Zone</h3>
+                  
+                  <div className="p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-start gap-3">
+                        <Copy className="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" />
+                        <div>
+                          <p className="text-sm text-yellow-400 font-medium">Organization Invite Link</p>
+                          <p className="text-xs text-gray-400 mt-1">
+                            Share this link to let users join your organization
+                          </p>
+                        </div>
+                      </div>
+                      <GlowButton variant="secondary" size="sm" onClick={copyInviteLink}>
+                        {copied ? (
+                          <Check className="w-4 h-4 mr-2" />
+                        ) : (
+                          <Copy className="w-4 h-4 mr-2" />
+                        )}
+                        {copied ? "Copied!" : "Copy Link"}
                       </GlowButton>
                     </div>
+                  </div>
 
-                    {domains.length === 0 ? (
-                      <div className="text-center py-8 bg-gray-800/30 rounded-lg">
-                        <Globe className="w-12 h-12 text-gray-600 mx-auto mb-3" />
-                        <p className="text-gray-400">No domains added yet</p>
+                  <div className="p-4 bg-red-500/5 rounded-lg border border-red-500/20">
+                    <div className="mb-4">
+                      <h3 className="font-semibold text-white flex items-center gap-2">
+                        <Building2 className="w-5 h-5 text-red-400" />
+                        Delete Organization
+                      </h3>
+                      <p className="text-sm text-gray-400 mt-1">
+                        Permanently delete {organization?.name}. This action cannot be undone.
+                      </p>
+                    </div>
+
+                    {deletionStep === 'select' && (
+                      <>
+                        <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 mb-4">
+                          <p className="text-sm text-yellow-300 flex items-center gap-2">
+                            <AlertCircle className="w-4 h-4" />
+                            ⚠️ Deleting your organization will permanently remove all courses, members, and data.
+                          </p>
+                        </div>
+                        <GlowButton 
+                          onClick={() => setDeletionStep('confirm')}
+                          className="w-full bg-red-600 hover:bg-red-700"
+                        >
+                          Request Organization Deletion
+                        </GlowButton>
+                      </>
+                    )}
+
+                    {deletionStep === 'confirm' && (
+                      <div className="space-y-3">
+                        <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                          <p className="text-sm text-red-300 flex items-center gap-2">
+                            <AlertTriangle className="w-4 h-4" />
+                            Are you sure? This action cannot be undone immediately. You will have 30 days to cancel.
+                          </p>
+                        </div>
+                        <div className="flex gap-3">
+                          <GlowButton 
+                            variant="outline" 
+                            onClick={() => setDeletionStep('select')}
+                            className="flex-1"
+                          >
+                            Cancel
+                          </GlowButton>
+                          <GlowButton 
+                            onClick={startOrganizationDeletion}
+                            className="flex-1 bg-red-600 hover:bg-red-700"
+                          >
+                            Confirm Deletion Request
+                          </GlowButton>
+                        </div>
                       </div>
-                    ) : (
-                      <div className="space-y-2">
-                        {domains.map((domain) => (
-                          <div key={domain.id} className="flex items-center justify-between p-3 bg-gray-800/50 rounded-lg border border-gray-700">
-                            <div className="flex items-center gap-3">
-                              <Globe className="w-4 h-4 text-gray-400" />
-                              <span className="text-white">{domain.domain}</span>
-                            </div>
-                            <button
-                              onClick={() => handleRemoveDomain(domain.id, domain.domain)}
-                              className="text-red-400 hover:text-red-300 transition-colors"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                    )}
+
+                    {deletionStep === 'cooldown' && deleteCooldown && (
+                      <div className="space-y-3">
+                        <div className="bg-orange-500/10 border border-orange-500/30 rounded-lg p-3">
+                          <div className="flex items-center gap-2 mb-2">
+                            <Clock className="w-4 h-4 text-orange-400" />
+                            <span className="text-sm font-medium text-orange-400">Deletion Scheduled</span>
                           </div>
-                        ))}
+                          <p className="text-sm text-gray-300">
+                            Organization <strong>{organization?.name}</strong> will be permanently deleted on:
+                          </p>
+                          <p className="text-lg font-semibold text-orange-400 my-2">
+                            {new Date(deleteCooldown.scheduledDeletionDate).toLocaleDateString()} at{' '}
+                            {new Date(deleteCooldown.scheduledDeletionDate).toLocaleTimeString()}
+                          </p>
+                          <div className="mt-3 p-2 bg-gray-800/50 rounded-lg">
+                            <div className="flex justify-between text-sm mb-1">
+                              <span className="text-gray-400">Days remaining:</span>
+                              <span className="text-orange-400 font-semibold">{deleteCooldown.daysRemaining} days</span>
+                            </div>
+                            <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
+                              <div 
+                                className="h-full bg-orange-500 rounded-full transition-all"
+                                style={{ width: `${((30 - deleteCooldown.daysRemaining) / 30) * 100}%` }}
+                              />
+                            </div>
+                            <p className="text-xs text-gray-500 mt-2">
+                              {deleteCooldown.daysRemaining} days remaining until permanent deletion
+                            </p>
+                          </div>
+                        </div>
+
+                        <GlowButton 
+                          variant="outline" 
+                          onClick={() => setDeletionStep('recovery-request')}
+                          className="w-full border-blue-500/50 text-blue-400 hover:bg-blue-500/10"
+                        >
+                          Request Recovery from Admin
+                        </GlowButton>
+                        
+                        <GlowButton 
+                          variant="outline" 
+                          onClick={cancelOrganizationDeletion}
+                          className="w-full border-yellow-500/50 text-yellow-400 hover:bg-yellow-500/10"
+                        >
+                          Cancel Deletion
+                        </GlowButton>
+                      </div>
+                    )}
+
+                    {deletionStep === 'recovery-request' && (
+                      <div className="space-y-3">
+                        <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
+                          <p className="text-sm text-blue-300 mb-2 flex items-center gap-2">
+                            <MessageCircle className="w-4 h-4" />
+                            Request organization recovery from system admin
+                          </p>
+                          <textarea
+                            value={recoveryReason}
+                            onChange={(e) => setRecoveryReason(e.target.value)}
+                            placeholder="Explain why you need to recover this organization..."
+                            rows={3}
+                            className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm mt-2"
+                          />
+                        </div>
+                        <div className="flex gap-3">
+                          <GlowButton 
+                            variant="outline" 
+                            onClick={() => setDeletionStep('cooldown')}
+                            className="flex-1"
+                          >
+                            Back
+                          </GlowButton>
+                          <GlowButton 
+                            onClick={requestRecoveryFromAdmin}
+                            className="flex-1 bg-blue-600 hover:bg-blue-700"
+                          >
+                            Submit Recovery Request
+                          </GlowButton>
+                        </div>
                       </div>
                     )}
                   </div>
+                </div>
 
-                  {/* Danger Zone */}
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-semibold text-red-400 border-b border-gray-700 pb-2">Danger Zone</h3>
-                    
-                    {/* Organization Invite Link Section */}
-                    <div className="p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
-                      <div className="flex items-start justify-between">
-                        <div className="flex items-start gap-3">
-                          <Copy className="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" />
-                          <div>
-                            <p className="text-sm text-yellow-400 font-medium">Organization Invite Link</p>
-                            <p className="text-xs text-gray-400 mt-1">
-                              Share this link to let users join your organization
-                            </p>
-                          </div>
-                        </div>
-                        <GlowButton variant="secondary" size="sm" onClick={copyInviteLink}>
-                          {copied ? (
-                            <Check className="w-4 h-4 mr-2" />
-                          ) : (
-                            <Copy className="w-4 h-4 mr-2" />
-                          )}
-                          {copied ? "Copied!" : "Copy Link"}
-                        </GlowButton>
-                      </div>
-                    </div>
-
-                    {/* Delete Organization Section - Simplified for single org */}
-                    <div className="p-4 bg-red-500/5 rounded-lg border border-red-500/20">
-                      <div className="mb-4">
-                        <h3 className="font-semibold text-white flex items-center gap-2">
-                          <Building2 className="w-5 h-5 text-red-400" />
-                          Delete Organization
-                        </h3>
-                        <p className="text-sm text-gray-400 mt-1">
-                          Permanently delete {organization?.name}. This action cannot be undone.
-                        </p>
-                      </div>
-
-                      {deletionStep === 'select' && (
-                        <>
-                          <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 mb-4">
-                            <p className="text-sm text-yellow-300 flex items-center gap-2">
-                              <AlertCircle className="w-4 h-4" />
-                              ⚠️ Deleting your organization will permanently remove all courses, members, and data.
-                            </p>
-                          </div>
-                          <GlowButton 
-                            onClick={() => setDeletionStep('confirm')}
-                            className="w-full bg-red-600 hover:bg-red-700"
-                          >
-                            Request Organization Deletion
-                          </GlowButton>
-                        </>
-                      )}
-
-                      {deletionStep === 'confirm' && (
-                        <div className="space-y-3">
-                          <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
-                            <p className="text-sm text-red-300 flex items-center gap-2">
-                              <AlertTriangle className="w-4 h-4" />
-                              Are you sure? This action cannot be undone immediately. You will have 30 days to cancel.
-                            </p>
-                          </div>
-                          <div className="flex gap-3">
-                            <GlowButton 
-                              variant="outline" 
-                              onClick={() => setDeletionStep('select')}
-                              className="flex-1"
-                            >
-                              Cancel
-                            </GlowButton>
-                            <GlowButton 
-                              onClick={startOrganizationDeletion}
-                              className="flex-1 bg-red-600 hover:bg-red-700"
-                            >
-                              Confirm Deletion Request
-                            </GlowButton>
-                          </div>
-                        </div>
-                      )}
-
-                      {deletionStep === 'cooldown' && deleteCooldown && (
-                        <div className="space-y-3">
-                          <div className="bg-orange-500/10 border border-orange-500/30 rounded-lg p-3">
-                            <div className="flex items-center gap-2 mb-2">
-                              <Clock className="w-4 h-4 text-orange-400" />
-                              <span className="text-sm font-medium text-orange-400">Deletion Scheduled</span>
-                            </div>
-                            <p className="text-sm text-gray-300">
-                              Organization <strong>{organization?.name}</strong> will be permanently deleted on:
-                            </p>
-                            <p className="text-lg font-semibold text-orange-400 my-2">
-                              {new Date(deleteCooldown.scheduledDeletionDate).toLocaleDateString()} at{' '}
-                              {new Date(deleteCooldown.scheduledDeletionDate).toLocaleTimeString()}
-                            </p>
-                            <div className="mt-3 p-2 bg-gray-800/50 rounded-lg">
-                              <div className="flex justify-between text-sm mb-1">
-                                <span className="text-gray-400">Days remaining:</span>
-                                <span className="text-orange-400 font-semibold">{deleteCooldown.daysRemaining} days</span>
-                              </div>
-                              <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
-                                <div 
-                                  className="h-full bg-orange-500 rounded-full transition-all"
-                                  style={{ width: `${((30 - deleteCooldown.daysRemaining) / 30) * 100}%` }}
-                                />
-                              </div>
-                              <p className="text-xs text-gray-500 mt-2">
-                                {deleteCooldown.daysRemaining} days remaining until permanent deletion
-                              </p>
-                            </div>
-                          </div>
-
-                          <GlowButton 
-                            variant="outline" 
-                            onClick={() => setDeletionStep('recovery-request')}
-                            className="w-full border-blue-500/50 text-blue-400 hover:bg-blue-500/10"
-                          >
-                            Request Recovery from Admin
-                          </GlowButton>
-                          
-                          <GlowButton 
-                            variant="outline" 
-                            onClick={cancelOrganizationDeletion}
-                            className="w-full border-yellow-500/50 text-yellow-400 hover:bg-yellow-500/10"
-                          >
-                            Cancel Deletion
-                          </GlowButton>
-                        </div>
-                      )}
-
-                      {deletionStep === 'recovery-request' && (
-                        <div className="space-y-3">
-                          <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
-                            <p className="text-sm text-blue-300 mb-2 flex items-center gap-2">
-                              <MessageCircle className="w-4 h-4" />
-                              Request organization recovery from system admin
-                            </p>
-                            <textarea
-                              value={recoveryReason}
-                              onChange={(e) => setRecoveryReason(e.target.value)}
-                              placeholder="Explain why you need to recover this organization..."
-                              rows={3}
-                              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm mt-2"
-                            />
-                          </div>
-                          <div className="flex gap-3">
-                            <GlowButton 
-                              variant="outline" 
-                              onClick={() => setDeletionStep('cooldown')}
-                              className="flex-1"
-                            >
-                              Back
-                            </GlowButton>
-                            <GlowButton 
-                              onClick={requestRecoveryFromAdmin}
-                              className="flex-1 bg-blue-600 hover:bg-blue-700"
-                            >
-                              Submit Recovery Request
-                            </GlowButton>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Save Button */}
-                  <div className="pt-4">
-                    <GlowButton onClick={handleSaveSettings} isLoading={savingSettings}>
-                      <Save className="w-4 h-4 mr-2" />
-                      Save All Settings
-                    </GlowButton>
-                  </div>
+                <div className="pt-4">
+                  <GlowButton onClick={handleSaveSettings} isLoading={savingSettings}>
+                    <Save className="w-4 h-4 mr-2" />
+                    Save All Settings
+                  </GlowButton>
                 </div>
               </div>
-            </GlowCard>
-          </TabsContent>
-        </Tabs>
-      </div>
+            </div>
+          </GlowCard>
+        </TabsContent>
+      </Tabs>
 
-      {/* Invite Modal */}
       {showInviteModal && organization && (
         <InviteMemberModal
           isOpen={showInviteModal}
@@ -1381,7 +1372,6 @@ export default function OrganizationAdminPage({ params }: PageProps) {
         />
       )}
 
-      {/* Edit Member Modal */}
       {editingMember && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setEditingMember(null)}>
           <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md shadow-2xl" onClick={(e) => e.stopPropagation()}>
@@ -1422,7 +1412,6 @@ export default function OrganizationAdminPage({ params }: PageProps) {
         </div>
       )}
 
-      {/* Delete Confirmation Dialog */}
       <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <DialogContent className="bg-gray-900 border border-gray-700">
           <DialogHeader>

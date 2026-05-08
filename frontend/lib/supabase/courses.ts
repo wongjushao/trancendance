@@ -803,3 +803,60 @@ export async function deleteClassSchedule(scheduleId: number): Promise<void> {
   
   if (error) throw error;
 }
+
+// Get course reviews with user details
+export async function getCourseReviews(courseId: number, page = 1, limit = 10) {
+  const supabase = getSupabaseBrowserClient();
+  const from = (page - 1) * limit;
+  
+  const { data, error, count } = await supabase
+    .from("course_reviews")
+    .select(`
+      *,
+      user:user_id (
+        id,
+        first_name,
+        last_name,
+        username,
+        avatar_url
+      )
+    `, { count: "exact" })
+    .eq("course_id", courseId)
+    .order("created_at", { ascending: false })
+    .range(from, from + limit - 1);
+  
+  if (error) throw error;
+  return { reviews: data, total: count || 0 };
+}
+
+// Check if user has written a review
+export async function hasUserReviewed(courseId: number, userId: string) {
+  const supabase = getSupabaseBrowserClient();
+  const { data, error } = await supabase
+    .from("course_reviews")
+    .select("id")
+    .eq("course_id", courseId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  
+  if (error) throw error;
+  return !!data;
+}
+
+// Get course offerings with schedule
+export async function getCourseOfferings(courseId: number) {
+  const supabase = getSupabaseBrowserClient();
+  
+  const { data, error } = await supabase
+    .from("course_classes")
+    .select(`
+      *,
+      schedules:class_schedules(*),
+      members:class_members(count)
+    `)
+    .eq("course_id", courseId)
+    .in("status", ["upcoming", "ongoing"]);
+  
+  if (error) throw error;
+  return data;
+}
