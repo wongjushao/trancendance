@@ -25,6 +25,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
+import { clearUserRoleData } from "@/lib/role";
 import { useAvatar } from "@/lib/useAvatar";
 import SignOutButton from "@/components/SignOutButton";
 import {
@@ -1103,9 +1104,23 @@ export default function SettingsPage() {
       });
 
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || "Failed to delete account");
+        const raw = await response.text();
+        let message = "Failed to delete account";
+        try {
+          const parsed = JSON.parse(raw);
+          message = typeof parsed?.error === "string" ? parsed.error : message;
+        } catch {
+          if (raw && !raw.trim().startsWith("<")) {
+            message = raw.slice(0, 200);
+          } else {
+            message = `Request failed (${response.status})`;
+          }
+        }
+        throw new Error(message);
       }
+
+      clearUserRoleData();
+      await supabase.auth.signOut();
 
       toast.success("Account deleted successfully");
       setTimeout(() => {

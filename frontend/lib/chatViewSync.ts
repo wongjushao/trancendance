@@ -72,17 +72,14 @@ function getChatServiceBaseUrl(): string {
   // Use the environment variable from .env
   const explicitBase = process.env.NEXT_PUBLIC_CHAT_API_URL?.trim();
   if (explicitBase) {
-    console.log('[chatViewSync] Using NEXT_PUBLIC_CHAT_API_URL:', explicitBase);
     return explicitBase.replace(/\/$/, '');
   }
 
   // Fallback for browser
   if (typeof window !== 'undefined') {
-    console.log('[chatViewSync] Using window.location.origin');
     return window.location.origin;
   }
 
-  console.log('[chatViewSync] Using default localhost:5002');
   return 'http://localhost:5002';
 }
 
@@ -98,92 +95,73 @@ export async function fetchLatestMessages(
 ): Promise<FetchMessagesResult> {
   const { forceRefresh = false, pageSize = 50, cursor } = options;
 
-  console.log(`[chatViewSync] Fetching messages for room ${roomId}`, {
-    forceRefresh,
-    pageSize,
-    cursor
+  // Build URL with cursor-based pagination
+  const query = new URLSearchParams({ page_size: String(pageSize) });
+  if (cursor) {
+    query.set('cursor', String(cursor));
+  }
+
+  // Use relative path for Next.js API routes (will be proxied)
+  const relativePath = `/api/chat-service/rooms/${roomId}/messages?${query.toString()}`;
+  
+  const requestInit: RequestInit = {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    cache: forceRefresh ? 'no-store' : 'default',
+  };
+
+  let response: Response;
+  try {
+    response = await fetch(relativePath, requestInit);
+  } catch {
+    // If relative fetch fails, try absolute URL as fallback
+    const absoluteUrl = `${getChatServiceBaseUrl()}${relativePath}`;
+    response = await fetch(absoluteUrl, requestInit);
+  }
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`HTTP ${response.status}: ${errorText.substring(0, 200)}`);
+  }
+
+  // Check content type before parsing JSON
+  const contentType = response.headers.get('content-type');
+  if (!contentType || !contentType.includes('application/json')) {
+    await response.text(); // consume body
+    throw new Error('API did not return JSON');
+  }
+
+  const data = await response.json();
+
+  // Format messages with is_me flag
+  const formattedMessages = ((data.messages || []) as RawMessage[]).map((msg) => {
+    const createdAt = normalizeChatTimestamp(msg.created_at);
+    return {
+      ...msg,
+      created_at: createdAt,
+      is_me: msg.sender_id === currentUserId,
+      timestamp: msg.timestamp || formatChatTime(createdAt),
+      read_by_peer: msg.read_by_peer === true,
+    };
   });
 
-  try {
-    // Build URL with cursor-based pagination
-    const query = new URLSearchParams({ page_size: String(pageSize) });
-    if (cursor) {
-      query.set('cursor', String(cursor));
-    }
+  // Update cache
+  messageCache.set(roomId, formattedMessages);
 
-    // Use relative path for Next.js API routes (will be proxied)
-    const relativePath = `/api/chat-service/rooms/${roomId}/messages?${query.toString()}`;
-    
-    const requestInit: RequestInit = {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      cache: forceRefresh ? 'no-store' : 'default',
-    };
+  // Update last sync timestamp
+  const lastTimestamp = formattedMessages.length > 0
+    ? formattedMessages[formattedMessages.length - 1].created_at
+    : new Date().toISOString();
+  lastSyncTimestamps.set(roomId, lastTimestamp);
 
-    console.log(`[chatViewSync] Fetching from: ${relativePath}`);
-    
-    let response: Response;
-    try {
-      response = await fetch(relativePath, requestInit);
-    } catch (err) {
-      // If relative fetch fails, try absolute URL as fallback
-      const absoluteUrl = `${getChatServiceBaseUrl()}${relativePath}`;
-      console.warn('[chatViewSync] Relative fetch failed, trying absolute URL:', absoluteUrl);
-      response = await fetch(absoluteUrl, requestInit);
-    }
-
-    console.log(`[chatViewSync] Response status: ${response.status}`);
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`[chatViewSync] Failed to fetch messages: ${response.status} - ${errorText}`);
-      throw new Error(`HTTP ${response.status}: ${errorText.substring(0, 200)}`);
-    }
-
-    // Check content type before parsing JSON
-    const contentType = response.headers.get('content-type');
-    if (!contentType || !contentType.includes('application/json')) {
-      console.error(`[chatViewSync] Invalid content type: ${contentType}`);
-      console.error(`[chatViewSync] Response preview: ${(await response.text()).substring(0, 200)}`);
-      throw new Error('API did not return JSON');
-    }
-
-    const data = await response.json();
-    console.log(`[chatViewSync] Fetched ${data.messages?.length || 0} messages for room ${roomId}`);
-
-    // Format messages with is_me flag
-    const formattedMessages = ((data.messages || []) as RawMessage[]).map((msg) => {
-      const createdAt = normalizeChatTimestamp(msg.created_at);
-      return {
-        ...msg,
-        created_at: createdAt,
-        is_me: msg.sender_id === currentUserId,
-        timestamp: msg.timestamp || formatChatTime(createdAt),
-        read_by_peer: msg.read_by_peer === true,
-      };
-    });
-
-    // Update cache
-    messageCache.set(roomId, formattedMessages);
-
-    // Update last sync timestamp
-    const lastTimestamp = formattedMessages.length > 0
-      ? formattedMessages[formattedMessages.length - 1].created_at
-      : new Date().toISOString();
-    lastSyncTimestamps.set(roomId, lastTimestamp);
-
-    return {
-      messages: formattedMessages,
-      total_count: data.total_count || data.total,
-      has_more: data.has_more,
-      last_timestamp: lastTimestamp,
-    };
-  } catch (error) {
-    console.error('[chatViewSync] Error fetching messages:', error);
-    throw error;
-  }
+  return {
+    messages: formattedMessages,
+    total_count: data.total_count || data.total,
+    has_more: data.has_more,
+    last_timestamp: lastTimestamp,
+  };
 }
 
 /**
@@ -201,7 +179,6 @@ export async function syncMessages(
   
   // If no previous sync or force refresh, fetch from server
   if (!lastSync || options.forceRefresh) {
-    console.log(`[chatViewSync] No previous sync or force refresh for room ${roomId}, fetching from server`);
     const result = await fetchLatestMessages(roomId, accessToken, currentUserId, options);
     return result.messages;
   }
@@ -211,7 +188,6 @@ export async function syncMessages(
   const staleThreshold = 30 * 1000; // 30 seconds
   
   if (now.getTime() - lastSyncDate.getTime() > staleThreshold) {
-    console.log(`[chatViewSync] Cache is stale for room ${roomId}, re-fetching from server`);
     const result = await fetchLatestMessages(roomId, accessToken, currentUserId, {
       ...options,
       forceRefresh: true,
@@ -220,7 +196,6 @@ export async function syncMessages(
   }
 
   // Return cached messages
-  console.log(`[chatViewSync] Using cached messages for room ${roomId}`);
   return messageCache.get(roomId) || [];
 }
 
@@ -240,7 +215,6 @@ export async function forceRefreshMessages(
   currentUserId: string,
   pageSize = 50
 ): Promise<Message[]> {
-  console.log(`[chatViewSync] Force refreshing messages for room ${roomId}`);
   const result = await fetchLatestMessages(roomId, accessToken, currentUserId, {
     forceRefresh: true,
     pageSize,
@@ -254,7 +228,6 @@ export async function forceRefreshMessages(
 export function clearRoomCache(roomId: number): void {
   messageCache.delete(roomId);
   lastSyncTimestamps.delete(roomId);
-  console.log(`[chatViewSync] Cleared cache for room ${roomId}`);
 }
 
 /**
@@ -263,7 +236,6 @@ export function clearRoomCache(roomId: number): void {
 export function clearAllCaches(): void {
   messageCache.clear();
   lastSyncTimestamps.clear();
-  console.log('[chatViewSync] Cleared all caches');
 }
 
 /**
@@ -290,8 +262,6 @@ export function appendMessagesToCache(roomId: number, newMessages: Message[]): v
     // Update last sync timestamp
     const lastTimestamp = updated[updated.length - 1].created_at;
     lastSyncTimestamps.set(roomId, lastTimestamp);
-    
-    console.log(`[chatViewSync] Appended ${uniqueNewMessages.length} new messages to cache for room ${roomId}`);
   }
 }
 
