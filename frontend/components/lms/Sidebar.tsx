@@ -139,8 +139,8 @@ export function Sidebar({ user }: SidebarProps) {
       { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
       { href: "/organizations", label: "Organizations", icon: Building2 },  // Moved up
       { href: "/courses", label: "Courses", icon: BookOpen },               // Moved down
-      //{ href: "/assignments", label: "Assignments", icon: FileText },
-      {href: "/chat/rooms", label: "Chat", icon: MessageSquare },
+      { href: "/assignments", label: "Assignments", icon: FileText },
+      { href: "/chat/rooms", label: "Chat", icon: MessageSquare },
       { href: "/analytics", label: "Analytics", icon: BarChart3 },
     ];
 

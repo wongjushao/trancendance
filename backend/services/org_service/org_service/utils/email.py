@@ -125,15 +125,23 @@ def build_org_verification_html(org_name: str, verification_url: str) -> str:
 
 
 def send_org_verification_email(admin_email: str, org_name: str, verification_url: str) -> None:
-    if not _env_flag("GF_SMTP_ENABLED", default=True):
-        raise EmailConfigurationError("SMTP is disabled")
+    logger.info(f"[EMAIL] Starting send_org_verification_email to {admin_email}")
+    logger.info(f"[EMAIL] Verification URL: {verification_url}")
+    
 
+    if not _env_flag("GF_SMTP_ENABLED", default=True):
+        logger.error("[EMAIL] SMTP is disabled")
+        raise EmailConfigurationError("SMTP is disabled")
+    
     smtp_host = os.getenv("GF_SMTP_HOST")
     from_address = os.getenv("GF_SMTP_FROM_ADDRESS")
-
+    
+    logger.info(f"[EMAIL] SMTP Host: {smtp_host}")
+    logger.info(f"[EMAIL] From Address: {from_address}")
+    
     if not smtp_host or not from_address:
+        logger.error("[EMAIL] Missing SMTP configuration")
         raise EmailConfigurationError("GF_SMTP_HOST and GF_SMTP_FROM_ADDRESS must be configured")
-
     host, port = _parse_host(smtp_host)
     username = os.getenv("GF_SMTP_USER")
     password = os.getenv("GF_SMTP_PASSWORD")
