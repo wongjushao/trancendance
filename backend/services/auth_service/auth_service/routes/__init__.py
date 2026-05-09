@@ -10,6 +10,7 @@ from .MFA import mfa_ns
 from .onboarding import onboarding_ns
 from .profile import profile_ns
 from .register import register_ns
+from .settings import settings_ns 
 
 __all__ = [
     "AUTH_API_DESCRIPTION",
@@ -27,5 +28,6 @@ __all__ = [
     "onboarding_ns",
     "profile_ns",
     "register_ns",
+    "settings_ns",
 ]
 

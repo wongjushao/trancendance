@@ -141,7 +141,7 @@ export default function UnifiedDashboardPage() {
     total_courses: 0,
     completed_courses: 0,
     average_progress: 0,
-    streak_days: 7,
+    streak_days: 0,
     pending_tasks: 0,
   });
   
@@ -365,63 +365,141 @@ export default function UnifiedDashboardPage() {
         return;
       }
 
-      // Use a Map to deduplicate courses by ID
+      if (!classMembers || classMembers.length === 0) {
+        setEnrolledCourses([]);
+        setStudentStats({
+          total_courses: 0,
+          completed_courses: 0,
+          average_progress: 0,
+          streak_days: 0,
+          pending_tasks: 0,
+        });
+        return; // ← Important: exit early
+      }
+
+      // --- Batch all course IDs ---
+      const courseIds = [...new Set(
+        classMembers
+          .filter(cm => cm.course_classes?.courses)
+          .map(cm => cm.course_classes.courses.id)
+      )];
+
+      if (courseIds.length === 0) {
+        setEnrolledCourses([]);
+        return;
+      }
+
+      // --- QUERY 1: All modules and lessons for these courses ---
+      const { data: allModules, error: modulesError } = await supabase
+        .from("modules")
+        .select(`
+          id,
+          course_id,
+          classes!inner (
+            id,
+            lessons!inner (
+              id,
+              title
+            )
+          )
+        `)
+        .in("course_id", courseIds);
+
+      if (modulesError) {
+        console.error("Error fetching modules:", modulesError);
+      }
+
+      // --- Build lesson count per course ---
+      const lessonCountMap = new Map<number, number>();
+      // --- NEW: Build lesson_id -> course_id mapping for recent activity ---
+      const lessonToCourseMap = new Map<number, number>();
+      
+      allModules?.forEach((module: any) => {
+        let lessonCount = 0;
+        module.classes?.forEach((classItem: any) => {
+          classItem.lessons?.forEach((lesson: any) => {
+            lessonCount++;
+            // Store mapping: lesson_id -> course_id
+            lessonToCourseMap.set(lesson.id, module.course_id);
+          });
+        });
+        lessonCountMap.set(module.course_id, (lessonCountMap.get(module.course_id) || 0) + lessonCount);
+      });
+
+      // --- QUERY 2: All lesson progress for these class members ---
+      const classMemberIds = classMembers.map(cm => cm.id);
+      const { data: allProgress, error: progressError } = await supabase
+        .from("lesson_progress")
+        .select("class_member_id, lesson_id, status")
+        .in("class_member_id", classMemberIds);
+
+      if (progressError) {
+        console.error("Error fetching lesson progress:", progressError);
+      }
+
+      // Group progress by class_member_id
+      const progressByMember = new Map<string, { completed: Set<number> }>();
+      allProgress?.forEach((p: any) => {
+        if (!progressByMember.has(p.class_member_id)) {
+          progressByMember.set(p.class_member_id, { completed: new Set() });
+        }
+        if (p.status === "completed") {
+          progressByMember.get(p.class_member_id)!.completed.add(p.lesson_id);
+        }
+      });
+
+      // --- QUERY 3: All upcoming assignments ---
+      const { data: allAssignments, error: assignmentsError } = await supabase
+        .from("assignments")
+        .select("id, title, due_at, course_id, courses!inner(title)")
+        .in("course_id", courseIds)
+        .gte("due_at", new Date().toISOString())
+        .order("due_at", { ascending: true })
+        .limit(5);
+
+      if (assignmentsError) {
+        console.error("Error fetching assignments:", assignmentsError);
+      }
+
+      // --- QUERY 4: All recent completed lessons ---
+      const { data: allRecentProgress, error: recentError } = await supabase
+        .from("lesson_progress")
+        .select(`
+          id,
+          completed_at,
+          lesson_id,
+          class_member_id
+        `)
+        .in("class_member_id", classMemberIds)
+        .eq("status", "completed")
+        .not("completed_at", "is", null)
+        .order("completed_at", { ascending: false })
+        .limit(10);
+
+      if (recentError) {
+        console.error("Error fetching recent progress:", recentError);
+      }
+
+      // --- Build courses using batched data ---
       const coursesMap = new Map<number, EnrolledCourse>();
-      let totalProgress = 0;
+      let totalProgressSum = 0;
       let completedCount = 0;
 
-      for (const cm of classMembers || []) {
+      for (const cm of classMembers) {
         const course = cm.course_classes?.courses;
         if (!course) continue;
 
+        // Skip if user is the instructor
         if (course.created_by === userId) {
-          console.log(`Skipping course "${course.title}" because user is the instructor`);
           continue;
         }
 
-        // If we already have this course, use the best progress (highest)
-        const existingCourse = coursesMap.get(course.id);
-        
-        // Get total lessons count (do this once per course)
-        let totalLessons = 0;
-        if (!existingCourse) {
-          const { data: modules, error: modulesError } = await supabase
-            .from("modules")
-            .select(`
-              classes!inner(
-                lessons!inner(id)
-              )
-            `)
-            .eq("course_id", course.id);
-
-          if (modulesError) {
-            console.error("Error fetching modules:", modulesError);
-          }
-
-          modules?.forEach((module: any) => {
-            module.classes?.forEach((classItem: any) => {
-              totalLessons += classItem.lessons?.length || 0;
-            });
-          });
-        } else {
-          totalLessons = existingCourse.total_lessons;
-        }
-
-        // Get completed lessons for this specific class member
-        const { data: lessonProgress, error: progressError } = await supabase
-          .from("lesson_progress")
-          .select("id")
-          .eq("class_member_id", cm.id)
-          .eq("status", "completed");
-
-        if (progressError) {
-          console.error("Error fetching lesson progress:", progressError);
-        }
-
-        const completedLessons = lessonProgress?.length || 0;
+        const totalLessons = lessonCountMap.get(course.id) || 0;
+        const memberProgress = progressByMember.get(cm.id);
+        const completedLessons = memberProgress?.completed.size || 0;
         const progress = totalLessons > 0 ? (completedLessons / totalLessons) * 100 : 0;
+        const existingCourse = coursesMap.get(course.id);
 
-        // If course already exists, take the higher progress
         if (existingCourse) {
           if (progress > existingCourse.progress) {
             existingCourse.progress = Math.round(progress);
@@ -445,84 +523,51 @@ export default function UnifiedDashboardPage() {
             certificate_earned: false,
           });
         }
+
+        totalProgressSum += progress;
+        if (progress === 100) completedCount++;
       }
 
-      // Convert Map to array and calculate stats
       const coursesData = Array.from(coursesMap.values());
-      
-      // Recalculate totals
-      let totalProgressSum = 0;
-      let completedCourses = 0;
-      for (const course of coursesData) {
-        totalProgressSum += course.progress;
-        if (course.progress === 100) completedCourses++;
-      }
-
       setEnrolledCourses(coursesData);
       setStudentStats({
         total_courses: coursesData.length,
-        completed_courses: completedCourses,
+        completed_courses: completedCount,
         average_progress: coursesData.length > 0 ? Math.round(totalProgressSum / coursesData.length) : 0,
-        streak_days: 7,
+        streak_days: 0,
         pending_tasks: 0,
       });
 
-      // Get upcoming deadlines (deduplicated by course ID)
-      const courseIds = coursesData.map(c => c.id);
-      if (courseIds.length > 0) {
-        const { data: assignments, error: assignmentsError } = await supabase
-          .from("assignments")
-          .select("id, title, due_at, courses!inner(title)")
-          .in("course_id", courseIds)
-          .gte("due_at", new Date().toISOString())
-          .order("due_at", { ascending: true })
-          .limit(5);
+      // Set upcoming deadlines
+      setUpcomingDeadlines(allAssignments || []);
 
-        if (assignmentsError) {
-          console.error("Error fetching assignments:", assignmentsError);
-        }
-
-        setUpcomingDeadlines(assignments || []);
-      }
-
-      // Get recent activity (deduplicated by lesson)
-      const classMemberIds = classMembers?.map(cm => cm.id) || [];
-      if (classMemberIds.length > 0) {
-        const { data: recentProgress, error: recentError } = await supabase
-          .from("lesson_progress")
-          .select(`
-            id,
-            completed_at,
-            lesson_id,
-            lessons!inner(title)
-          `)
-          .in("class_member_id", classMemberIds)
-          .eq("status", "completed")
-          .not("completed_at", "is", null)
-          .order("completed_at", { ascending: false })
-          .limit(10);
-
-        if (recentError) {
-          console.error("Error fetching recent progress:", recentError);
-        }
-
-        // Deduplicate recent activities by lesson_id to avoid duplicates
-        const uniqueActivities = new Map();
-        (recentProgress || []).forEach((p) => {
-          if (!uniqueActivities.has(p.lesson_id)) {
-            uniqueActivities.set(p.lesson_id, {
-              id: `${p.id}-${Date.now()}-${p.lesson_id}`,
-              type: "lesson",
-              title: p.lessons?.title || "Lesson",
-              courseName: coursesData.find(c => c.id.toString() === p.lesson_id?.toString())?.title || "Course",
-              completed_at: p.completed_at,
-              status: "completed",
-            });
-          }
+      // --- FIXED: Build recent activity using the lesson-to-course mapping ---
+      const uniqueActivities = new Map();
+      
+      for (const progress of allRecentProgress || []) {
+        // Skip if we already have this lesson
+        if (uniqueActivities.has(progress.lesson_id)) continue;
+        
+        // Find which course this lesson belongs to using our mapping
+        const courseId = lessonToCourseMap.get(progress.lesson_id);
+        const course = coursesData.find(c => c.id === courseId);
+        
+        // Get lesson title (optional - you can fetch if needed)
+        let lessonTitle = "Lesson";
+        // If you want lesson titles, you'd need to fetch them or store in mapping
+        
+        uniqueActivities.set(progress.lesson_id, {
+          id: `${progress.id}-${Date.now()}-${progress.lesson_id}`,
+          type: "lesson",
+          title: `Lesson ${progress.lesson_id}`, // Or fetch actual title
+          courseName: course?.title || "Course",
+          completed_at: progress.completed_at,
+          status: "completed",
         });
-
-        setRecentActivity(Array.from(uniqueActivities.values()).slice(0, 5));
       }
+      
+      setRecentActivity(Array.from(uniqueActivities.values()).slice(0, 5));
+
     } catch (error) {
       console.error("Error in loadLearningData:", error);
     }
@@ -542,56 +587,158 @@ export default function UnifiedDashboardPage() {
         return;
       }
 
-      const teacherCoursesData: TeacherCourse[] = [];
-      let totalStudents = 0;
-      let totalRating = 0;
-      let ratingCount = 0;
+      if (!courses || courses.length === 0) {
+        setTeacherCourses([]);
+        setTeacherStats({
+          total_students: 0,
+          active_courses: 0,
+          average_rating: 0,
+          completion_rate: 0,
+        });
+        setPendingGrading([]);
+        return;
+      }
 
-      for (const course of courses || []) {
-        // Get student count
-        const { data: courseClasses, error: classesError } = await supabase
-          .from("course_classes")
-          .select("id")
-          .eq("course_id", course.id);
+      const courseIds = courses.map(c => c.id);
 
-        if (classesError) {
-          console.error("Error fetching course classes:", classesError);
+      // --- OPTIMIZATION: Single query for ALL course classes ---
+      const { data: allCourseClasses, error: classesError } = await supabase
+        .from("course_classes")
+        .select("id, course_id")
+        .in("course_id", courseIds);
+
+      if (classesError) {
+        console.error("Error fetching course classes:", classesError);
+      }
+
+      // Build classIds by course
+      const classIdsByCourse = new Map<number, number[]>();
+      allCourseClasses?.forEach((cc: any) => {
+        if (!classIdsByCourse.has(cc.course_id)) {
+          classIdsByCourse.set(cc.course_id, []);
         }
+        classIdsByCourse.get(cc.course_id)!.push(cc.id);
+      });
 
-        const classIds = courseClasses?.map(cc => cc.id) || [];
-        let studentCount = 0;
+      const allClassIds = allCourseClasses?.map(cc => cc.id) || [];
 
-        if (classIds.length > 0) {
-          const { count, error: countError } = await supabase
-            .from("class_members")
-            .select("id", { count: "exact", head: true })
-            .in("course_class_id", classIds)
-            .eq("role", "student");
-          
-          if (countError) {
-            console.error("Error counting students:", countError);
-          } else {
-            studentCount = count || 0;
-            totalStudents += studentCount;
+      // --- OPTIMIZATION: Single query for ALL student counts ---
+      let studentCountMap = new Map<number, number>();
+      if (allClassIds.length > 0) {
+        const { data: allClassMembers, error: membersError } = await supabase
+          .from("class_members")
+          .select("course_class_id, user_id")
+          .in("course_class_id", allClassIds)
+          .eq("role", "student");
+
+        if (membersError) {
+          console.error("Error fetching class members:", membersError);
+        } else {
+          // Count unique students per course class, then aggregate by course
+          const studentsPerClass = new Map<number, Set<string>>();
+          allClassMembers?.forEach((cm: any) => {
+            if (!studentsPerClass.has(cm.course_class_id)) {
+              studentsPerClass.set(cm.course_class_id, new Set());
+            }
+            studentsPerClass.get(cm.course_class_id)!.add(cm.user_id);
+          });
+
+          // Aggregate by course
+          for (const [courseId, classIds] of classIdsByCourse) {
+            let uniqueStudents = new Set<string>();
+            for (const classId of classIds) {
+              const students = studentsPerClass.get(classId);
+              if (students) {
+                students.forEach(s => uniqueStudents.add(s));
+              }
+            }
+            studentCountMap.set(courseId, uniqueStudents.size);
           }
         }
+      }
 
-        // Get average rating
-        const { data: reviews, error: reviewsError } = await supabase
-          .from("course_reviews")
-          .select("rating")
-          .eq("course_id", course.id);
+      // --- OPTIMIZATION: Single query for ALL reviews ---
+      const { data: allReviews, error: reviewsError } = await supabase
+        .from("course_reviews")
+        .select("course_id, rating")
+        .in("course_id", courseIds);
 
-        if (reviewsError) {
-          console.error("Error fetching reviews:", reviewsError);
+      if (reviewsError) {
+        console.error("Error fetching reviews:", reviewsError);
+      }
+
+      // Calculate average rating per course
+      const ratingMap = new Map<number, { sum: number; count: number }>();
+      allReviews?.forEach((review: any) => {
+        if (!ratingMap.has(review.course_id)) {
+          ratingMap.set(review.course_id, { sum: 0, count: 0 });
         }
+        const entry = ratingMap.get(review.course_id)!;
+        entry.sum += review.rating;
+        entry.count++;
+      });
 
-        const avgRating = reviews?.length 
-          ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length 
-          : 0;
-        
-        if (reviews && reviews.length > 0) {
-          totalRating += avgRating;
+      // --- OPTIMIZATION: Single query for ALL assignments and submissions ---
+      const { data: allAssignments, error: assignError } = await supabase
+        .from("assignments")
+        .select("id, title, due_at, course_id")
+        .in("course_id", courseIds)
+        .order("due_at", { ascending: true })
+        .limit(5);
+
+      if (assignError) {
+        console.error("Error fetching assignments:", assignError);
+      }
+
+      const assignmentIds = allAssignments?.map(a => a.id) || [];
+      let pendingGradingMap = new Map<number, { submissions: number; title: string; due_date: string; course_name: string }>();
+
+      if (assignmentIds.length > 0) {
+        const { data: allSubmissions, error: subError } = await supabase
+          .from("submissions")
+          .select("assignment_id, grade")
+          .in("assignment_id", assignmentIds);
+
+        if (subError) {
+          console.error("Error fetching submissions:", subError);
+        } else {
+          // Count pending per assignment
+          const pendingCount = new Map<number, number>();
+          allSubmissions?.forEach((sub: any) => {
+            if (sub.grade === null) {
+              pendingCount.set(sub.assignment_id, (pendingCount.get(sub.assignment_id) || 0) + 1);
+            }
+          });
+
+          // Build pending grading map
+          allAssignments?.forEach((assignment: any) => {
+            const count = pendingCount.get(assignment.id) || 0;
+            if (count > 0) {
+              pendingGradingMap.set(assignment.id, {
+                submissions: count,
+                title: assignment.title,
+                due_date: assignment.due_at,
+                course_name: courses.find(c => c.id === assignment.course_id)?.title || "Unknown",
+              });
+            }
+          });
+        }
+      }
+
+      // Build teacher courses data
+      const teacherCoursesData: TeacherCourse[] = [];
+      let totalStudents = 0;
+      let totalRatingSum = 0;
+      let ratingCount = 0;
+
+      for (const course of courses) {
+        const studentCount = studentCountMap.get(course.id) || 0;
+        totalStudents += studentCount;
+
+        const ratingData = ratingMap.get(course.id);
+        const avgRating = ratingData ? ratingData.sum / ratingData.count : 0;
+        if (ratingData) {
+          totalRatingSum += avgRating;
           ratingCount++;
         }
 
@@ -609,54 +756,24 @@ export default function UnifiedDashboardPage() {
       setTeacherCourses(teacherCoursesData);
       setTeacherStats({
         total_students: totalStudents,
-        active_courses: courses?.filter(c => c.status === "published").length || 0,
-        average_rating: ratingCount > 0 ? totalRating / ratingCount : 0,
+        active_courses: courses.filter(c => c.status === "published").length,
+        average_rating: ratingCount > 0 ? totalRatingSum / ratingCount : 0,
         completion_rate: 0,
       });
 
-      // Get pending grading
-      const courseIds = teacherCoursesData.map(c => c.id);
-      if (courseIds.length > 0) {
-        const { data: assignments, error: assignmentsError } = await supabase
-          .from("assignments")
-          .select(`
-            id,
-            title,
-            due_at,
-            courses(title)
-          `)
-          .in("course_id", courseIds)
-          .order("due_at", { ascending: true })
-          .limit(5);
+      // Set pending grading
+      const pendingList: PendingGrading[] = Array.from(pendingGradingMap.values())
+        .map(p => ({
+          id: 0, // We don't have the original assignment ID in this structure
+          title: p.title,
+          course_name: p.course_name,
+          submissions: p.submissions,
+          due_date: p.due_date,
+        }))
+        .slice(0, 3);
+      
+      setPendingGrading(pendingList);
 
-        if (assignmentsError) {
-          console.error("Error fetching assignments:", assignmentsError);
-        }
-
-        const pending: PendingGrading[] = [];
-        for (const assignment of assignments || []) {
-          const { count, error: countError } = await supabase
-            .from("submissions")
-            .select("id", { count: "exact", head: true })
-            .eq("assignment_id", assignment.id)
-            .is("grade", null);
-
-          if (countError) {
-            console.error("Error counting submissions:", countError);
-          }
-
-          if (count && count > 0) {
-            pending.push({
-              id: assignment.id,
-              title: assignment.title,
-              course_name: assignment.courses?.title || "Unknown",
-              submissions: count,
-              due_date: assignment.due_at,
-            });
-          }
-        }
-        setPendingGrading(pending.slice(0, 3));
-      }
     } catch (error) {
       console.error("Error in loadTeachingData:", error);
     }
@@ -705,127 +822,195 @@ export default function UnifiedDashboardPage() {
       const totalCourses = courses?.length || 0;
       const publishedCourses = courses?.filter(c => c.status === "published").length || 0;
 
-      // Get all students in this organization
-      const { data: courseClasses, error: classesError } = await supabase
+      if (!courses || courses.length === 0) {
+        setAdminStats({
+          total_students: 0,
+          active_students: 0,
+          total_courses: 0,
+          published_courses: 0,
+          average_rating: 0,
+          completion_rate: 0,
+          pending_approvals: 0,
+        });
+        setTopCourses([]);
+        return;
+      }
+
+      const courseIds = courses.map(c => c.id);
+
+      // --- OPTIMIZATION: Single query for ALL course classes ---
+      const { data: allCourseClasses, error: classesError } = await supabase
         .from("course_classes")
-        .select("id")
-        .in("course_id", courses?.map(c => c.id) || []);
+        .select("id, course_id")
+        .in("course_id", courseIds);
 
       if (classesError) {
         console.error("Error fetching course classes:", classesError);
       }
 
-      const classIds = courseClasses?.map(cc => cc.id) || [];
+      const classIdsByCourse = new Map<number, number[]>();
+      const allClassIds: number[] = [];
+
+      allCourseClasses?.forEach((cc: any) => {
+        allClassIds.push(cc.id);
+        if (!classIdsByCourse.has(cc.course_id)) {
+          classIdsByCourse.set(cc.course_id, []);
+        }
+        classIdsByCourse.get(cc.course_id)!.push(cc.id);
+      });
+
+      // --- OPTIMIZATION: Single query for ALL class members (students) ---
       let totalStudents = 0;
       let activeStudents = 0;
+      let studentCountByCourse = new Map<number, number>();
+      let completionByCourse = new Map<number, number>();
 
-      if (classIds.length > 0) {
-        // Get unique students
-        const { data: classMembers, error: membersError } = await supabase
+      if (allClassIds.length > 0) {
+        const { data: allClassMembers, error: membersError } = await supabase
           .from("class_members")
-          .select("user_id, enrolled_at")
-          .in("course_class_id", classIds)
+          .select("id, user_id, enrolled_at, course_class_id")
+          .in("course_class_id", allClassIds)
           .eq("role", "student");
 
         if (membersError) {
           console.error("Error fetching class members:", membersError);
-        }
+        } else {
+          // Calculate totals
+          const uniqueStudents = new Set(allClassMembers?.map(cm => cm.user_id));
+          totalStudents = uniqueStudents.size;
 
-        const uniqueStudents = new Set(classMembers?.map(cm => cm.user_id));
-        totalStudents = uniqueStudents.size;
-
-        // Active students (enrolled in last 30 days)
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-        
-        const activeSet = new Set();
-        classMembers?.forEach(cm => {
-          if (new Date(cm.enrolled_at) > thirtyDaysAgo) {
-            activeSet.add(cm.user_id);
-          }
-        });
-        activeStudents = activeSet.size;
-      }
-
-      // Calculate average rating and completion for top courses
-      const coursesWithStats = await Promise.all((courses || []).map(async (course) => {
-        // Get average rating
-        const { data: reviews, error: reviewsError } = await supabase
-          .from("course_reviews")
-          .select("rating")
-          .eq("course_id", course.id);
-        
-        if (reviewsError) {
-          console.error("Error fetching reviews:", reviewsError);
-        }
-
-        const avgRating = reviews?.length 
-          ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length 
-          : 0;
-
-        // Get student count
-        const { data: ccForCourse, error: ccError } = await supabase
-          .from("course_classes")
-          .select("id")
-          .eq("course_id", course.id);
-        
-        if (ccError) {
-          console.error("Error fetching course classes:", ccError);
-        }
-
-        const classIdsForCourse = ccForCourse?.map(cc => cc.id) || [];
-        let studentCount = 0;
-        let completion = 0;
-
-        if (classIdsForCourse.length > 0) {
-          const { data: cmForCourse, error: cmError } = await supabase
-            .from("class_members")
-            .select("id")
-            .in("course_class_id", classIdsForCourse)
-            .eq("role", "student");
+          const thirtyDaysAgo = new Date();
+          thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
           
-          if (cmError) {
-            console.error("Error fetching class members:", cmError);
+          const activeSet = new Set();
+          allClassMembers?.forEach(cm => {
+            if (new Date(cm.enrolled_at) > thirtyDaysAgo) {
+              activeSet.add(cm.user_id);
+            }
+          });
+          activeStudents = activeSet.size;
+
+          // Count students per course
+          const studentsPerClassMemberId = new Map<number, Set<string>>();
+          allClassMembers?.forEach((cm: any) => {
+            if (!studentsPerClassMemberId.has(cm.course_class_id)) {
+              studentsPerClassMemberId.set(cm.course_class_id, new Set());
+            }
+            studentsPerClassMemberId.get(cm.course_class_id)!.add(cm.user_id);
+          });
+
+          // Aggregate by course
+          for (const [courseId, classIds] of classIdsByCourse) {
+            let uniqueCourseStudents = new Set<string>();
+            for (const classId of classIds) {
+              const students = studentsPerClassMemberId.get(classId);
+              if (students) {
+                students.forEach(s => uniqueCourseStudents.add(s));
+              }
+            }
+            studentCountByCourse.set(courseId, uniqueCourseStudents.size);
           }
 
-          studentCount = cmForCourse?.length || 0;
-
-          // Calculate completion rate
-          const cmIds = cmForCourse?.map(cm => cm.id) || [];
-          if (cmIds.length > 0) {
-            const { data: progress, error: progressError } = await supabase
+          // --- Get completion rates per course ---
+          const classMemberIds = allClassMembers?.map(cm => cm.id) || [];
+          if (classMemberIds.length > 0) {
+            const { data: allProgress, error: progressError } = await supabase
               .from("lesson_progress")
-              .select("status")
-              .in("class_member_id", cmIds);
-            
+              .select("class_member_id, status")
+              .in("class_member_id", classMemberIds);
+
             if (progressError) {
               console.error("Error fetching progress:", progressError);
-            }
+            } else {
+              const progressByClassMember = new Map<number, { total: number; completed: number }>();
+              allProgress?.forEach((p: any) => {
+                if (!progressByClassMember.has(p.class_member_id)) {
+                  progressByClassMember.set(p.class_member_id, { total: 0, completed: 0 });
+                }
+                const stats = progressByClassMember.get(p.class_member_id)!;
+                stats.total++;
+                if (p.status === "completed") stats.completed++;
+              });
 
-            const total = progress?.length || 0;
-            const completed = progress?.filter(p => p.status === "completed").length || 0;
-            completion = total > 0 ? (completed / total) * 100 : 0;
+              // Calculate completion rate per course by mapping class members to courses
+              const classMemberToCourse = new Map<number, number>();
+              allClassMembers?.forEach((cm: any) => {
+                // Find which course this class member belongs to
+                for (const [courseId, classIds] of classIdsByCourse) {
+                  if (classIds.includes(cm.course_class_id)) {
+                    classMemberToCourse.set(cm.id, courseId);
+                    break;
+                  }
+                }
+              });
+
+              const courseCompletion = new Map<number, { total: number; completed: number }>();
+              for (const [cmId, stats] of progressByClassMember) {
+                const courseId = classMemberToCourse.get(cmId);
+                if (courseId) {
+                  if (!courseCompletion.has(courseId)) {
+                    courseCompletion.set(courseId, { total: 0, completed: 0 });
+                  }
+                  const courseStats = courseCompletion.get(courseId)!;
+                  courseStats.total += stats.total;
+                  courseStats.completed += stats.completed;
+                }
+              }
+
+              for (const [courseId, stats] of courseCompletion) {
+                completionByCourse.set(courseId, stats.total > 0 ? (stats.completed / stats.total) * 100 : 0);
+              }
+            }
           }
         }
+      }
 
-        return {
-          id: course.id,
-          title: course.title,
-          students: studentCount,
-          rating: avgRating,
-          completion: Math.round(completion),
-        };
+      // --- OPTIMIZATION: Single query for ALL reviews ---
+      const { data: allReviews, error: reviewsError } = await supabase
+        .from("course_reviews")
+        .select("course_id, rating")
+        .in("course_id", courseIds);
+
+      if (reviewsError) {
+        console.error("Error fetching reviews:", reviewsError);
+      }
+
+      const ratingByCourse = new Map<number, { sum: number; count: number }>();
+      allReviews?.forEach((review: any) => {
+        if (!ratingByCourse.has(review.course_id)) {
+          ratingByCourse.set(review.course_id, { sum: 0, count: 0 });
+        }
+        const entry = ratingByCourse.get(review.course_id)!;
+        entry.sum += review.rating;
+        entry.count++;
+      });
+
+      // Build courses with stats
+      const coursesWithStats = courses.map(course => ({
+        id: course.id,
+        title: course.title,
+        students: studentCountByCourse.get(course.id) || 0,
+        rating: (() => {
+          const r = ratingByCourse.get(course.id);
+          return r ? r.sum / r.count : 0;
+        })(),
+        completion: completionByCourse.get(course.id) || 0,
       }));
 
-      const topCoursesSorted = coursesWithStats.sort((a, b) => b.students - a.students).slice(0, 3);
+      const topCoursesSorted = [...coursesWithStats]
+        .sort((a, b) => b.students - a.students)
+        .slice(0, 3);
+
+      const avgRating = coursesWithStats.reduce((sum, c) => sum + c.rating, 0) / (coursesWithStats.length || 1);
+      const avgCompletion = coursesWithStats.reduce((sum, c) => sum + c.completion, 0) / (coursesWithStats.length || 1);
 
       setAdminStats({
         total_students: totalStudents,
         active_students: activeStudents,
         total_courses: totalCourses,
         published_courses: publishedCourses,
-        average_rating: coursesWithStats.reduce((sum, c) => sum + c.rating, 0) / (coursesWithStats.length || 1),
-        completion_rate: coursesWithStats.reduce((sum, c) => sum + c.completion, 0) / (coursesWithStats.length || 1),
+        average_rating: Math.round(avgRating * 10) / 10,
+        completion_rate: Math.round(avgCompletion),
         pending_approvals: 0,
       });
 

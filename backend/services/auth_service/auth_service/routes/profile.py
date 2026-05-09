@@ -362,6 +362,8 @@ def update_profile():
     token = extract_bearer_token()
     if token is None:
         return jsonify({"error": "Missing authorization header"}), 401
+    
+    current_app.logger.info(f"Token received: {token[:50]}...")
 
     user_id, email = verify_supabase_jwt(token)
     if not user_id:

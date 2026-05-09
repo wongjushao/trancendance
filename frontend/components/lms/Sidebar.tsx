@@ -236,7 +236,23 @@ export function Sidebar({ user }: SidebarProps) {
           {!isCollapsed && (
             <div className="flex-1 min-w-0">
               <p className="text-white text-sm font-medium truncate">{getDisplayName()}</p>
-              <p className="text-gray-400 text-xs truncate capitalize">{roleData.role?.replace('_', ' ')}</p>
+              {/* Display role - sanitize to ensure proper display */}
+              <p className="text-gray-400 text-xs truncate">
+                {(() => {
+                  const roleMap: Record<string, string> = {
+                    'student': 'Student',
+                    'teacher': 'Teacher', 
+                    'admin': 'Admin',
+                  };
+                  const currentRole = roleData.role;
+                  return roleMap[currentRole] || currentRole;
+                })()}
+                {roleData.pendingRole && (
+                  <span className="text-yellow-400 ml-1">
+                    (Pending {roleData.pendingRole})
+                  </span>
+                )}
+              </p>
             </div>
           )}
         </Link>

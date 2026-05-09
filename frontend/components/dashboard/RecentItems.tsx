@@ -93,9 +93,9 @@ export function RecentItems({ items }: RecentItemsProps) {
             <Clock className="w-5 h-5 text-purple-400" />
             <h3 className="text-lg font-semibold text-white">Recent Activity</h3>
           </div>
-          <Link href="/dashboard/activity">
+          <Link href="/dashboard">
             <button className="text-sm text-gray-400 hover:text-white transition-colors">
-              View all
+              View
             </button>
           </Link>
         </div>

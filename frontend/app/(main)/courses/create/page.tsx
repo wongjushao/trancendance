@@ -106,7 +106,6 @@ export default function CreateCoursePage() {
           <h1 className="text-2xl font-bold text-white mb-3">Cannot Create Course</h1>
           <p className="text-gray-400 mb-6">
             You need to be a teacher or admin in an organization to create courses.
-            {roleData.role === 'pending_teacher' && ' Your teacher request is still pending approval.'}
           </p>
           <div className="flex gap-3 justify-center">
             <button
