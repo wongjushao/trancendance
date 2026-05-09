@@ -59,6 +59,7 @@ import { useRole } from "@/components/providers/RoleProvider";
 import { InviteMemberModal } from "@/components/organization/InviteMemberModal";
 import { toast } from "sonner";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
+import { type TeacherRequest } from "@/lib/teacher-requests"; // ADD THIS IMPORT
 
 interface OrganizationData {
   id: number;
@@ -134,6 +135,8 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
   const [editingMember, setEditingMember] = useState<Member | null>(null);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [activeTab, setActiveTab] = useState("members");
+
+  const [teacherRequests, setTeacherRequests] = useState<TeacherRequest[]>([]);
   
   const [settingsForm, setSettingsForm] = useState({
     name: "",
@@ -154,6 +157,119 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
   } | null>(null);
   const [deletionStep, setDeletionStep] = useState<'select' | 'confirm' | 'cooldown' | 'recovery-request'>('select');
   const [recoveryReason, setRecoveryReason] = useState('');
+
+  // ADD THIS FUNCTION - Fetch members after approval
+  const fetchMembers = async () => {
+    try {
+      const { data: memberData, error } = await supabase
+        .from("organization_members")
+        .select(`
+          id,
+          user_id,
+          member_role,
+          created_at,
+          user:profiles!organization_members_user_id_fkey (
+            id,
+            first_name,
+            last_name,
+            username,
+            avatar_url
+          )
+        `)
+        .eq("organization_id", organizationId);
+
+      if (error) throw error;
+
+      if (memberData) {
+        // Get student course counts
+        const { data: classMembers } = await supabase
+          .from("class_members")
+          .select("user_id, role");
+
+        const studentCourseCount = new Map<string, number>();
+        classMembers?.forEach(cm => {
+          if (cm.role === 'student') {
+            studentCourseCount.set(cm.user_id, (studentCourseCount.get(cm.user_id) || 0) + 1);
+          }
+        });
+
+        // Get instructor course counts
+        const { data: orgCourses } = await supabase
+          .from("courses")
+          .select("id, created_by")
+          .eq("organization_id", organizationId);
+
+        const instructorCourseCount = new Map<string, number>();
+        orgCourses?.forEach(course => {
+          instructorCourseCount.set(course.created_by, (instructorCourseCount.get(course.created_by) || 0) + 1);
+        });
+
+        const formattedMembers: Member[] = memberData.map((m: any) => {
+          let courseCount = 0;
+          
+          if (m.member_role === "student") {
+            courseCount = studentCourseCount.get(m.user_id) || 0;
+          } else if (m.member_role === "teacher" || m.member_role === "admin" || m.member_role === "sub_admin") {
+            courseCount = instructorCourseCount.get(m.user_id) || 0;
+          }
+          
+          const firstName = m.user?.first_name || "";
+          const lastName = m.user?.last_name || "";
+          const username = m.user?.username || "";
+          
+          let name = "Unknown User";
+          if (firstName && lastName) name = `${firstName} ${lastName}`;
+          else if (firstName) name = firstName;
+          else if (username) name = username;
+          
+          let avatar = "U";
+          if (firstName) avatar = firstName[0].toUpperCase();
+          else if (username) avatar = username[0].toUpperCase();
+          
+          return {
+            id: m.user_id,
+            user_id: m.user_id,
+            name: name,
+            email: "",
+            role: m.member_role as Member["role"],
+            avatar: m.user?.avatar_url || avatar,
+            joinedAt: new Date(m.created_at).toISOString().split("T")[0],
+            courses: courseCount,
+            status: "active",
+          };
+        });
+        
+        setMembers(formattedMembers);
+      }
+    } catch (error) {
+      console.error("Error fetching members:", error);
+    }
+  };
+
+  // Load teacher requests
+  const loadTeacherRequests = async () => {
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      const response = await fetch(`/api/org-service/organizations/${organizationId}/teacher-requests`, {
+        headers: {
+          'Authorization': `Bearer ${session?.access_token}`,
+        },
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setTeacherRequests(data);
+      } else {
+        console.error("Failed to load teacher requests:", response.status);
+        setTeacherRequests([]);
+      }
+    } catch (error) {
+      console.error("Error loading teacher requests:", error);
+      setTeacherRequests([]);
+    }
+  };
 
   const startOrganizationDeletion = () => {
     if (!organizationId || !organization?.name) {
@@ -324,23 +440,8 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
         });
       }
 
-      // Get organization members with profiles
-      const { data: memberData } = await supabase
-        .from("organization_members")
-        .select(`
-          id,
-          user_id,
-          member_role,
-          created_at,
-          user:profiles!organization_members_user_id_fkey (
-            id,
-            first_name,
-            last_name,
-            username,
-            avatar_url
-          )
-        `)
-        .eq("organization_id", organizationId);
+      // Load members and other data
+      await fetchMembers(); // Use the fetchMembers function
 
       // Get all courses in this organization
       const { data: orgCourses } = await supabase
@@ -348,158 +449,23 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
         .select("id, created_by, title, description, thumbnail, status, created_at")
         .eq("organization_id", organizationId);
 
-      if (memberData && orgCourses) {
-        const instructorCourseCount = new Map<string, number>();
-        orgCourses.forEach(course => {
-          instructorCourseCount.set(course.created_by, (instructorCourseCount.get(course.created_by) || 0) + 1);
-        });
-
-        const { data: classMembers } = await supabase
-          .from("class_members")
-          .select("user_id, role");
-
-        const studentCourseCount = new Map<string, number>();
-        classMembers?.forEach(cm => {
-          if (cm.role === 'student') {
-            studentCourseCount.set(cm.user_id, (studentCourseCount.get(cm.user_id) || 0) + 1);
-          }
-        });
-
-        const membersWithCourses: Member[] = (memberData || []).map((m: any) => {
-          let courseCount = 0;
-          
-          if (m.member_role === "student") {
-            courseCount = studentCourseCount.get(m.user_id) || 0;
-          } else if (m.member_role === "teacher" || m.member_role === "admin" || m.member_role === "sub_admin") {
-            courseCount = instructorCourseCount.get(m.user_id) || 0;
-          }
-          
-          const firstName = m.user?.first_name || "";
-          const lastName = m.user?.last_name || "";
-          const username = m.user?.username || "";
-          
-          let name = "Unknown User";
-          if (firstName && lastName) name = `${firstName} ${lastName}`;
-          else if (firstName) name = firstName;
-          else if (username) name = username;
-          
-          let avatar = "U";
-          if (firstName) avatar = firstName[0].toUpperCase();
-          else if (username) avatar = username[0].toUpperCase();
-          
-          return {
-            id: m.user_id,
-            user_id: m.user_id,
-            name: name,
-            email: "",
-            role: m.member_role as Member["role"],
-            avatar: m.user?.avatar_url || avatar,
-            joinedAt: new Date(m.created_at).toISOString().split("T")[0],
-            courses: courseCount,
-            status: "active",
-          };
-        });
-        
-        setMembers(membersWithCourses);
-        
-        const totalStudents = membersWithCourses.filter(m => m.role === "student").length;
-        const totalTeachers = membersWithCourses.filter(m => m.role === "teacher" || m.role === "admin" || m.role === "sub_admin").length;
-        const totalCoursesCount = orgCourses?.length || 0;
-        
-        let totalRatingSum = 0;
-        let totalRatingCount = 0;
-        for (const course of orgCourses || []) {
-          const { data: reviews } = await supabase
-            .from("course_reviews")
-            .select("rating")
-            .eq("course_id", course.id);
-          
-          if (reviews && reviews.length > 0) {
-            totalRatingSum += reviews.reduce((sum, r) => sum + r.rating, 0);
-            totalRatingCount += reviews.length;
-          }
-        }
-        const averageRating = totalRatingCount > 0 ? totalRatingSum / totalRatingCount : 0;
-        
-        let totalProgress = 0;
-        let totalProgressCount = 0;
-        
-        const courseIds = orgCourses?.map(c => c.id) || [];
-        if (courseIds.length > 0) {
-          const { data: courseClassesData } = await supabase
-            .from("course_classes")
-            .select("id")
-            .in("course_id", courseIds);
-          
-          const classIds = courseClassesData?.map(cc => cc.id) || [];
-          
-          if (classIds.length > 0) {
-            const { data: classMembersData } = await supabase
-              .from("class_members")
-              .select("id")
-              .in("course_class_id", classIds);
-            
-            const cmIds = classMembersData?.map(cm => cm.id) || [];
-            
-            if (cmIds.length > 0) {
-              const { data: lessonProgress } = await supabase
-                .from("lesson_progress")
-                .select("status")
-                .in("class_member_id", cmIds);
-              
-              const completed = lessonProgress?.filter(lp => lp.status === "completed").length || 0;
-              totalProgress += completed;
-              totalProgressCount += lessonProgress?.length || 0;
-            }
-          }
-        }
-        const completionRate = totalProgressCount > 0 ? (totalProgress / totalProgressCount) * 100 : 0;
-        
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-        
-        const recentMembers = membersWithCourses.filter(m => {
-          const joinedDate = new Date(m.joinedAt);
-          return joinedDate > thirtyDaysAgo;
-        }).length;
-        
-        const monthlyGrowth = totalStudents > 0 ? Math.round((recentMembers / totalStudents) * 100) : 0;
-        
-        setAnalytics({
-          totalStudents,
-          totalTeachers,
-          totalCourses: totalCoursesCount,
-          averageRating: Math.round(averageRating * 10) / 10,
-          completionRate: Math.round(completionRate),
-          monthlyGrowth: Math.max(0, monthlyGrowth),
-        });
-      }
-
-      const { data: domainData } = await supabase
-        .from("organization_domains")
-        .select("*")
-        .eq("organization_id", organizationId);
-      setDomains(domainData || []);
+      // Load teacher requests
+      await loadTeacherRequests();
 
       if (orgCourses) {
         const formattedCourses: Course[] = await Promise.all(orgCourses.map(async (c: any) => {
           let instructorName = "Unknown Instructor";
           if (c.created_by) {
-            const instructorProfile = members.find(m => m.user_id === c.created_by);
-            if (instructorProfile) {
-              instructorName = instructorProfile.name;
-            } else {
-              const { data: instructor } = await supabase
-                .from("profiles")
-                .select("first_name, last_name, username")
-                .eq("id", c.created_by)
-                .single();
+            const { data: instructor } = await supabase
+              .from("profiles")
+              .select("first_name, last_name, username")
+              .eq("id", c.created_by)
+              .single();
               
-              if (instructor) {
-                instructorName = instructor.first_name 
-                  ? `${instructor.first_name} ${instructor.last_name || ""}`.trim()
-                  : instructor.username || "Instructor";
-              }
+            if (instructor) {
+              instructorName = instructor.first_name 
+                ? `${instructor.first_name} ${instructor.last_name || ""}`.trim()
+                : instructor.username || "Instructor";
             }
           }
 
@@ -544,6 +510,87 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
         }));
         setCourses(formattedCourses);
       }
+
+      // Calculate analytics
+      if (members.length > 0 && orgCourses) {
+        const totalStudents = members.filter(m => m.role === "student").length;
+        const totalTeachers = members.filter(m => m.role === "teacher" || m.role === "admin" || m.role === "sub_admin").length;
+        const totalCoursesCount = orgCourses?.length || 0;
+        
+        let totalRatingSum = 0;
+        let totalRatingCount = 0;
+        for (const course of orgCourses || []) {
+          const { data: reviews } = await supabase
+            .from("course_reviews")
+            .select("rating")
+            .eq("course_id", course.id);
+          
+          if (reviews && reviews.length > 0) {
+            totalRatingSum += reviews.reduce((sum, r) => sum + r.rating, 0);
+            totalRatingCount += reviews.length;
+          }
+        }
+        const averageRating = totalRatingCount > 0 ? totalRatingSum / totalRatingCount : 0;
+        
+        // Calculate completion rate
+        let totalProgress = 0;
+        let totalProgressCount = 0;
+        const courseIds = orgCourses?.map(c => c.id) || [];
+        if (courseIds.length > 0) {
+          const { data: courseClassesData } = await supabase
+            .from("course_classes")
+            .select("id")
+            .in("course_id", courseIds);
+          
+          const classIds = courseClassesData?.map(cc => cc.id) || [];
+          
+          if (classIds.length > 0) {
+            const { data: classMembersData } = await supabase
+              .from("class_members")
+              .select("id")
+              .in("course_class_id", classIds);
+            
+            const cmIds = classMembersData?.map(cm => cm.id) || [];
+            
+            if (cmIds.length > 0) {
+              const { data: lessonProgress } = await supabase
+                .from("lesson_progress")
+                .select("status")
+                .in("class_member_id", cmIds);
+              
+              const completed = lessonProgress?.filter(lp => lp.status === "completed").length || 0;
+              totalProgress += completed;
+              totalProgressCount += lessonProgress?.length || 0;
+            }
+          }
+        }
+        const completionRate = totalProgressCount > 0 ? (totalProgress / totalProgressCount) * 100 : 0;
+        
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        
+        const recentMembers = members.filter(m => {
+          const joinedDate = new Date(m.joinedAt);
+          return joinedDate > thirtyDaysAgo;
+        }).length;
+        
+        const monthlyGrowth = totalStudents > 0 ? Math.round((recentMembers / totalStudents) * 100) : 0;
+        
+        setAnalytics({
+          totalStudents,
+          totalTeachers,
+          totalCourses: totalCoursesCount,
+          averageRating: Math.round(averageRating * 10) / 10,
+          completionRate: Math.round(completionRate),
+          monthlyGrowth: Math.max(0, monthlyGrowth),
+        });
+      }
+
+      const { data: domainData } = await supabase
+        .from("organization_domains")
+        .select("*")
+        .eq("organization_id", organizationId);
+      setDomains(domainData || []);
 
       setLoading(false);
     };
@@ -590,6 +637,59 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
     
     checkSetupStatus();
   }, [organizationId]);
+
+  const approveTeacherRequest = async (requestId: string) => {
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      const response = await fetch(`/api/org-service/organizations/${organizationId}/teacher-requests/${requestId}/approve`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session?.access_token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (response.ok) {
+        toast.success("Teacher request approved. User is now a teacher.");
+        await loadTeacherRequests();
+        await fetchMembers(); // Refresh members list
+      } else {
+        const error = await response.json();
+        throw new Error(error.message || "Failed to approve");
+      }
+    } catch (error: any) {
+      console.error("Error approving teacher request:", error);
+      toast.error(error.message || "Failed to approve teacher request");
+    }
+  };
+
+  const rejectTeacherRequest = async (requestId: string) => {
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      const response = await fetch(`/api/org-service/organizations/${organizationId}/teacher-requests/${requestId}/reject`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session?.access_token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (response.ok) {
+        toast.success("Teacher request rejected");
+        await loadTeacherRequests();
+      } else {
+        const error = await response.json();
+        throw new Error(error.message || "Failed to reject");
+      }
+    } catch (error: any) {
+      console.error("Error rejecting teacher request:", error);
+      toast.error(error.message || "Failed to reject teacher request");
+    }
+  };
 
   const handleRemoveMember = async (memberId: string, memberName: string, memberRole: string) => {
     if (memberRole === "admin") {
@@ -838,6 +938,10 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
             <BookOpen className="w-4 h-4 mr-2" />
             Courses ({courses.length})
           </TabsTrigger>
+          <TabsTrigger value="teacher-requests" className="rounded-xl px-6 py-2.5">
+            <UserPlus className="w-4 h-4 mr-2" />
+            Teacher Requests ({teacherRequests.filter(r => r.status === "pending").length})
+          </TabsTrigger>
           <TabsTrigger value="analytics" className="rounded-xl px-6 py-2.5">
             <BarChart3 className="w-4 h-4 mr-2" />
             Analytics
@@ -1026,6 +1130,42 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
                   </div>
                 ))}
               </div>
+            </div>
+          </GlowCard>
+        </TabsContent>
+
+        <TabsContent value="teacher-requests">
+          <GlowCard>
+            <div className="p-6">
+              <h2 className="text-xl font-semibold text-white mb-4">Teacher Role Requests</h2>
+              {teacherRequests.filter(r => r.status === "pending").length === 0 ? (
+                <p className="text-gray-400 text-center py-8">No pending teacher requests</p>
+              ) : (
+                <div className="space-y-4">
+                  {teacherRequests.filter(r => r.status === "pending").map((request) => (
+                    <div key={request.id} className="flex items-center justify-between p-4 bg-gray-800/30 rounded-lg">
+                      <div>
+                        <p className="font-semibold text-white">{request.user?.first_name} {request.user?.last_name}</p>
+                        <p className="text-sm text-gray-400">{request.user?.email}</p>
+                        {request.message && (
+                          <p className="text-sm text-gray-500 mt-1">"{request.message}"</p>
+                        )}
+                        <p className="text-xs text-gray-500 mt-1">
+                          Requested: {new Date(request.requested_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <GlowButton size="sm" variant="primary" onClick={() => approveTeacherRequest(request.id)}>
+                          Approve
+                        </GlowButton>
+                        <GlowButton size="sm" variant="outline" onClick={() => rejectTeacherRequest(request.id)}>
+                          Reject
+                        </GlowButton>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </GlowCard>
         </TabsContent>

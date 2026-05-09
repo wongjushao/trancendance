@@ -283,17 +283,30 @@ export default function AssignmentsPage() {
       // Get submissions for these assignments
       const assignmentIds = assignmentsData?.map(a => a.id) || [];
       let submissionsMap = new Map<number, Submission>();
-      
+
       if (assignmentIds.length > 0) {
-        const { data: submissionsData } = await supabase
+        // Get user's submissions for all assignments in one query
+        const { data: submissionsData, error: subError } = await supabase
           .from("submissions")
-          .select("*")
+          .select(`
+            id,
+            assignment_id,
+            grade,
+            feedback,
+            submitted_at,
+            content_url,
+            text_content
+          `)
           .in("assignment_id", assignmentIds)
           .eq("user_id", user.id);
         
-        submissionsData?.forEach(sub => {
-          submissionsMap.set(sub.assignment_id, sub);
-        });
+        if (subError) {
+          console.error("Error fetching submissions:", subError);
+        } else {
+          submissionsData?.forEach(sub => {
+            submissionsMap.set(sub.assignment_id, sub);
+          });
+        }
       }
       
       // Format assignments with status
@@ -406,7 +419,7 @@ export default function AssignmentsPage() {
       
       const courseIds = courseList.map(c => c.id);
       
-      // Get all assignments for these courses
+      // --- OPTIMIZATION: Get ALL assignments in one query ---
       const { data: assignmentsData, error: assignmentsError } = await supabase
         .from("assignments")
         .select(`
@@ -428,44 +441,71 @@ export default function AssignmentsPage() {
       
       if (assignmentsError) throw assignmentsError;
       
-      // For each assignment, get submission stats
-      const assignmentsWithStats: TeacherAssignment[] = await Promise.all(
-        (assignmentsData || []).map(async (assignment) => {
-          // Get all submissions for this assignment
-          const { data: submissionsData } = await supabase
-            .from("submissions")
-            .select("id, grade")
-            .eq("assignment_id", assignment.id);
-          
-          const totalSubmissions = submissionsData?.length || 0;
-          const gradedCount = submissionsData?.filter(s => s.grade !== null).length || 0;
-          const pendingCount = totalSubmissions - gradedCount;
-          const avgGrade = submissionsData
-            ?.filter(s => s.grade !== null)
-            .reduce((sum, s) => sum + (s.grade || 0), 0) / (gradedCount || 1) || 0;
-          
-          const dueDate = new Date(assignment.due_at);
-          const now = new Date();
-          const status = dueDate < now ? "overdue" : "pending";
-          
-          return {
-            id: assignment.id,
-            title: assignment.title,
-            description: assignment.description || "",
-            course_id: assignment.course_id,
-            course_title: assignment.course?.title || "Unknown Course",
-            lesson_id: assignment.lesson_id || 0,
-            lesson_title: assignment.lesson?.title || "Unknown Lesson",
-            due_at: assignment.due_at,
-            points: assignment.points,
-            status,
-            total_submissions: totalSubmissions,
-            graded_count: gradedCount,
-            pending_count: pendingCount,
-            average_grade: Math.round(avgGrade),
-          };
-        })
-      );
+      if (!assignmentsData || assignmentsData.length === 0) {
+        setTeacherAssignments([]);
+        setLoading(false);
+        return;
+      }
+      
+      const assignmentIds = assignmentsData.map(a => a.id);
+      
+      // --- OPTIMIZATION: Get ALL submissions for ALL assignments in ONE query ---
+      const { data: allSubmissions, error: submissionsError } = await supabase
+        .from("submissions")
+        .select("assignment_id, id, grade")
+        .in("assignment_id", assignmentIds);
+      
+      if (submissionsError) {
+        console.error("Error fetching submissions:", submissionsError);
+      }
+      
+      // Build stats maps from the single query result
+      const submissionsByAssignment = new Map<number, { total: number; graded: number; gradeSum: number }>();
+      
+      // Initialize map for all assignments
+      assignmentIds.forEach(id => {
+        submissionsByAssignment.set(id, { total: 0, graded: 0, gradeSum: 0 });
+      });
+      
+      // Process all submissions in one pass
+      allSubmissions?.forEach((sub: any) => {
+        const stats = submissionsByAssignment.get(sub.assignment_id);
+        if (stats) {
+          stats.total++;
+          if (sub.grade !== null) {
+            stats.graded++;
+            stats.gradeSum += sub.grade;
+          }
+        }
+      });
+      
+      // Build teacher assignments using the pre-processed stats
+      const assignmentsWithStats: TeacherAssignment[] = assignmentsData.map(assignment => {
+        const stats = submissionsByAssignment.get(assignment.id) || { total: 0, graded: 0, gradeSum: 0 };
+        const pendingCount = stats.total - stats.graded;
+        const avgGrade = stats.graded > 0 ? stats.gradeSum / stats.graded : 0;
+        
+        const dueDate = new Date(assignment.due_at);
+        const now = new Date();
+        const status = dueDate < now ? "overdue" : "pending";
+        
+        return {
+          id: assignment.id,
+          title: assignment.title,
+          description: assignment.description || "",
+          course_id: assignment.course_id,
+          course_title: assignment.course?.title || "Unknown Course",
+          lesson_id: assignment.lesson_id || 0,
+          lesson_title: assignment.lesson?.title || "Unknown Lesson",
+          due_at: assignment.due_at,
+          points: assignment.points,
+          status,
+          total_submissions: stats.total,
+          graded_count: stats.graded,
+          pending_count: pendingCount,
+          average_grade: Math.round(avgGrade),
+        };
+      });
       
       setTeacherAssignments(assignmentsWithStats);
       
@@ -584,7 +624,6 @@ export default function AssignmentsPage() {
       
       setAssignmentModalOpen(false);
       await fetchTeacherAssignments();
-      // Also refresh student view if they're viewing assignments from same course
       await fetchStudentAssignments();
       
     } catch (error) {

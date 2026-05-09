@@ -130,7 +130,7 @@ export async function getCourseClassIdForUser(courseId: number, userId: string):
   return data && data.length > 0 ? data[0].course_class_id : null;
 }
 
-// Get course with all details (modules, classes, lessons, assignments)
+// Get course with all details (modules, classes, lessons, assignments) - BATCH OPTIMIZED
 export async function getCourseWithDetails(courseId: number): Promise<CourseWithDetails | null> {
   const supabase = getSupabaseBrowserClient();
   
@@ -144,7 +144,7 @@ export async function getCourseWithDetails(courseId: number): Promise<CourseWith
   if (courseError) throw courseError;
   if (!course) return null;
   
-  // Get modules
+  // BATCH 1: Get ALL modules for this course
   const { data: modules, error: modulesError } = await supabase
     .from("modules")
     .select("*")
@@ -153,51 +153,103 @@ export async function getCourseWithDetails(courseId: number): Promise<CourseWith
   
   if (modulesError) throw modulesError;
   
-  // For each module, get classes
-  const modulesWithClasses = await Promise.all(
-    (modules || []).map(async (module) => {
-      const { data: classes, error: classesError } = await supabase
-        .from("classes")
-        .select("*")
-        .eq("module_id", module.id)
-        .order("order_index", { ascending: true });
-      
-      if (classesError) throw classesError;
-      
-      // For each class, get lessons
-      const classesWithLessons = await Promise.all(
-        (classes || []).map(async (classItem) => {
-          const { data: lessons, error: lessonsError } = await supabase
-            .from("lessons")
-            .select("*")
-            .eq("class_id", classItem.id)
-            .order("order_index", { ascending: true });
-          
-          if (lessonsError) throw lessonsError;
-          
-          // For each lesson, get assignments
-          const lessonsWithAssignments = await Promise.all(
-            (lessons || []).map(async (lesson) => {
-              const { data: assignments, error: assignmentsError } = await supabase
-                .from("assignments")
-                .select("*")
-                .eq("lesson_id", lesson.id);
-              
-              if (assignmentsError) throw assignmentsError;
-              
-              return { ...lesson, assignments: assignments || [] };
-            })
-          );
-          
-          return { ...classItem, lessons: lessonsWithAssignments };
-        })
-      );
-      
-      return { ...module, classes: classesWithLessons };
-    })
-  );
+  if (!modules || modules.length === 0) {
+    return {
+      ...course,
+      modules: [],
+      course_classes: []
+    };
+  }
   
-  // Get course classes (offerings)
+  const moduleIds = modules.map(m => m.id);
+  
+  // BATCH 2: Get ALL classes for ALL modules in one query
+  const { data: allClasses, error: classesError } = await supabase
+    .from("classes")
+    .select("*")
+    .in("module_id", moduleIds)
+    .order("order_index", { ascending: true });
+  
+  if (classesError) throw classesError;
+  
+  const classIds = (allClasses || []).map(c => c.id);
+  
+  // BATCH 3: Get ALL lessons for ALL classes in one query
+  const { data: allLessons, error: lessonsError } = await supabase
+    .from("lessons")
+    .select("*")
+    .in("class_id", classIds)
+    .order("order_index", { ascending: true });
+  
+  if (lessonsError) throw lessonsError;
+  
+  const lessonIds = (allLessons || []).map(l => l.id);
+  
+  // BATCH 4: Get ALL assignments for ALL lessons in one query
+  let allAssignments: any[] = [];
+  if (lessonIds.length > 0) {
+    const { data: assignments, error: assignmentsError } = await supabase
+      .from("assignments")
+      .select("*")
+      .in("lesson_id", lessonIds);
+    
+    if (!assignmentsError && assignments) {
+      allAssignments = assignments;
+    }
+  }
+  
+  // Build lookup maps for efficient data assembly
+  const classesByModuleId: Record<number, any[]> = {};
+  (allClasses || []).forEach(classItem => {
+    if (!classesByModuleId[classItem.module_id]) {
+      classesByModuleId[classItem.module_id] = [];
+    }
+    classesByModuleId[classItem.module_id].push(classItem);
+  });
+  
+  const lessonsByClassId: Record<number, any[]> = {};
+  (allLessons || []).forEach(lesson => {
+    if (!lessonsByClassId[lesson.class_id]) {
+      lessonsByClassId[lesson.class_id] = [];
+    }
+    lessonsByClassId[lesson.class_id].push(lesson);
+  });
+  
+  const assignmentsByLessonId: Record<number, any[]> = {};
+  allAssignments.forEach(assignment => {
+    if (assignment.lesson_id) {
+      if (!assignmentsByLessonId[assignment.lesson_id]) {
+        assignmentsByLessonId[assignment.lesson_id] = [];
+      }
+      assignmentsByLessonId[assignment.lesson_id].push(assignment);
+    }
+  });
+  
+  // Assemble the hierarchy
+  const modulesWithClasses = modules.map(module => {
+    const moduleClasses = classesByModuleId[module.id] || [];
+    
+    const classesWithLessons = moduleClasses.map(classItem => {
+      const classLessons = lessonsByClassId[classItem.id] || [];
+      
+      const lessonsWithAssignments = classLessons.map(lesson => ({
+        ...lesson,
+        assignments: assignmentsByLessonId[lesson.id] || []
+      }));
+      
+      return {
+        ...classItem,
+        lessons: lessonsWithAssignments
+      };
+    });
+    
+    return {
+      ...module,
+      classes: classesWithLessons
+    };
+  });
+  
+  // BATCH 5: Get ALL course classes (offerings) for this course
   const { data: courseClasses, error: courseClassesError } = await supabase
     .from("course_classes")
     .select("*")
@@ -205,44 +257,63 @@ export async function getCourseWithDetails(courseId: number): Promise<CourseWith
   
   if (courseClassesError) throw courseClassesError;
   
-  // For each course class, get schedules and members
-  const courseClassesWithDetails = await Promise.all(
-    (courseClasses || []).map(async (courseClass) => {
-      const { data: schedules, error: schedulesError } = await supabase
-        .from("class_schedules")
-        .select("*")
-        .eq("course_class_id", courseClass.id);
-      
-      if (schedulesError) throw schedulesError;
-      
-      const { data: members, error: membersError } = await supabase
-        .from("class_members")
-        .select("*")
-        .eq("course_class_id", courseClass.id);
-      
-      if (membersError) throw membersError;
-      
-      const { data: chatRoom, error: chatRoomError } = await supabase
-        .from("chat_rooms")
-        .select("*")
-        .eq("related_course_id", courseId)
-        .eq("type", "course")
-        .maybeSingle();  // Changed from .single() to .maybeSingle()
-
-      // Don't throw error - .maybeSingle() returns null if not found
-      if (chatRoomError) {
-        console.error("Error fetching chat room:", chatRoomError);
-        // Don't throw - just continue without chat room
+  let courseClassesWithDetails: CourseClassWithDetails[] = [];
+  
+  if (courseClasses && courseClasses.length > 0) {
+    const offeringIds = courseClasses.map(cc => cc.id);
+    
+    // BATCH 6: Get ALL schedules for ALL offerings in one query
+    const { data: allSchedules, error: schedulesError } = await supabase
+      .from("class_schedules")
+      .select("*")
+      .in("course_class_id", offeringIds);
+    
+    if (schedulesError) throw schedulesError;
+    
+    const schedulesByOfferingId: Record<number, any[]> = {};
+    (allSchedules || []).forEach(schedule => {
+      if (!schedulesByOfferingId[schedule.course_class_id]) {
+        schedulesByOfferingId[schedule.course_class_id] = [];
       }
-      
-      return {
-        ...courseClass,
-        schedules: schedules || [],
-        members: members || [],
-        chat_room: chatRoom || null
-      };
-    })
-  );
+      schedulesByOfferingId[schedule.course_class_id].push(schedule);
+    });
+    
+    // BATCH 7: Get ALL members for ALL offerings in one query
+    const { data: allMembers, error: membersError } = await supabase
+      .from("class_members")
+      .select("*")
+      .in("course_class_id", offeringIds);
+    
+    if (membersError) throw membersError;
+    
+    const membersByOfferingId: Record<number, any[]> = {};
+    (allMembers || []).forEach(member => {
+      if (!membersByOfferingId[member.course_class_id]) {
+        membersByOfferingId[member.course_class_id] = [];
+      }
+      membersByOfferingId[member.course_class_id].push(member);
+    });
+    
+    // BATCH 8: Get chat room for this course (single query)
+    const { data: chatRoom, error: chatRoomError } = await supabase
+      .from("chat_rooms")
+      .select("*")
+      .eq("related_course_id", courseId)
+      .eq("type", "course")
+      .maybeSingle();
+    
+    if (chatRoomError) {
+      console.error("Error fetching chat room:", chatRoomError);
+    }
+    
+    // Assemble offerings
+    courseClassesWithDetails = courseClasses.map(courseClass => ({
+      ...courseClass,
+      schedules: schedulesByOfferingId[courseClass.id] || [],
+      members: membersByOfferingId[courseClass.id] || [],
+      chat_room: chatRoom || null
+    }));
+  }
   
   return {
     ...course,

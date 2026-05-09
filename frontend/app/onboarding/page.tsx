@@ -165,6 +165,8 @@ export default function OnboardingPage() {
     org.domain.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const selectedOrgData = emailDomainOrganizations.find(org => org.id === formData.selectedOrganizationId);
+
   // Handle organization detection from email domain
   const handleOrganizationDetected = (org: Organization | null) => {
     setDetectedOrg(org);
@@ -495,47 +497,38 @@ export default function OnboardingPage() {
     }
 
     // Set role data after successful registration
-    let role: UserRole;
-    let pendingRole: 'teacher' | 'admin' | null = null;
-
-    if (formData.desiredRole === 'admin') {
-      role = 'pending_admin';
-      pendingRole = 'admin';
-    } else if (formData.desiredRole === 'teacher') {
-      role = 'pending_teacher';
-      pendingRole = 'teacher';
+    let role: UserRole = 'student';
+    if (formData.desiredRole === 'teacher') {
+      // If organization is detected via domain, they can be teacher directly
+      if (formData.selectedOrganizationId && detectedOrg) {
+        role = 'teacher';
+      } else {
+        role = 'student';
+        // Show message that they need to request teacher role
+        toast.info("You've joined as a student. You can request teacher role from the organization admin.");
+      }
+    } else if (formData.desiredRole === 'admin') {
+      // Admin always starts as student until verification
+      role = 'student';
+      toast.info("Organization creation request submitted. You'll receive an email to verify and become admin.");
     } else {
       role = 'student';
-      pendingRole = null;
     }
-    
-    const selectedOrg = formData.selectedOrganizationId 
-      ? emailDomainOrganizations.find(o => o.id === formData.selectedOrganizationId)
-      : null;
-    
+
     setRole({
       role,
       organizationId: formData.selectedOrganizationId || null,
-      organizationName: selectedOrg?.name || null,
-      pendingRole,
-      pendingOrganizationId: formData.selectedOrganizationId,
-      pendingOrganizationName: selectedOrg?.name,
+      organizationName: detectedOrg?.name || null,
     });
 
-    // Create role request if teacher role was selected
-    if (formData.desiredRole === 'teacher' && formData.selectedOrganizationId) {
-      const selectedOrgForRequest = emailDomainOrganizations.find(o => o.id === formData.selectedOrganizationId);
-      if (selectedOrgForRequest && user) {
-        createRoleRequest(
-          user.id,
-          `${formData.firstName} ${formData.lastName}`.trim(),
-          formData.email,
-          'teacher',
-          formData.selectedOrganizationId,
-          selectedOrgForRequest.name
-        );
-        console.log('[onboarding] Created teacher role request for organization:', selectedOrgForRequest.name);
-      }
+    // If user selected teacher role AND has organization matched via domain, create teacher role directly
+    if (formData.desiredRole === 'teacher' && formData.selectedOrganizationId && detectedOrg) {
+      // Directly add as teacher in organization_members
+      await createTeacherDirect(user.id, formData.selectedOrganizationId);
+    } 
+    // If teacher role requested but no domain match, create teacher request
+    else if (formData.desiredRole === 'teacher' && formData.selectedOrganizationId && !detectedOrg) {
+      await createTeacherRequest(user.id, formData.selectedOrganizationId);
     }
 
     // Upload avatar if one was selected

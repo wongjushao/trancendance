@@ -105,7 +105,7 @@ const ContactSupportModal = ({ isOpen, onClose, onSubmit }: any) => {
             <div>
               <Label className="text-gray-300">Subject</Label>
               <Input
-                value={subject}
+                value={subject ?? ''}
                 onChange={(e) => setSubject(e.target.value)}
                 placeholder="What's the issue?"
                 className="mt-1"
@@ -145,10 +145,13 @@ export default function SettingsPage() {
   const [hasSetPassword, setHasSetPassword] = useState(false);
   const [activeTab, setActiveTab] = useState("profile");
   const [profileDataLoaded, setProfileDataLoaded] = useState(false);
-  const [mfaStatus, setMfaStatus] = useState<{ enabled: boolean; configured: boolean }>({ enabled: false, configured: false });
+  const [mfaStatus, setMfaStatus] = useState<{ enabled: boolean; configured: boolean }>({ 
+  enabled: false, 
+  configured: false 
+  });
   const [showMFASetupModal, setShowMFASetupModal] = useState(false);
   const [showMFADisableModal, setShowMFADisableModal] = useState(false);
-  const [loadingMFAStatus, setLoadingMFAStatus] = useState(true);
+  const [loadingMFAStatus, setLoadingMFAStatus] = useState(false);
   const [showMFARequestModal, setShowMFARequestModal] = useState(false);
   const [mfaRequestReason, setMfaRequestReason] = useState("");
   const [isSubmittingMFARequest, setIsSubmittingMFARequest] = useState(false);
@@ -168,22 +171,39 @@ export default function SettingsPage() {
   });
 
   //MFA
-  // Add fetch function
   const fetchMFAStatus = async () => {
+    // Check cache first (5 minute cache)
+    const cached = localStorage.getItem('mfa_status_cache');
+    const cachedTime = localStorage.getItem('mfa_status_time');
+    
+    if (cached && cachedTime) {
+      const age = Date.now() - parseInt(cachedTime);
+      if (age < 5 * 60 * 1000) { // 5 minutes cache
+        setMfaStatus(JSON.parse(cached));
+        setLoadingMFAStatus(false);
+        return;
+      }
+    }
+    
     setLoadingMFAStatus(true);
+    
     try {
       const status = await getMFAStatus();
-      setMfaStatus({
+      const mfaData = {
         enabled: status.enabled_mfa,
         configured: status.totp_configured,
-      });
+      };
+      setMfaStatus(mfaData);
+      
+      // Cache the result
+      localStorage.setItem('mfa_status_cache', JSON.stringify(mfaData));
+      localStorage.setItem('mfa_status_time', Date.now().toString());
     } catch (err) {
       console.error('Failed to fetch MFA status:', err);
     } finally {
       setLoadingMFAStatus(false);
     }
   };
-
   // Add handler for successful enable/disable
   const handleMFAEnabled = () => {
     fetchMFAStatus();
@@ -286,24 +306,129 @@ export default function SettingsPage() {
   //Saving
   const [isSaving, setIsSaving] = useState(false);
 
-  // ========== END NEW STATE VARIABLES ==========
+  // REPLACE this entire useEffect block (around line 230-240):
+
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
       try {
-        await fetchProfile();
-        await checkAuthProvider();
-        await fetchMFAStatus();
-        await fetchNotificationPrefs();
-        await loadUserOrganizations();
+        const token = await getAuthToken();
+        if (!token) {
+          router.push('/login');
+          return;
+        }
+
+        // Batch all API calls in parallel
+        const [profileRes, mfaRes, notifRes, passwordRes] = await Promise.all([
+          fetch('/api/auth-service/profile', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          }),
+          fetch('/api/auth-service/mfa/status', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          }),
+          fetch('/api/notification-service/notification', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          }),
+          fetch('/api/auth-service/password-status', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          })
+        ]);
+
+        // Check if any failed
+        if (!profileRes.ok) throw new Error('Failed to fetch profile');
+        if (!mfaRes.ok) throw new Error('Failed to fetch MFA status');
+        
+        // Parse responses
+        const profileData = await profileRes.json();
+        const mfaData = await mfaRes.json();
+        const passwordData = passwordRes.ok ? await passwordRes.json() : null;
+        
+        // Handle notification prefs (might 404 if not exist)
+        let notifData = null;
+        if (notifRes.ok) {
+          notifData = await notifRes.json();
+        }
+
+        // Set profile data
+        setFormData({
+          username: profileData.username || '',
+          first_name: profileData.first_name || '',
+          last_name: profileData.last_name || '',
+          bio: profileData.bio || '',
+          language: profileData.language || 'EN',
+          timezone: profileData.timezone || detectTimezone(),
+          birthday: profileData.birthday || '',
+          job_title: profileData.job_title || '',
+        });
+        
+        setBioCharCount(profileData.bio?.length || 0);
+        
+        setProfessionalInfo({
+          jobTitle: profileData.job_title ?? '', 
+          department: profileData.department ?? '',
+          yearsOfExperience: profileData.years_of_experience?.toString() ?? '', // ← Convert to string with fallback
+          professionalSummary: profileData.professional_summary ?? '',
+        });
+        setSocialLinks(profileData.social_links || { 
+          linkedin: '', 
+          github: '', 
+          twitter: '', 
+          website: '' 
+        });
+        setEducationList(profileData.educations || []);
+        setSkills((profileData.skills || []).map((s: any) => ({ 
+          name: s.name, 
+          level: s.level || 1, 
+          years: s.years || 0 
+        })));
+
+        // Set MFA status
+        setMfaStatus({
+          enabled: mfaData.enabled_mfa === true,
+          configured: mfaData.totp_configured === true,
+        });
+
+        // Set auth provider info
+        if (passwordData) {
+          setHasSetPassword(passwordData.has_password || false);
+          setIsGoogleUser(passwordData.is_google_user || false);
+        }
+
+        // Set notification preferences
+        if (notifData) {
+          // Handle both response formats
+          const prefs = notifData.preferences || notifData;
+          setNotificationPrefs({
+            email_enabled: prefs.email_enabled ?? true,
+            push_enabled: prefs.push_enabled ?? true,
+            assignment_reminders: prefs.assignment_reminders ?? true,
+            course_updates: prefs.course_updates ?? true,
+            message_notifications: prefs.message_notifications ?? true,
+            marketing_emails: prefs.marketing_emails ?? false,
+          });
+        } else {
+          // Default preferences if none exist
+          setNotificationPrefs({
+            email_enabled: true,
+            push_enabled: true,
+            assignment_reminders: true,
+            course_updates: true,
+            message_notifications: true,
+            marketing_emails: true,
+          });
+        }
+
+        setProfileDataLoaded(true);
       } catch (error) {
         console.error('Error loading data:', error);
+        toast.error('Failed to load settings');
+        setProfileDataLoaded(true);
       } finally {
         setLoading(false);
       }
     };
     loadData();
-  }, []);
+  }, [router]);
 
   const searchParams = useSearchParams();
   const [pendingScrollTarget, setPendingScrollTarget] = useState<string | null>(null);
@@ -539,82 +664,63 @@ export default function SettingsPage() {
     marketing_emails: boolean;
   } | null>(null); // Start as null
 
-  const [loadingPrefs, setLoadingPrefs] = useState(true);
-
   // Helper to get auth token
   const getAuthToken = async () => {
     const supabase = getSupabaseBrowserClient();
-    const { data: { session } } = await supabase.auth.getSession();
-    return session?.access_token;
+    const { data: { session }, error } = await supabase.auth.getSession();
+    
+    if (error) {
+      console.error('Session error:', error);
+      return null;
+    }
+    
+    if (!session) {
+      console.error('No session found');
+      return null;
+    }
+    
+    console.log('Session user:', session.user.email);
+    console.log('Token expires at:', new Date(session.expires_at * 1000).toLocaleString());
+    
+    // Check if token is expired
+    const expiresAt = session.expires_at;
+    if (expiresAt && expiresAt * 1000 < Date.now()) {
+      console.log('Token expired, refreshing...');
+      const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+      if (refreshError || !refreshData.session) {
+        console.error('Failed to refresh token:', refreshError);
+        return null;
+      }
+      return refreshData.session.access_token;
+    }
+    
+    return session.access_token;
   };
 
-  // Fetch notification preferences from backend
   const fetchNotificationPrefs = async () => {
-    setLoadingPrefs(true);
     try {
       const token = await getAuthToken();
-      if (!token) {
-        console.error('No auth token available');
-        setLoadingPrefs(false);
-        return;
-      }
-      
-      console.log('Fetching notification prefs...');
+      if (!token) return;
       
       const response = await fetch('/api/notification-service/notification', {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Authorization': `Bearer ${token}` }
       });
       
-      console.log('Fetch response status:', response.status);
-      
-      if (response.status === 404) {
-        console.log('No preferences found, creating defaults');
-        const defaultPrefs = {
-          email_enabled: true,
-          push_enabled: true,
-          assignment_reminders: true,
-          course_updates: true,
-          message_notifications: true,
-          marketing_emails: false,
-        };
-        setNotificationPrefs(defaultPrefs);
-        await createDefaultNotificationPrefs(defaultPrefs);
-        return;
-      }
-      
-      if (!response.ok) {
-        throw new Error(`Failed to fetch: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      console.log('Raw response from server:', data);
-      
-      // FIX: Extract the nested preferences object
-      if (data.preferences) {
-        console.log('Setting notification prefs from preferences object:', data.preferences);
-        setNotificationPrefs(data.preferences);
-      } else {
-        // Fallback for backward compatibility
-        console.log('Setting notification prefs from root object:', data);
-        setNotificationPrefs(data);
+      if (response.ok) {
+        const data = await response.json();
+        const prefs = data.preferences || data;
+        setNotificationPrefs({
+          email_enabled: prefs.email_enabled ?? true,
+          push_enabled: prefs.push_enabled ?? true,
+          assignment_reminders: prefs.assignment_reminders ?? true,
+          course_updates: prefs.course_updates ?? true,
+          message_notifications: prefs.message_notifications ?? true,
+          marketing_emails: prefs.marketing_emails ?? false,
+        });
       }
     } catch (error) {
       console.error('Error fetching notification preferences:', error);
-      setNotificationPrefs({
-        email_enabled: true,
-        push_enabled: true,
-        assignment_reminders: true,
-        course_updates: true,
-        message_notifications: true,
-        marketing_emails: false,
-      });
-    } finally {
-      setLoadingPrefs(false);
-    }
+    } 
   };
 
   // Create default notification preferences
@@ -725,110 +831,15 @@ export default function SettingsPage() {
   };
 
   // Handle toggle changes - SIMPLIFIED
-  const handleNotificationChange = (key: keyof Exclude<typeof notificationPrefs, null>) => {
-    if (!notificationPrefs) return;
+  const handleNotificationChange = (key: keyof Exclude<typeof notificationPrefs, null>, value: boolean) => {
+    // Optimistically update
+    setNotificationPrefs(prev => prev ? { ...prev, [key]: value } : prev);
     
-    const newValue = !notificationPrefs[key];
-    console.log(`🔄 Toggle: ${key} from ${notificationPrefs[key]} to ${newValue}`);
-    
-    // Update UI optimistically
-    setNotificationPrefs({
-      ...notificationPrefs,
-      [key]: newValue,
+    // Fire and forget - don't refetch after saving
+    saveNotificationPrefs(key, value).catch(error => {
+      // Revert on error
+      setNotificationPrefs(prev => prev ? { ...prev, [key]: !value } : prev);
     });
-    
-    // Save to backend
-    saveNotificationPrefs(key, newValue);
-  };
-
-  const checkAuthProvider = async () => {
-    try {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (user) {
-        // Check if user is from Google
-        const isGoogle = user.app_metadata?.provider === 'google' ||
-                        user.identities?.some(identity => identity.provider === 'google');
-        setIsGoogleUser(!!isGoogle);
-        
-        // Check if user has password set
-        const response = await fetch('/api/auth-service/password-status', {
-          headers: {
-            'Authorization': `Bearer ${await getAuthToken()}`,
-          },
-        });
-        
-        if (response.ok) {
-          const data = await response.json();
-          setHasSetPassword(data.has_password);
-        }
-      }
-    } catch (error) {
-      console.error('Error checking auth provider:', error);
-    }
-  };
-
-
-  // ✅ CORRECTED: Fetch profile from backend API
-  const fetchProfile = async () => {
-    try {
-      const token = await getAuthToken();
-      if (!token) {
-        router.push('/login');
-        return;
-      }
-
-      const response = await fetch('/api/auth-service/profile', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch profile');
-      }
-
-      const data = await response.json();
-      
-      setFormData({
-        username: data.username || '',
-        first_name: data.first_name || '',
-        last_name: data.last_name || '',
-        bio: data.bio || '',
-        language: data.language || 'EN',
-        timezone: data.timezone || detectTimezone(),
-        birthday: data.birthday || '',
-        job_title: data.job_title || '',
-      });
-
-      setBioCharCount(data.bio?.length || 0);
-      
-      setProfessionalInfo({
-        jobTitle: data.job_title || '', 
-        department: data.department || '',
-        yearsOfExperience: data.years_of_experience || 0,
-        professionalSummary: data.professional_summary || '',
-      });
-      
-      setSocialLinks(data.social_links || {});
-      
-      // Load education and skills from the same response
-      setEducationList(data.educations || []);
-      setSkills((data.skills || []).map((s: any) => ({ 
-        name: s.name, 
-        level: s.level || 1, 
-        years: s.years || 0 
-      })));
-      setProfileDataLoaded(true);
-    } catch (error) {
-      console.error('Error fetching profile:', error);
-      toast.error('Failed to load profile data');
-      setProfileDataLoaded(true);
-    } finally {
-      setLoading(false);
-    }
   };
 
   const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -959,7 +970,8 @@ export default function SettingsPage() {
         birthday: formData.birthday,
         job_title: formData.job_title,
         department: professionalInfo.department,
-        years_of_experience: professionalInfo.yearsOfExperience,
+        years_of_experience: professionalInfo.yearsOfExperience ? 
+        parseInt(professionalInfo.yearsOfExperience) : null, 
         professional_summary: professionalInfo.professionalSummary,
         social_links: socialLinks,
         skills: skills,
@@ -1088,17 +1100,22 @@ export default function SettingsPage() {
   const handleDeleteAccount = async () => {
     try {
       const supabase = getSupabaseBrowserClient();
-      const { data: { session } } = await supabase.auth.getSession();
       
-      if (!session) {
-        toast.error("You need to be logged in");
+      // Force refresh the session first
+      const { data: { session: refreshedSession }, error: refreshError } = 
+        await supabase.auth.refreshSession();
+      
+      if (refreshError || !refreshedSession) {
+        console.error('Failed to refresh session:', refreshError);
+        toast.error('Your session has expired. Please log in again.');
+        router.push('/login');
         return;
       }
-
+      
       const response = await fetch('/api/auth-service/delete-account', {
         method: 'DELETE',
         headers: {
-          'Authorization': `Bearer ${session.access_token}`,
+          'Authorization': `Bearer ${refreshedSession.access_token}`,
           'Content-Type': 'application/json',
         },
       });
@@ -1129,7 +1146,19 @@ export default function SettingsPage() {
       }, 1500);
     } catch (error: any) {
       console.error("Error deleting account:", error);
-      toast.error(error.message || "Failed to delete account");
+      
+      // Check if it's the specific user not found error
+      if (error.message?.includes("user_from_sub_claim_in_jwt_does_not_exist") ||
+          error.message?.includes("User from sub claim in JWT does not exist")) {
+        // User might have been deleted already - just sign out locally
+        console.log("User may have been deleted already, signing out locally");
+        clearUserRoleData();
+        await supabase.auth.signOut();
+        toast.success("Account sign out successful (account was already deleted)");
+        router.push("/login");
+      } else {
+        toast.error(error.message || "Failed to delete account");
+      }
     } finally {
       setShowDeleteAccount(false);
     }
@@ -1356,7 +1385,7 @@ export default function SettingsPage() {
                   <div>
                     <Label className="text-gray-300">First Name</Label>
                     <Input
-                      value={formData.first_name}
+                      value={formData.first_name  ?? ''}
                       onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
                       className="mt-1"
                       placeholder="Enter first name"
@@ -1365,7 +1394,7 @@ export default function SettingsPage() {
                   <div>
                     <Label className="text-gray-300">Last Name</Label>
                     <Input
-                      value={formData.last_name}
+                      value={formData.last_name  ?? ''}
                       onChange={(e) => setFormData({ ...formData, last_name: e.target.value })}
                       className="mt-1"
                       placeholder="Enter last name"
@@ -1376,7 +1405,7 @@ export default function SettingsPage() {
                 <div>
                   <Label className="text-gray-300">Username</Label>
                   <Input
-                    value={formData.username}
+                    value={formData.username ?? ''}
                     onChange={(e) => setFormData({ ...formData, username: e.target.value })}
                     className="mt-1"
                     placeholder="Enter username"
@@ -1388,7 +1417,7 @@ export default function SettingsPage() {
                   <Textarea
                     className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500 mt-1"
                     rows={4}
-                    value={formData.bio}
+                    value={formData.bio  ?? ''}
                     onChange={(e) => {
                       const newBio = e.target.value;
                       if (newBio.length <= 500) {
@@ -1412,7 +1441,7 @@ export default function SettingsPage() {
                     <Label className="text-gray-300">Birthday</Label>
                     <Input
                       type="date"
-                      value={formData.birthday}
+                      value={formData.birthday  ?? ''}
                       onChange={(e) => setFormData({ ...formData, birthday: e.target.value })}
                       className="mt-1"
                     />
@@ -1421,15 +1450,13 @@ export default function SettingsPage() {
                     <Label className="text-gray-300">Language</Label>
                     <select
                       className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500 mt-1"
-                      value={formData.language}
+                      value={formData.language ?? 'en'}
                       onChange={(e) => setFormData({ ...formData, language: e.target.value })}
                     >
                       <option value="en">English</option>
-                      <option value="es">Spanish</option>
                       <option value="fr">French</option>
-                      <option value="de">German</option>
                       <option value="zh">Chinese</option>
-                      <option value="ja">Japanese</option>
+                      <option value="bm">Malay</option>
                     </select>
                   </div>
                 </div>
@@ -1451,7 +1478,7 @@ export default function SettingsPage() {
                   <div className="flex items-center gap-3">
                     <Linkedin className="w-5 h-5 text-blue-400" />
                     <Input
-                      value={socialLinks.linkedin}
+                      value={socialLinks.linkedin  ?? ''}
                       onChange={(e) => setSocialLinks({ ...socialLinks, linkedin: e.target.value })}
                       placeholder="LinkedIn URL (e.g., https://linkedin.com/in/username)"
                       className="flex-1 bg-gray-800 border-gray-700"
@@ -1460,7 +1487,7 @@ export default function SettingsPage() {
                   <div className="flex items-center gap-3">
                     <Github className="w-5 h-5 text-gray-400" />
                     <Input
-                      value={socialLinks.github}
+                      value={socialLinks.github  ?? ''}
                       onChange={(e) => setSocialLinks({ ...socialLinks, github: e.target.value })}
                       placeholder="GitHub URL (e.g., https://github.com/username)"
                       className="flex-1 bg-gray-800 border-gray-700"
@@ -1469,7 +1496,7 @@ export default function SettingsPage() {
                   <div className="flex items-center gap-3">
                     <Twitter className="w-5 h-5 text-blue-400" />
                     <Input
-                      value={socialLinks.twitter}
+                      value={socialLinks.twitter ?? ''}
                       onChange={(e) => setSocialLinks({ ...socialLinks, twitter: e.target.value })}
                       placeholder="Twitter/X URL"
                       className="flex-1 bg-gray-800 border-gray-700"
@@ -1478,7 +1505,7 @@ export default function SettingsPage() {
                   <div className="flex items-center gap-3">
                     <Globe className="w-5 h-5 text-green-400" />
                     <Input
-                      value={socialLinks.website}
+                      value={socialLinks.website ?? ''}
                       onChange={(e) => setSocialLinks({ ...socialLinks, website: e.target.value })}
                       placeholder="Personal Website or Portfolio"
                       className="flex-1 bg-gray-800 border-gray-700"
@@ -1514,7 +1541,7 @@ export default function SettingsPage() {
                     <div>
                       <Label className="text-sm text-gray-300 mb-1 block">Job Title</Label>
                       <Input
-                        value={professionalInfo.jobTitle}
+                        value={professionalInfo.jobTitle  ?? ''}
                         onChange={(e) => setProfessionalInfo({ ...professionalInfo, jobTitle: e.target.value })}
                         placeholder="e.g., Senior Software Engineer"
                         className="bg-gray-800 border-gray-700"
@@ -1524,7 +1551,7 @@ export default function SettingsPage() {
                     <div>
                       <Label className="text-sm text-gray-300 mb-1 block">Professional Summary</Label>
                       <Textarea
-                        value={professionalInfo.professionalSummary}
+                        value={professionalInfo.professionalSummary ?? ''}
                         onChange={(e) => setProfessionalInfo({ ...professionalInfo, professionalSummary: e.target.value })}
                         placeholder="e.g., Experienced software engineer with 8+ years of expertise in full-stack development, leading cross-functional teams, and delivering scalable solutions..."
                         className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
@@ -1535,7 +1562,7 @@ export default function SettingsPage() {
                     <div>
                       <Label className="text-sm text-gray-300 mb-1 block">Department</Label>
                       <Input
-                        value={professionalInfo.department}
+                        value={professionalInfo.department ?? ''}
                         onChange={(e) => setProfessionalInfo({ ...professionalInfo, department: e.target.value })}
                         placeholder="e.g., Engineering, Product, Design"
                         className="bg-gray-800 border-gray-700"
@@ -1545,7 +1572,7 @@ export default function SettingsPage() {
                       <Label className="text-sm text-gray-300 mb-1 block">Years of Experience</Label>
                       <Input
                         type="number"
-                        value={professionalInfo.yearsOfExperience}
+                        value={professionalInfo.yearsOfExperience ?? ''} // Add nullish coalescing
                         onChange={(e) => setProfessionalInfo({ ...professionalInfo, yearsOfExperience: e.target.value })}
                         placeholder="e.g., 5"
                         className="bg-gray-800 border-gray-700"
@@ -1685,7 +1712,7 @@ export default function SettingsPage() {
                         <div>
                           <Label className="text-gray-300 mb-1 block">Institution Name *</Label>
                           <Input
-                            value={educationForm.institution_name}
+                            value={educationForm.institution_name  ?? ''}
                             onChange={(e) => setEducationForm({ ...educationForm, institution_name: e.target.value })}
                             placeholder="e.g., Stanford University"
                             className="bg-gray-800 border-gray-700"
@@ -1696,7 +1723,7 @@ export default function SettingsPage() {
                           <div>
                             <Label className="text-gray-300 mb-1 block">Degree *</Label>
                             <Input
-                              value={educationForm.degree}
+                              value={educationForm.degree  ?? ''}
                               onChange={(e) => setEducationForm({ ...educationForm, degree: e.target.value })}
                               placeholder="e.g., Bachelor of Science"
                               className="bg-gray-800 border-gray-700"
@@ -1705,7 +1732,7 @@ export default function SettingsPage() {
                           <div>
                             <Label className="text-gray-300 mb-1 block">Field of Study</Label>
                             <Input
-                              value={educationForm.field_of_study}
+                              value={educationForm.field_of_study  ?? ''}
                               onChange={(e) => setEducationForm({ ...educationForm, field_of_study: e.target.value })}
                               placeholder="e.g., Computer Science"
                               className="bg-gray-800 border-gray-700"
@@ -1718,7 +1745,7 @@ export default function SettingsPage() {
                             <Label className="text-gray-300 mb-1 block">Start Year</Label>
                             <Input
                               type="number"
-                              value={educationForm.start_year || ""}
+                              value={educationForm.start_year  ?? ''}
                               onChange={(e) => setEducationForm({ ...educationForm, start_year: e.target.value ? parseInt(e.target.value) : null })}
                               placeholder="e.g., 2020"
                               className="bg-gray-800 border-gray-700"
@@ -1728,7 +1755,7 @@ export default function SettingsPage() {
                             <Label className="text-gray-300 mb-1 block">End Year</Label>
                             <Input
                               type="number"
-                              value={educationForm.end_year || ""}
+                              value={educationForm.end_year  ?? ''}
                               onChange={(e) => setEducationForm({ ...educationForm, end_year: e.target.value ? parseInt(e.target.value) : null })}
                               placeholder="e.g., 2024"
                               disabled={educationForm.is_current}
@@ -1754,7 +1781,7 @@ export default function SettingsPage() {
                         <div>
                           <Label className="text-gray-300 mb-1 block">Description</Label>
                           <Textarea
-                            value={educationForm.description}
+                            value={educationForm.description  ?? ''}
                             onChange={(e) => setEducationForm({ ...educationForm, description: e.target.value })}
                             placeholder="Describe your studies, achievements, relevant coursework..."
                             rows={3}
@@ -1816,11 +1843,12 @@ export default function SettingsPage() {
 
         {/* Notifications Tab */}
         <TabsContent value="notifications" className="space-y-6">
-          {loadingPrefs ? (
-            <div className="flex justify-center items-center py-12">
-              <Loader2 className="w-8 h-8 animate-spin text-purple-500" />
-            </div>
-          ) : notificationPrefs ? (
+        {notificationPrefs === null ? (
+          // Loading state - only shows while loading
+          <div className="flex justify-center items-center py-12">
+            <Loader2 className="w-8 h-8 animate-spin text-purple-500" />
+          </div>
+        ) : (          
             <GlowCard>
               <div className="p-6">
                 <div className="flex items-center gap-2 mb-4">
@@ -1845,7 +1873,7 @@ export default function SettingsPage() {
                     </div>
                     <Switch
                       checked={notificationPrefs.email_enabled}
-                      onCheckedChange={() => handleNotificationChange('email_enabled')}
+                      onCheckedChange={(checked) => handleNotificationChange('email_enabled', checked)}
                     />
                   </div>
 
@@ -1862,7 +1890,7 @@ export default function SettingsPage() {
                     </div>
                     <Switch
                       checked={notificationPrefs.push_enabled}
-                      onCheckedChange={() => handleNotificationChange('push_enabled')}
+                      onCheckedChange={(checked) => handleNotificationChange('push_enabled', checked)}
                     />
                   </div>
 
@@ -1879,7 +1907,7 @@ export default function SettingsPage() {
                     </div>
                     <Switch
                       checked={notificationPrefs.assignment_reminders}
-                      onCheckedChange={() => handleNotificationChange('assignment_reminders')}
+                      onCheckedChange={(checked) => handleNotificationChange('assignment_reminders', checked)}
                     />
                   </div>
 
@@ -1896,7 +1924,7 @@ export default function SettingsPage() {
                     </div>
                     <Switch
                       checked={notificationPrefs.course_updates}
-                      onCheckedChange={() => handleNotificationChange('course_updates')}
+                      onCheckedChange={(checked) => handleNotificationChange('course_updates', checked)}
                     />
                   </div>
 
@@ -1913,7 +1941,7 @@ export default function SettingsPage() {
                     </div>
                     <Switch
                       checked={notificationPrefs.message_notifications}
-                      onCheckedChange={() => handleNotificationChange('message_notifications')}
+                      onCheckedChange={(checked) => handleNotificationChange('message_notifications', checked)}
                     />
                   </div>
 
@@ -1930,7 +1958,7 @@ export default function SettingsPage() {
                     </div>
                     <Switch
                       checked={notificationPrefs.marketing_emails}
-                      onCheckedChange={() => handleNotificationChange('marketing_emails')}
+                      onCheckedChange={(checked) => handleNotificationChange('marketing_emails', checked)}
                     />
                   </div>
                 </div>
@@ -1942,10 +1970,6 @@ export default function SettingsPage() {
                 </div>
               </div>
             </GlowCard>
-          ) : (
-            <div className="text-center py-12 text-gray-400">
-              Failed to load notification preferences. Please try again later.
-            </div>
           )}
         </TabsContent>
 
@@ -2115,7 +2139,7 @@ export default function SettingsPage() {
                   </GlowButton>
                 </div>
                 
-                {/* MFA Section */}
+                {/* MFA Section - Change this part */}
                 <div className="border border-gray-800 rounded-xl overflow-hidden">
                   <div className="p-5 bg-gray-900/50">
                     <div className="flex items-start justify-between">
@@ -2129,46 +2153,43 @@ export default function SettingsPage() {
                           <h4 className="font-semibold text-white">Two-Factor Authentication</h4>
                         </div>
                         <p className="text-sm text-gray-400 mb-4">
-                          {mfaStatus.enabled 
-                            ? "Your account is protected with two-factor authentication" 
-                            : "Add an extra layer of security to your account"}
+                          {loadingMFAStatus 
+                            ? "Loading MFA status..." 
+                            : mfaStatus.enabled 
+                              ? "Your account is protected with two-factor authentication" 
+                              : "Add an extra layer of security to your account"}
                         </p>
+                        
+                        {/* Show loading state properly */}
                         {loadingMFAStatus ? (
-                          <div className="animate-pulse h-10 w-32 bg-gray-800 rounded-lg" />
+                          <div className="h-10 w-32 bg-gray-800 rounded-lg animate-pulse" />
                         ) : mfaStatus.enabled ? (
-                          <div className="flex gap-3">
-                            <GlowButton
-                              variant="secondary"
-                              onClick={() => setShowMFADisableModal(true)}
-                              className="border-red-500/50 hover:border-red-500"
-                            >
-                              Disable MFA
-                            </GlowButton>
-                          </div>
-                        ) : (
                           <GlowButton
-                            onClick={() => setShowMFASetupModal(true)}
+                            variant="secondary"
+                            onClick={() => setShowMFADisableModal(true)}
+                            className="border-red-500/50 hover:border-red-500"
                           >
+                            Disable MFA
+                          </GlowButton>
+                        ) : (
+                          <GlowButton onClick={() => setShowMFASetupModal(true)}>
                             <Smartphone className="w-4 h-4 mr-2" />
                             Enable MFA
                           </GlowButton>
                         )}
                       </div>
-                      {mfaStatus.enabled && (
+                      {!loadingMFAStatus && mfaStatus.enabled && (
                         <div className="px-3 py-1 bg-green-500/20 rounded-full border border-green-500/30">
                           <span className="text-xs text-green-400 font-medium">ENABLED</span>
                         </div>
                       )}
                     </div>
                     
-                    {/* Lost Access Link - Show when MFA is enabled */}
-                    {mfaStatus.enabled && (
+                    {/* Lost Access Link - only show when not loading */}
+                    {!loadingMFAStatus && mfaStatus.enabled && (
                       <div className="mt-4 pt-4 border-t border-gray-800">
                         <button
-                          onClick={() => {
-                            // Open modal to request MFA reset from admin
-                            setShowMFARequestModal(true);
-                          }}
+                          onClick={() => setShowMFARequestModal(true)}
                           className="text-sm text-yellow-400 hover:text-yellow-300 transition-colors flex items-center gap-2"
                         >
                           <AlertCircle className="w-4 h-4" />

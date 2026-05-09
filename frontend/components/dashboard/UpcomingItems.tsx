@@ -74,9 +74,9 @@ export function UpcomingItems({ items }: UpcomingItemsProps) {
             <Calendar className="w-5 h-5 text-purple-400" />
             <h3 className="text-lg font-semibold text-white">Upcoming Deadlines</h3>
           </div>
-          <Link href="/dashboard/calendar">
+          <Link href="/dashboard">
             <button className="text-sm text-gray-400 hover:text-white transition-colors">
-              View calendar
+              View
             </button>
           </Link>
         </div>

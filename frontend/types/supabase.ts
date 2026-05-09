@@ -1580,6 +1580,54 @@ export type Database = {
           },
         ]
       }
+      teacher_requests: {
+        Row: {
+          id: string;
+          user_id: string;
+          organization_id: number;
+          status: 'pending' | 'approved' | 'rejected';
+          requested_at: string;
+          reviewed_at: string | null;
+          reviewed_by: string | null;
+          message: string | null;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          organization_id: number;
+          status?: 'pending' | 'approved' | 'rejected';
+          requested_at?: string;
+          reviewed_at?: string | null;
+          reviewed_by?: string | null;
+          message?: string | null;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          organization_id?: number;
+          status?: 'pending' | 'approved' | 'rejected';
+          requested_at?: string;
+          reviewed_at?: string | null;
+          reviewed_by?: string | null;
+          message?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "teacher_requests_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "teacher_requests_organization_id_fkey";
+            columns: ["organization_id"];
+            isOneToOne: false;
+            referencedRelation: "organizations";
+            referencedColumns: ["id"];
+          },
+        ];
+      }
     }
     Views: {
       [_ in never]: never

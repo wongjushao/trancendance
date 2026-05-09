@@ -1,13 +1,11 @@
-// frontend/lib/role.ts
-"use client";
-
-export type UserRole = 'student' | 'teacher' | 'admin' | 'pending_teacher' | 'pending_admin';
+// lib/role.ts
+export type UserRole = 'student' | 'teacher' | 'admin';
 
 export interface RoleData {
   role: UserRole;
   organizationId: number | null;
   organizationName: string | null;
-  pendingRole: 'teacher' | 'admin' | null;
+  pendingRole?: UserRole | null;
   pendingOrganizationId?: number | null;
   pendingOrganizationName?: string | null;
 }
@@ -22,60 +20,6 @@ export interface Organization {
   createdAt?: string;
   createdBy?: string;
 }
-
-// Mock organizations with domains for auto-detection
-export const mockOrganizations: Organization[] = [
-  {
-    id: 1,
-    name: "Tech University",
-    domain: "tech.edu",
-    description: "Leading technology education institution focused on practical learning",
-    memberCount: 2847,
-    verified: true,
-    createdAt: "2024-01-15",
-    createdBy: "admin-1"
-  },
-  {
-    id: 2,
-    name: "DevCorp Training",
-    domain: "devcorp.com",
-    description: "Corporate development training platform for professionals",
-    memberCount: 1523,
-    verified: true,
-    createdAt: "2024-02-20",
-    createdBy: "admin-2"
-  },
-  {
-    id: 3,
-    name: "Design Academy",
-    domain: "design.academy",
-    description: "Creative design and UX courses for aspiring designers",
-    memberCount: 892,
-    verified: true,
-    createdAt: "2024-03-10",
-    createdBy: "admin-3"
-  },
-  {
-    id: 4,
-    name: "Data Science Institute",
-    domain: "datasci.org",
-    description: "Advanced data science and machine learning education",
-    memberCount: 456,
-    verified: true,
-    createdAt: "2024-04-01",
-    createdBy: "admin-4"
-  },
-  {
-    id: 5,
-    name: "Cloud Masters",
-    domain: "cloudmasters.com",
-    description: "Cloud computing certification programs",
-    memberCount: 1234,
-    verified: true,
-    createdAt: "2024-05-15",
-    createdBy: "admin-5"
-  },
-];
 
 const ROLE_STORAGE_KEY = 'user_role_data';
 
@@ -98,9 +42,26 @@ export function getUserRoleData(): RoleData {
   if (stored) {
     try {
       const parsed = JSON.parse(stored);
+      // Sanitize role to ensure it's a valid role
+      const validRoles: UserRole[] = ['student', 'teacher', 'admin'];
+      let role = parsed.role;
+      
+      // If role is pending, pending_admin, pending_teacher, or any non-valid value, default to student
+      if (!validRoles.includes(role)) {
+        console.log(`[Role] Sanitizing invalid role: "${role}" -> defaulting to "student"`);
+        role = 'student';
+        
+        // Also clear pending fields if they exist
+        parsed.pendingRole = null;
+        parsed.pendingOrganizationId = null;
+        parsed.pendingOrganizationName = null;
+      }
+      
+      // Ensure valid structure
       return {
         ...defaultRoleData,
         ...parsed,
+        role,
       };
     } catch {
       return defaultRoleData;
@@ -111,6 +72,14 @@ export function getUserRoleData(): RoleData {
 
 export function setUserRoleData(data: RoleData): void {
   if (typeof window === 'undefined') return;
+  
+  // Validate before saving - ensure role is valid
+  const validRoles: UserRole[] = ['student', 'teacher', 'admin'];
+  if (!validRoles.includes(data.role)) {
+    console.warn(`[Role] Attempting to set invalid role: "${data.role}" - forcing to student`);
+    data.role = 'student';
+  }
+  
   localStorage.setItem(ROLE_STORAGE_KEY, JSON.stringify(data));
   window.dispatchEvent(new CustomEvent('role-changed', { detail: data }));
 }
@@ -120,28 +89,23 @@ export function clearUserRoleData(): void {
   localStorage.removeItem(ROLE_STORAGE_KEY);
 }
 
+export function clearPendingRoleData(): void {
+  if (typeof window === 'undefined') return;
+  const current = getUserRoleData();
+  setUserRoleData({
+    ...current,
+    pendingRole: null,
+    pendingOrganizationId: null,
+    pendingOrganizationName: null,
+  });
+}
+
 export function hasPermission(requiredRole: UserRole): boolean {
   const { role } = getUserRoleData();
   const roleHierarchy: Record<UserRole, number> = {
     student: 1,
-    pending_teacher: 1,
-    pending_admin: 1,
     teacher: 2,
     admin: 3,
   };
   return roleHierarchy[role] >= roleHierarchy[requiredRole];
-}
-
-export function requestRoleUpgrade(desiredRole: 'teacher' | 'admin', organizationId?: number): void {
-  const current = getUserRoleData();
-  if (current.role === desiredRole) return;
-  
-  setUserRoleData({
-    ...current,
-    pendingRole: desiredRole,
-    ...(desiredRole === 'teacher' && organizationId ? {
-      pendingOrganizationId: organizationId,
-      pendingOrganizationName: mockOrganizations.find(o => o.id === organizationId)?.name,
-    } : {}),
-  });
 }

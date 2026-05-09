@@ -1,16 +1,16 @@
-// frontend/components/providers/RoleProvider.tsx
+// frontend/components/providers/RoleProvider.tsx (UPDATED)
 "use client";
 
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
-import { RoleData, UserRole, getUserRoleData, setUserRoleData, clearUserRoleData } from "@/lib/role";
+import { RoleData, UserRole, getUserRoleData, setUserRoleData, clearUserRoleData, clearPendingRoleData } from "@/lib/role";
 
 interface RoleContextType {
   roleData: RoleData;
   setRole: (data: Partial<RoleData>) => void;
   hasPermission: (role: UserRole) => boolean;
-  isPending: () => boolean;
   refreshRole: () => void;
   clearRole: () => void;
+  clearPendingRole: () => void;
 }
 
 const RoleContext = createContext<RoleContextType | undefined>(undefined);
@@ -19,13 +19,20 @@ const RoleContext = createContext<RoleContextType | undefined>(undefined);
 const setRoleCookie = (role: string, organizationId?: number | null, organizationName?: string | null) => {
   if (typeof document === 'undefined') return;
   
+  // Sanitize role for cookie
+  const validRoles = ['student', 'teacher', 'admin'];
+  let sanitizedRole = role;
+  if (!validRoles.includes(role)) {
+    sanitizedRole = 'student';
+  }
+  
   const cookieData = {
-    role,
+    role: sanitizedRole,
     organizationId: organizationId || null,
     organizationName: organizationName || null
   };
   
-  document.cookie = `user_role_data=${JSON.stringify(cookieData)}; path=/; max-age=604800; SameSite=Lax`; // 7 days
+  document.cookie = `user_role_data=${JSON.stringify(cookieData)}; path=/; max-age=604800; SameSite=Lax`;
 };
 
 // Helper to clear cookie
@@ -34,22 +41,9 @@ const clearRoleCookie = () => {
   document.cookie = 'user_role_data=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
 };
 
-// Add this function to validate that teachers/admins only have one teaching org
-const validateTeachingOrganization = (roleData: RoleData): RoleData => {
-  // If user is teacher or admin, ensure they have only one organization
-  if (roleData.role === 'teacher' || roleData.role === 'admin') {
-    // If they have multiple organizations, we need to handle it
-    // In practice, the backend should enforce this
-    return roleData;
-  }
-  return roleData;
-};
-
 export function RoleProvider({ children }: { children: React.ReactNode }) {
-
   const [roleData, setRoleData] = useState<RoleData>(() => {
-    const data = getUserRoleData();
-    return validateTeachingOrganization(data);
+    return getUserRoleData();
   });
 
   const [isInitialized, setIsInitialized] = useState(false);
@@ -60,7 +54,11 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     setRoleCookie(data.role, data.organizationId, data.organizationName);
   }, []);
 
-  // Initialize cookie on first load
+  const clearPendingRole = useCallback(() => {
+    clearPendingRoleData();
+    refreshRole();
+  }, [refreshRole]);
+
   useEffect(() => {
     if (!isInitialized) {
       setRoleCookie(roleData.role, roleData.organizationId, roleData.organizationName);
@@ -81,40 +79,44 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const setRole = useCallback((data: Partial<RoleData>) => {
-    const newData = { ...roleData, ...data };
+    // Ensure role is valid
+    const validRoles: UserRole[] = ['student', 'teacher', 'admin'];
+    let newRole = data.role;
+    if (newRole && !validRoles.includes(newRole)) {
+      console.warn(`[RoleProvider] Rejecting invalid role: "${newRole}"`);
+      newRole = 'student';
+    }
+    
+    const newData = { 
+      ...roleData, 
+      ...data,
+      role: newRole || roleData.role 
+    };
     setRoleData(newData);
     setUserRoleData(newData);
     setRoleCookie(newData.role, newData.organizationId, newData.organizationName);
-    
-    // Dispatch event for other components
     window.dispatchEvent(new CustomEvent('role-changed', { detail: newData }));
   }, [roleData]);
 
   const clearRole = useCallback(() => {
     clearUserRoleData();
     clearRoleCookie();
-    const defaultData = { role: 'student' as UserRole, organizationId: null, organizationName: null, pendingRole: null };
-    setRoleData(defaultData as RoleData);
+    const defaultData = { role: 'student' as UserRole, organizationId: null, organizationName: null, pendingRole: null, pendingOrganizationId: null, pendingOrganizationName: null };
+    setRoleData(defaultData);
     window.dispatchEvent(new CustomEvent('role-changed', { detail: defaultData }));
   }, []);
 
   const hasPermission = useCallback((requiredRole: UserRole): boolean => {
     const roleHierarchy: Record<UserRole, number> = {
       student: 1,
-      pending_teacher: 1,
-      pending_admin: 1,
       teacher: 2,
       admin: 3,
     };
     return roleHierarchy[roleData.role] >= roleHierarchy[requiredRole];
   }, [roleData.role]);
 
-  const isPending = useCallback((): boolean => {
-    return roleData.role === 'pending_admin' || roleData.role === 'pending_teacher';
-  }, [roleData.role]);
-
   return (
-    <RoleContext.Provider value={{ roleData, setRole, hasPermission, isPending, refreshRole, clearRole }}>
+    <RoleContext.Provider value={{ roleData, setRole, hasPermission, refreshRole, clearRole, clearPendingRole }}>
       {children}
     </RoleContext.Provider>
   );

@@ -16,7 +16,6 @@ const protectedRoutes = [
   "/teacher",
   "/admin",
   "/organizations",
-  "/teacher-request",
 ];
 
 // Pages that require login but NOT a completed profile

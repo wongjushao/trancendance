@@ -738,18 +738,6 @@ export default function ProfileClient({ user }: ProfileClientProps) {
             </GlowCard>
             <GlowCard className="p-4">
               <div className="text-center">
-                <Award className="w-6 h-6 text-green-400 mx-auto mb-2" />
-              </div>
-            </GlowCard>
-            <GlowCard className="p-4">
-              <div className="text-center">
-                <Trophy className="w-6 h-6 text-yellow-400 mx-auto mb-2" />
-                <p className="text-2xl font-bold text-white">12</p>
-                <p className="text-xs text-gray-400">Achievements</p>
-              </div>
-            </GlowCard>
-            <GlowCard className="p-4">
-              <div className="text-center">
                 <Users className="w-6 h-6 text-pink-400 mx-auto mb-2" />
                 <p className="text-2xl font-bold text-white">24</p>
                 <p className="text-xs text-gray-400">Connections</p>
