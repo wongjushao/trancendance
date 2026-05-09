@@ -1,9 +1,19 @@
 # services/org_service/org_service/routes/users.py
+import uuid
+
 from flask import current_app, jsonify, request
 from flask_restx import Namespace, Resource, fields
 from sqlalchemy.exc import SQLAlchemyError
 
-from backend.common.models import OrganizationMember, Profile, ClassMember, CourseClass, Course
+from backend.common.models import (
+    ChatRoom,
+    ChatRoomMember,
+    ClassMember,
+    Course,
+    CourseClass,
+    OrganizationMember,
+    Profile,
+)
 from backend.services.org_service.org_service.utils.supabase_jwt import extract_bearer_token, verify_supabase_jwt
 
 users_ns = Namespace("users", path="/", description="User management endpoints")
@@ -102,6 +112,11 @@ class UserEnrollResource(Resource):
                 return jsonify({"error": f"No user found with email: {email}"}), 404
 
             student_id = found_user.id if hasattr(found_user, 'id') else found_user.get('id')
+            try:
+                student_uuid = uuid.UUID(str(student_id))
+            except (ValueError, TypeError):
+                return jsonify({"error": "Invalid user id for enrolled student"}), 500
+            student_id = student_uuid
 
             # Get profile to check if exists
             profile = session.query(Profile).filter(Profile.id == student_id).first()
@@ -152,6 +167,47 @@ class UserEnrollResource(Resource):
                 role="student",
             )
             session.add(new_enrollment)
+            session.flush()
+
+            # Ensure course chat room exists and add the new student + org admins
+            chat_room = (
+                session.query(ChatRoom)
+                .filter(
+                    ChatRoom.type == "course",
+                    ChatRoom.related_course_id == course.id,
+                )
+                .first()
+            )
+            if not chat_room:
+                chat_room = ChatRoom(type="course", related_course_id=course.id)
+                session.add(chat_room)
+                session.flush()
+
+            def _ensure_chat_member(room_id: int, uid: uuid.UUID) -> None:
+                exists = (
+                    session.query(ChatRoomMember)
+                    .filter(
+                        ChatRoomMember.room_id == room_id,
+                        ChatRoomMember.user_id == uid,
+                    )
+                    .first()
+                )
+                if not exists:
+                    session.add(ChatRoomMember(room_id=room_id, user_id=uid))
+
+            _ensure_chat_member(chat_room.id, student_id)
+
+            org_admins = (
+                session.query(OrganizationMember)
+                .filter(
+                    OrganizationMember.organization_id == organization_id,
+                    OrganizationMember.member_role == "admin",
+                )
+                .all()
+            )
+            for row in org_admins:
+                _ensure_chat_member(chat_room.id, row.user_id)
+
             session.commit()
 
             # Get user details for response
