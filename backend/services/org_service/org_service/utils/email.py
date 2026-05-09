@@ -124,17 +124,52 @@ def build_org_verification_html(org_name: str, verification_url: str) -> str:
 </html>"""
 
 
-def send_org_verification_email(admin_email: str, org_name: str, verification_url: str) -> None:
-    if not _env_flag("GF_SMTP_ENABLED", default=True):
-        raise EmailConfigurationError("SMTP is disabled")
+class OrgVerificationEmailOutcome(TypedDict):
+    """Result of attempting to send the organization verification email."""
+
+    sent: bool
+    """True only when SMTP accepted the message."""
+
+    delivery_mode: str
+    """smtp | not_configured | smtp_failed"""
+
+
+def deliver_organization_verification_email(
+    admin_email: str, org_name: str, verification_url: str
+) -> OrgVerificationEmailOutcome:
+    """
+    Same SMTP settings as member invites. Does not raise on missing SMTP or delivery failure;
+    returns delivery_mode so the API can still create the pending verification record.
+    """
+    smtp_ready = (
+        _env_flag("GF_SMTP_ENABLED", default=True)
+        and bool(os.getenv("GF_SMTP_HOST"))
+        and bool(os.getenv("GF_SMTP_FROM_ADDRESS"))
+    )
+
+    if not smtp_ready:
+        enabled = _env_flag("GF_SMTP_ENABLED", default=True)
+        has_host = bool(os.getenv("GF_SMTP_HOST"))
+        has_from = bool(os.getenv("GF_SMTP_FROM_ADDRESS"))
+        logger.info(
+            "Organization verification email not sent (SMTP not ready): GF_SMTP_ENABLED=%s GF_SMTP_HOST_set=%s GF_SMTP_FROM_ADDRESS_set=%s",
+            enabled,
+            has_host,
+            has_from,
+        )
+        return {"sent": False, "delivery_mode": "not_configured"}
 
     smtp_host = os.getenv("GF_SMTP_HOST")
     from_address = os.getenv("GF_SMTP_FROM_ADDRESS")
-
     if not smtp_host or not from_address:
-        raise EmailConfigurationError("GF_SMTP_HOST and GF_SMTP_FROM_ADDRESS must be configured")
+        return {"sent": False, "delivery_mode": "not_configured"}
 
-    host, port = _parse_host(smtp_host)
+    try:
+        host, port = _parse_host(smtp_host)
+    except EmailConfigurationError as exc:
+        logger.warning("Organization verification email: invalid GF_SMTP_HOST: %s", exc)
+        return {"sent": False, "delivery_mode": "not_configured"}
+
     username = os.getenv("GF_SMTP_USER")
     password = os.getenv("GF_SMTP_PASSWORD")
     from_name = os.getenv("GF_SMTP_FROM_NAME", "Trancendance")
@@ -176,7 +211,15 @@ def send_org_verification_email(admin_email: str, org_name: str, verification_ur
                 smtp.login(username, password)
             smtp.send_message(message)
     except (OSError, smtplib.SMTPException) as exc:
-        raise EmailDeliveryError("Failed to send organization verification email") from exc
+        logger.warning(
+            "Organization verification email SMTP failure for %s: %s",
+            admin_email,
+            exc,
+            exc_info=True,
+        )
+        return {"sent": False, "delivery_mode": "smtp_failed"}
+
+    return {"sent": True, "delivery_mode": "smtp"}
 
 
 def build_member_invite_accept_url(raw_token: str) -> str:

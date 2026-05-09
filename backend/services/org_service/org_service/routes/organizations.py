@@ -18,11 +18,9 @@ from backend.common.models import (
     Profile,
 )
 from backend.services.org_service.org_service.utils.email import (
-    EmailConfigurationError,
-    EmailDeliveryError,
     build_org_verification_url,
     deliver_organization_member_invitation_email,
-    send_org_verification_email,
+    deliver_organization_verification_email,
 )
 from backend.services.org_service.org_service.utils.supabase_jwt import extract_bearer_token, verify_supabase_jwt
 
@@ -149,7 +147,7 @@ class OrganizationListResource(Resource):
             session.close()
 
     @organizations_ns.expect(organization_create_model, validate=False)
-    @organizations_ns.response(202, "Verification request created and email sent")
+    @organizations_ns.response(202, "Verification request created (email sent when SMTP is configured and delivery succeeds)")
     @organizations_ns.response(400, "Invalid request body")
     @organizations_ns.response(401, "Unauthorized")
     @organizations_ns.response(409, "Pending verification request already exists")
@@ -158,7 +156,7 @@ class OrganizationListResource(Resource):
         if db_session is None:
             return jsonify({"error": "Database is not configured. Set valid DATABASE_URL"}), 503
 
-        requested_by, _requester_email = get_authenticated_user()
+        requested_by, requester_email = get_authenticated_user()
         if requested_by is None:
             return jsonify({"error": "Unauthorized"}), 401
 
@@ -203,14 +201,22 @@ class OrganizationListResource(Resource):
             session.flush()
 
             verification_url = build_org_verification_url(token)
-            send_org_verification_email(admin_email, name, verification_url)
+            email_outcome = deliver_organization_verification_email(admin_email, name, verification_url)
 
             session.commit()
             session.refresh(verification_request)
-            return jsonify(serialize_verification_request(verification_request)), 202
-        except (EmailConfigurationError, EmailDeliveryError) as exc:
-            session.rollback()
-            return jsonify({"error": str(exc)}), 500
+            body = serialize_verification_request(verification_request)
+            body["email_sent"] = email_outcome["sent"]
+            body["email_delivery_mode"] = email_outcome["delivery_mode"]
+            requester_email_norm = normalize_email(requester_email)
+            if (
+                not email_outcome["sent"]
+                and requester_email_norm
+                and requester_email_norm == admin_email
+            ):
+                body["verification_url"] = verification_url
+
+            return jsonify(body), 202
         except SQLAlchemyError as exc:
             session.rollback()
             return jsonify({"error": str(exc)}), 500

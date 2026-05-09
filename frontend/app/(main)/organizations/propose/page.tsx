@@ -19,6 +19,8 @@ export default function ProposeOrganizationPage() {
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [submittedOrgName, setSubmittedOrgName] = useState('');
   const [submittedAdminEmail, setSubmittedAdminEmail] = useState('');
+  /** When SMTP did not send, backend may return this only if the logged-in user is the admin email. */
+  const [fallbackVerificationUrl, setFallbackVerificationUrl] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     name: '',
     adminEmail: '',
@@ -83,8 +85,18 @@ export default function ProposeOrganizationPage() {
       // Store submitted info for display
       setSubmittedOrgName(formData.name.trim());
       setSubmittedAdminEmail(formData.adminEmail.trim());
-      
-      toast.success('Verification request submitted! Check the admin email for verification link.');
+      const emailSent = data.email_sent !== false;
+      const fallbackUrl =
+        typeof data.verification_url === 'string' && data.verification_url ? data.verification_url : null;
+      setFallbackVerificationUrl(!emailSent && fallbackUrl ? fallbackUrl : null);
+
+      if (emailSent) {
+        toast.success('Verification request submitted! Check the admin email for verification link.');
+      } else if (fallbackUrl) {
+        toast.success('Request saved. Email was not sent — use the button below to verify as the admin.');
+      } else {
+        toast.success('Verification request submitted. Configure SMTP to receive the verification email.');
+      }
       setIsSubmitted(true);
       
     } catch (error: any) {
@@ -117,21 +129,56 @@ export default function ProposeOrganizationPage() {
             <div className="bg-purple-500/10 border border-purple-500/30 rounded-lg p-4 mb-6 text-left">
               <h3 className="font-semibold text-white mb-2">What happens next?</h3>
               <ul className="text-sm text-gray-300 space-y-2">
-                <li className="flex items-start gap-2">
-                  <Mail className="w-4 h-4 text-purple-400 mt-0.5" />
-                  <span>We've sent a verification email to <strong>{submittedAdminEmail}</strong></span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <Building2 className="w-4 h-4 text-purple-400 mt-0.5" />
-                  <span>The admin must click the verification link in the email</span>
-                </li>
+                {fallbackVerificationUrl ? (
+                  <>
+                    <li className="flex items-start gap-2">
+                      <Mail className="w-4 h-4 text-amber-400 mt-0.5" />
+                      <span>
+                        We could not send email (SMTP misconfigured or delivery failed). Because you are
+                        requesting as <strong>{submittedAdminEmail}</strong>, you can verify directly.
+                      </span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <Building2 className="w-4 h-4 text-purple-400 mt-0.5" />
+                      <span>Click &quot;Continue verification&quot; to open the verification step.</span>
+                    </li>
+                  </>
+                ) : (
+                  <>
+                    <li className="flex items-start gap-2">
+                      <Mail className="w-4 h-4 text-purple-400 mt-0.5" />
+                      <span>
+                        We&apos;ve sent a verification email to <strong>{submittedAdminEmail}</strong>
+                      </span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <Building2 className="w-4 h-4 text-purple-400 mt-0.5" />
+                      <span>The admin must click the verification link in the email</span>
+                    </li>
+                  </>
+                )}
                 <li className="flex items-start gap-2">
                   <Globe className="w-4 h-4 text-purple-400 mt-0.5" />
                   <span>After verification, the organization will be created immediately</span>
                 </li>
               </ul>
             </div>
-            <div className="flex gap-4 justify-center">
+            <div className="flex flex-wrap gap-4 justify-center">
+              {fallbackVerificationUrl && (
+                <GlowButton
+                  variant="primary"
+                  onClick={() => {
+                    try {
+                      const u = new URL(fallbackVerificationUrl);
+                      router.push(`${u.pathname}${u.search}`);
+                    } catch {
+                      router.push(fallbackVerificationUrl);
+                    }
+                  }}
+                >
+                  Continue verification
+                </GlowButton>
+              )}
               <GlowButton variant="primary" onClick={() => router.push('/dashboard')}>
                 Go to Dashboard
               </GlowButton>
