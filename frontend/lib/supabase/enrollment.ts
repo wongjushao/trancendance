@@ -2,7 +2,7 @@
 import { getSupabaseBrowserClient } from "./browser-client";
 
 // Direct enrollment - no approval needed
-export async function enrollInCourse(courseClassId: number, userId: string) {
+export async function enrollInCourse(courseClassId: number, userId: string, organizationId?: number) {
   const supabase = getSupabaseBrowserClient();
   
   // BATCH: Get existing enrollment AND course class details in parallel
@@ -36,6 +36,40 @@ export async function enrollInCourse(courseClassId: number, userId: string) {
   // Check capacity
   if (courseClass?.max_students && enrolledCount && enrolledCount >= courseClass.max_students) {
     throw new Error("Course is full");
+  }
+  
+  // Get course to check visibility and organization
+  const { data: course, error: courseError } = await supabase
+    .from("courses")
+    .select("visibility, organization_id")
+    .eq("id", courseClass.course_id)
+    .single();
+  
+  if (courseError) throw courseError;
+  
+  // For org/private courses, ensure user is in organization
+  if (course.visibility !== "public" && organizationId) {
+    // Check if user is already in organization
+    const { data: orgMember } = await supabase
+      .from("organization_members")
+      .select("id, member_role")
+      .eq("organization_id", organizationId)
+      .eq("user_id", userId)
+      .not("member_role", "eq", "pending")
+      .maybeSingle();
+    
+    if (!orgMember) {
+      // Add user to organization first
+      const { error: addOrgError } = await supabase
+        .from("organization_members")
+        .insert({
+          organization_id: organizationId,
+          user_id: userId,
+          member_role: "student",
+        });
+      
+      if (addOrgError) throw addOrgError;
+    }
   }
   
   // Add as class member
@@ -326,4 +360,50 @@ export async function getBulkEnrollmentStatus(courseClassIds: number[], userId: 
   });
   
   return enrollmentMap;
+}
+
+export async function enrollStudentWithOrganization(
+  courseClassId: number, 
+  userId: string, 
+  organizationId: number
+) {
+  const supabase = getSupabaseBrowserClient();
+  
+  // First, add user to organization if not already a member
+  const { data: existingMember } = await supabase
+    .from("organization_members")
+    .select("id, member_role")
+    .eq("organization_id", organizationId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  
+  let addedToOrg = false;
+  
+  if (!existingMember) {
+    const { error: orgError } = await supabase
+      .from("organization_members")
+      .insert({
+        organization_id: organizationId,
+        user_id: userId,
+        member_role: "student",
+      });
+    
+    if (orgError) throw orgError;
+    addedToOrg = true;
+  }
+  
+  // Then enroll in course
+  const { data: enrollment, error: enrollError } = await supabase
+    .from("class_members")
+    .insert({
+      course_class_id: courseClassId,
+      user_id: userId,
+      role: "student",
+    })
+    .select()
+    .single();
+  
+  if (enrollError) throw enrollError;
+  
+  return { enrollment, addedToOrg };
 }

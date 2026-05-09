@@ -159,6 +159,10 @@ def deliver_organization_verification_email(
         )
         return {"sent": False, "delivery_mode": "not_configured"}
 
+    if not _env_flag("GF_SMTP_ENABLED", default=True):
+        logger.error("[EMAIL] SMTP is disabled")
+        raise EmailConfigurationError("SMTP is disabled")
+    
     smtp_host = os.getenv("GF_SMTP_HOST")
     from_address = os.getenv("GF_SMTP_FROM_ADDRESS")
     if not smtp_host or not from_address:

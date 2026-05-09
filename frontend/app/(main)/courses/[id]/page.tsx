@@ -19,6 +19,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 import { toast } from "sonner";
+import { isUserInOrganization, sendJoinOrganizationRequest } from '@/lib/supabase/organization';
+import { enrollInCourse } from '@/lib/supabase/enrollment';
 
 interface CourseData {
   id: number;
@@ -211,23 +213,114 @@ export default function CourseDetailPage() {
     setEnrolling(true);
 
     try {
-      const res = await fetch(`/api/org-service/courses/${courseId}/enroll`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      });
-      const body = await res.json().catch(() => ({}));
+      // First, get the course offering
+      const { data: offerings, error: offeringsError } = await supabase
+        .from("course_classes")
+        .select("id, name, max_students, status")
+        .eq("course_id", courseId)
+        .in("status", ["upcoming", "ongoing"])
+        .order("start_date", { ascending: true });
 
-      if (!res.ok) {
-        toast.error(typeof body.error === "string" ? body.error : "Failed to enroll in course");
+      if (offeringsError) throw offeringsError;
+      
+      if (!offerings || offerings.length === 0) {
+        toast.error("No active course offerings available");
+        return;
+      }
+      
+      const offeringId = offerings[0].id;
+      
+      // Get course details
+      const { data: courseData } = await supabase
+        .from('courses')
+        .select('visibility, organization_id')
+        .eq('id', courseId)
+        .single();
+
+      // For public courses - direct enrollment via backend
+      if (courseData?.visibility === 'public') {
+        const response = await fetch('/api/org-service/users/enroll', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            email: session.user.email,
+            course_class_id: offeringId,
+          }),
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to enroll in course");
+        }
+        
+        toast.success("Successfully enrolled in course!");
+        await loadCourseData();
         return;
       }
 
+      // For org/private courses - check organization membership
+      const isMember = await isUserInOrganization(session.user.id, courseData.organization_id);
+      
+      if (!isMember) {
+        // Check for pending request
+        const { data: pendingRequest } = await supabase
+          .from("organization_members")
+          .select("id")
+          .eq("organization_id", courseData.organization_id)
+          .eq("user_id", session.user.id)
+          .eq("member_role", "pending")
+          .maybeSingle();
+        
+        if (pendingRequest) {
+          toast.warning(
+            `Your join request to the organization is pending approval. You'll be able to enroll once approved.`,
+            { duration: 5000 }
+          );
+        } else {
+          const wantsToJoin = confirm(
+            "This course is only available to organization members. Would you like to send a join request to the organization admin?"
+          );
+          
+          if (wantsToJoin) {
+            await sendJoinOrganizationRequest(session.user.id, courseData.organization_id);
+            toast.info(
+              "Join request sent! You'll be able to enroll once an admin approves your membership.",
+              { duration: 5000 }
+            );
+          }
+        }
+        return;
+      }
+      
+      // User is in organization, proceed with enrollment via backend
+      const response = await fetch('/api/org-service/users/enroll', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          email: session.user.email,
+          course_class_id: offeringId,
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to enroll in course");
+      }
+      
       toast.success("Successfully enrolled in course!");
       await loadCourseData();
-
+      
     } catch (error) {
       console.error("Error enrolling:", error);
-      toast.error("Failed to enroll in course");
+      toast.error(error instanceof Error ? error.message : "Failed to enroll in course");
     } finally {
       setEnrolling(false);
     }

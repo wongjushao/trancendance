@@ -296,7 +296,7 @@ export default function CoursesPage() {
       setLoading(false);
     }
   };
-    
+
   const getInstructorName = (createdBy: string, profileMap: Map<string, any>): string => {
     const profile = profileMap.get(createdBy);
     if (profile) {

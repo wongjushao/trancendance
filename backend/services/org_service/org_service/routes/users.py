@@ -44,9 +44,6 @@ def get_authenticated_user():
 class UserEnrollResource(Resource):
     @users_ns.expect(user_enroll_model, validate=False)
     @users_ns.response(200, "Student enrolled successfully")
-    @users_ns.response(400, "Invalid request")
-    @users_ns.response(401, "Unauthorized")
-    @users_ns.response(404, "User or course not found")
     def post(self):
         """Enroll a student by email, auto-add to organization if needed."""
         import os
@@ -100,33 +97,13 @@ class UserEnrollResource(Resource):
 
             supabase_admin = create_client(supabase_url, supabase_service_key)
 
-            # FIX: list_users() returns a list directly (not an object with .users)
-            try:
-                # Try the newer method
-                users_response = supabase_admin.auth.admin.list_users()
-                # The response might be a list or an object with .data
-                if hasattr(users_response, 'users'):
-                    users_list = users_response.users
-                elif hasattr(users_response, 'data'):
-                    users_list = users_response.data
-                else:
-                    users_list = users_response if isinstance(users_response, list) else []
-            except AttributeError:
-                # Fallback: try to get from users attribute
-                try:
-                    users_list = supabase_admin.auth.admin.list_users().users
-                except:
-                    # Try a different approach
-                    users_list = supabase_admin.auth.admin.list_users()
-                    if hasattr(users_list, '__iter__') and not isinstance(users_list, dict):
-                        pass  # It's already a list
-                    else:
-                        users_list = []
-
             # Find user with matching email
+            users_response = supabase_admin.auth.admin.list_users()
+            users_list = users_response.users if hasattr(users_response, 'users') else users_response
+            
             found_user = None
             for user in users_list:
-                user_email = user.email if hasattr(user, 'email') else user.get('email') if isinstance(user, dict) else None
+                user_email = user.email if hasattr(user, 'email') else user.get('email')
                 if user_email and user_email.lower() == email:
                     found_user = user
                     break
@@ -134,7 +111,6 @@ class UserEnrollResource(Resource):
             if not found_user:
                 return jsonify({"error": f"No user found with email: {email}"}), 404
 
-            # Get user ID (handles both object and dict)
             student_id = found_user.id if hasattr(found_user, 'id') else found_user.get('id')
             try:
                 student_uuid = uuid.UUID(str(student_id))
@@ -145,7 +121,6 @@ class UserEnrollResource(Resource):
             # Get profile to check if exists
             profile = session.query(Profile).filter(Profile.id == student_id).first()
             if not profile:
-                # Create minimal profile if it doesn't exist
                 profile = Profile(id=student_id)
                 session.add(profile)
                 session.flush()
@@ -160,15 +135,16 @@ class UserEnrollResource(Resource):
                 .first()
             )
 
+            added_to_org = False
             if not existing_org_member:
-                # Add user as a member of the organization
                 new_org_member = OrganizationMember(
                     organization_id=organization_id,
                     user_id=student_id,
-                    member_role="member",  # Default role for new members
+                    member_role="member",
                 )
                 session.add(new_org_member)
                 session.flush()
+                added_to_org = True
                 print(f"Added user {student_id} to organization {organization_id}")
 
             # Step 2: Check if already enrolled in the course offering
@@ -241,7 +217,7 @@ class UserEnrollResource(Resource):
                 "username": profile.username,
                 "first_name": profile.first_name,
                 "last_name": profile.last_name,
-                "added_to_organization": existing_org_member is None,
+                "added_to_organization": added_to_org,
             }
 
             return jsonify({
@@ -250,10 +226,6 @@ class UserEnrollResource(Resource):
                 "user": user_details,
             }), 200
 
-        except SQLAlchemyError as exc:
-            session.rollback()
-            print(f"Database error: {str(exc)}")
-            return jsonify({"error": str(exc)}), 500
         except Exception as e:
             session.rollback()
             print(f"Error enrolling student: {str(e)}")

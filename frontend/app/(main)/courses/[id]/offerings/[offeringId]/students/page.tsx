@@ -62,6 +62,7 @@ import { useRole } from "@/components/providers/RoleProvider";
 import { toast } from "sonner";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 import { Database } from "@/types/supabase";
+import { addUserToOrganization } from '@/lib/supabase/organization';
 
 type ClassMember = Database['public']['Tables']['class_members']['Row'];
 type Profile = Database['public']['Tables']['profiles']['Row'];
@@ -510,18 +511,6 @@ export default function CourseStudentsPage() {
       return;
     }
 
-    if (!enrollData.offeringId) {
-      toast.error("Please select a course offering");
-      return;
-    }
-
-    // Basic email validation
-    const emailRegex = /^[^\s@]+@([^\s@]+\.)+[^\s@]+$/;
-    if (!emailRegex.test(enrollData.email)) {
-      toast.error("Please enter a valid email address");
-      return;
-    }
-
     setEnrolling(true);
 
     try {
@@ -530,11 +519,10 @@ export default function CourseStudentsPage() {
       
       if (!session) {
         toast.error("You must be logged in");
-        setEnrolling(false);
         return;
       }
 
-      // Call the backend endpoint to handle everything
+      // First, find the user by email via backend
       const response = await fetch('/api/org-service/users/enroll', {
         method: 'POST',
         headers: {
@@ -554,14 +542,13 @@ export default function CourseStudentsPage() {
       }
 
       if (data.success) {
-        // Show appropriate success message
+        // The backend handles adding to organization automatically
         if (data.user?.added_to_organization) {
           toast.success(`${data.user.first_name || data.user.username || data.user.email} has been added to the organization and enrolled in the course!`);
         } else {
           toast.success(data.message);
         }
         
-        // Refresh student list
         await fetchStudents();
         setShowEnrollModal(false);
         setEnrollData({ email: "", offeringId: courseOfferings[0]?.id || 0 });
