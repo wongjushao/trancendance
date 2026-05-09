@@ -125,6 +125,35 @@ class OrganizationMember(Base):
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
 
 
+class OrganizationMemberInvitation(Base):
+    __tablename__ = "organization_member_invitations"
+    __table_args__ = (
+        CheckConstraint(
+            "member_role in ('student','teacher','sub_admin')",
+            name="ck_organization_member_invitations_member_role",
+        ),
+        CheckConstraint(
+            "status in ('pending','accepted','expired','revoked')",
+            name="ck_organization_member_invitations_status",
+        ),
+        UniqueConstraint("token_hash", name="uq_organization_member_invitations_token_hash"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("public.organizations.id"), nullable=False)
+    email: Mapped[str] = mapped_column(Text, nullable=False)
+    member_role: Mapped[str] = mapped_column(Text, nullable=False)
+    invited_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False)
+    personal_message: Mapped[str | None] = mapped_column(Text)
+    token_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'pending'"))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    accepted_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("public.profiles.id"))
+
+
 class Role(Base):
     __tablename__ = "roles"
     __table_args__ = {"schema": "public"}

@@ -1,7 +1,7 @@
 // frontend/app/(auth)/register/page.tsx
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Mail, Lock, User, AlertCircle, CheckCircle } from "lucide-react";
@@ -16,6 +16,8 @@ import {
   validateName,
   validateConfirmPassword,
 } from "@/lib/validation";
+import { fetchOrganizationMemberInvitationFromBackend } from "@/lib/invites";
+import { readPendingOrgInvitation, writePendingOrgInvitation } from "@/lib/org-invitation-pending";
 
 interface FormErrors {
   name?: string;
@@ -59,8 +61,14 @@ function getFriendlyRegisterError(
   return { message: errorMessage };
 }
 
+function normalizeSignupEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
 export default function RegisterPage() {
   const router = useRouter();
+  const inviteTokenRef = useRef<string | null>(null);
+  const [inviteNotice, setInviteNotice] = useState<{ orgName: string } | null>(null);
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -76,6 +84,88 @@ export default function RegisterPage() {
     message: string;
     action?: { label: string; href: string };
   } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function hydrateInvitation() {
+      if (typeof window === "undefined") return;
+
+      const sp = new URLSearchParams(window.location.search);
+      const tokenFromUrl = sp.get("invite_token");
+
+      const pending = readPendingOrgInvitation();
+      const token = tokenFromUrl ?? pending?.token ?? null;
+      inviteTokenRef.current = token;
+
+      if (!token) {
+        if (pending?.email) {
+          setFormData((prev) => ({
+            ...prev,
+            email: normalizeSignupEmail(pending.email),
+          }));
+          setInviteNotice({ orgName: pending.organizationName });
+        }
+        return;
+      }
+
+      const backend = await fetchOrganizationMemberInvitationFromBackend(token);
+      if (cancelled || !backend.ok) {
+        if (!cancelled && pending?.email) {
+          setFormData((prev) => ({
+            ...prev,
+            email: normalizeSignupEmail(pending.email),
+          }));
+          setInviteNotice({ orgName: pending.organizationName });
+        }
+        return;
+      }
+
+      const d = backend.data;
+      const emailNorm = normalizeSignupEmail(d.email);
+      writePendingOrgInvitation({
+        token,
+        email: emailNorm,
+        role: d.member_role,
+        organizationId: d.organization_id,
+        organizationName: d.organization_name || "Organization",
+        invitedByName: d.invited_by_name || "",
+        inviteSource: "backend",
+      });
+
+      setFormData((prev) => ({
+        ...prev,
+        email: emailNorm,
+      }));
+      setInviteNotice({ orgName: d.organization_name || "your organization" });
+    }
+
+    hydrateInvitation();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const supabase = getSupabaseBrowserClient();
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event !== "SIGNED_IN" || !session?.user?.email) return;
+      const pending = readPendingOrgInvitation();
+      if (
+        !pending ||
+        normalizeSignupEmail(session.user.email) !== normalizeSignupEmail(pending.email)
+      ) {
+        return;
+      }
+      if (typeof window !== "undefined" && window.location.pathname.startsWith("/register")) {
+        router.replace(`/accept-invite?token=${encodeURIComponent(pending.token)}`);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [router]);
 
   const validateField = (field: string, value: string): string | undefined => {
     switch (field) {
@@ -162,11 +252,18 @@ export default function RegisterPage() {
     setIsLoading(true);
     const supabase = getSupabaseBrowserClient();
 
+    const inviteTok = inviteTokenRef.current?.trim();
+    const redirectBase = `${getSiteUrl()}/auth/callback`;
+    const emailRedirectTo =
+      inviteTok && inviteTok.length > 0
+        ? `${redirectBase}?invite_token=${encodeURIComponent(inviteTok)}`
+        : redirectBase;
+
     const { data, error } = await supabase.auth.signUp({
       email: formData.email,
       password: formData.password,
       options: {
-        emailRedirectTo: `${getSiteUrl()}/auth/callback`,
+        emailRedirectTo,
         data: { full_name: formData.name },
       },
     });
@@ -189,9 +286,17 @@ export default function RegisterPage() {
       return;
     }
 
+    if (data.session?.access_token && inviteTok && inviteTok.length > 0) {
+      router.replace(`/accept-invite?token=${encodeURIComponent(inviteTok)}`);
+      return;
+    }
+
     setStatus({
       type: "success",
-      message: "Account created! Check your email and click the confirmation link to activate it.",
+      message:
+        inviteTok && inviteTok.length > 0
+          ? "Account created! Confirm your email from your inbox — we'll take you to accept your invitation right after."
+          : "Account created! Check your email and click the confirmation link to activate it.",
     });
   };
 
@@ -200,10 +305,17 @@ export default function RegisterPage() {
     setStatus(null);
     const supabase = getSupabaseBrowserClient();
 
+    const inviteTok = inviteTokenRef.current?.trim();
+    const redirectBase = `${getSiteUrl()}/auth/callback`;
+    const redirectTo =
+      inviteTok && inviteTok.length > 0
+        ? `${redirectBase}?invite_token=${encodeURIComponent(inviteTok)}`
+        : redirectBase;
+
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${getSiteUrl()}/auth/callback`,
+        redirectTo,
         queryParams: {
           access_type: 'offline',
           prompt: 'consent',
@@ -241,6 +353,14 @@ export default function RegisterPage() {
           <h1 className="text-3xl font-bold text-white mb-2">Create Account</h1>
           <p className="text-[#A0A0B5]">Start your learning journey today</p>
         </div>
+
+        {inviteNotice && (
+          <div className="mb-6 rounded-xl border border-purple-500/25 bg-purple-500/10 p-4 text-sm text-purple-100">
+            You're signing up to join{" "}
+            <span className="font-semibold text-white">{inviteNotice.orgName}</span>.
+            Use the same email address this invitation was sent to so you can finish joining after you verify your account.
+          </div>
+        )}
 
         <form onSubmit={handleRegister} className="space-y-5">
           <div>

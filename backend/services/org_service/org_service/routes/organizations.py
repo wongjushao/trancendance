@@ -8,13 +8,20 @@ from email.utils import parseaddr
 
 from flask import current_app, jsonify, request
 from flask_restx import Namespace, Resource, fields
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from backend.common.models import Organization, OrganizationMember, OrganizationVerificationRequest, Profile
+from backend.common.models import (
+    Organization,
+    OrganizationMember,
+    OrganizationMemberInvitation,
+    OrganizationVerificationRequest,
+    Profile,
+)
 from backend.services.org_service.org_service.utils.email import (
     EmailConfigurationError,
     EmailDeliveryError,
     build_org_verification_url,
+    deliver_organization_member_invitation_email,
     send_org_verification_email,
 )
 from backend.services.org_service.org_service.utils.supabase_jwt import extract_bearer_token, verify_supabase_jwt
@@ -22,6 +29,13 @@ from backend.services.org_service.org_service.utils.supabase_jwt import extract_
 
 organizations_ns = Namespace("organizations", path="/", description="Organization endpoints")
 VERIFICATION_TOKEN_TTL_HOURS = 24
+MEMBER_INVITE_TOKEN_TTL_DAYS = 7
+
+INVITER_TO_ALLOWED_TARGETS = {
+    "admin": {"student", "teacher", "sub_admin"},
+    "sub_admin": {"student", "teacher"},
+    "teacher": {"student", "teacher"},
+}
 
 organization_create_model = organizations_ns.model(
     "OrganizationCreateRequest",
@@ -98,6 +112,24 @@ def normalize_email(value: str | None) -> str | None:
 
 def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def ensure_profile_row(session, user_id: uuid.UUID) -> Profile:
+    profile = session.query(Profile).filter(Profile.id == user_id).first()
+    if profile is None:
+        profile = Profile(id=user_id)
+        session.add(profile)
+        session.flush()
+    return profile
+
+
+def invite_inviter_display_name(profile: Profile | None) -> str:
+    if profile is None:
+        return "A teammate"
+    first = (profile.first_name or "").strip()
+    last = (profile.last_name or "").strip()
+    combo = " ".join(part for part in (first, last) if part)
+    return combo if combo else "A teammate"
 
 
 @organizations_ns.route("/orgs")
@@ -575,6 +607,250 @@ class OrganizationMemberResource(Resource):
                 "joined_at": member.created_at.isoformat() if member.created_at else None,
             }), 200
         except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+
+@organizations_ns.route("/orgs/<int:org_id>/invite")
+class OrganizationMemberInviteCreateResource(Resource):
+    """Create a tracked organization invite and send (or capture) invitation email."""
+
+    @organizations_ns.response(201, "Invitation created")
+    def post(self, org_id: int):
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        inviter_id, _inv_email = get_authenticated_user()
+        if inviter_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        payload = request.get_json(silent=True) or {}
+        recipient = normalize_email(payload.get("email"))
+        desired_role = (payload.get("role") or "").strip().lower()
+        personal_message_raw = payload.get("personal_message")
+        personal_message_msg = payload.get("message")
+        note = ""
+        if isinstance(personal_message_raw, str) and personal_message_raw.strip():
+            note = personal_message_raw.strip()
+        elif isinstance(personal_message_msg, str) and personal_message_msg.strip():
+            note = personal_message_msg.strip()
+
+        if not recipient:
+            return jsonify({"error": "Field 'email' must be a valid address"}), 400
+        if desired_role not in {"student", "teacher", "sub_admin"}:
+            return jsonify({"error": "Field 'role' must be student, teacher, or sub_admin"}), 400
+
+        session = db_session()
+        expires_at = datetime.now(timezone.utc) + timedelta(days=MEMBER_INVITE_TOKEN_TTL_DAYS)
+
+        try:
+            membership = session.query(OrganizationMember).filter(
+                OrganizationMember.organization_id == org_id,
+                OrganizationMember.user_id == inviter_id,
+            ).first()
+            if membership is None or membership.member_role not in INVITER_TO_ALLOWED_TARGETS:
+                return jsonify({"error": "You are not allowed to send invitations for this organization"}), 403
+
+            allowed_roles = INVITER_TO_ALLOWED_TARGETS[membership.member_role]
+            if desired_role not in allowed_roles:
+                return jsonify({"error": "You cannot assign this role to an invite"}), 403
+
+            organization = session.query(Organization).filter(Organization.id == org_id).first()
+            if organization is None:
+                return jsonify({"error": "Organization not found"}), 404
+
+            inviter_profile = ensure_profile_row(session, inviter_id)
+
+            plain_token = secrets.token_urlsafe(32)
+
+            invite_row = OrganizationMemberInvitation(
+                organization_id=org_id,
+                email=recipient,
+                member_role=desired_role,
+                invited_by=inviter_id,
+                personal_message=note or None,
+                token_hash=hash_token(plain_token),
+                expires_at=expires_at,
+            )
+
+            session.add(invite_row)
+            session.flush()
+            session.commit()
+            session.refresh(invite_row)
+
+            inviter_name = invite_inviter_display_name(inviter_profile)
+
+            outcome = deliver_organization_member_invitation_email(
+                recipient,
+                organization.name,
+                desired_role,
+                inviter_name,
+                plain_token,
+                note or None,
+            )
+
+            resp = {
+                "id": invite_row.id,
+                "organization_id": org_id,
+                "organization_name": organization.name,
+                "email": recipient,
+                "member_role": desired_role,
+                "expires_at": invite_row.expires_at.isoformat() if invite_row.expires_at else None,
+                "status": invite_row.status,
+                "email_sent": outcome["sent"],
+                "email_delivery": outcome["delivery_mode"],
+            }
+            mock = outcome.get("mock_envelope")
+            if mock is not None:
+                resp["mock_email"] = mock
+            return jsonify(resp), 201
+
+        except IntegrityError:
+            session.rollback()
+            return jsonify({"error": "A pending invitation for this email already exists"}), 409
+        except SQLAlchemyError as exc:
+            session.rollback()
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+
+@organizations_ns.route("/member-invitations")
+class OrganizationMemberInvitationDetailsResource(Resource):
+    def get(self):
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        token_raw = request.args.get("token")
+        if not token_raw:
+            return jsonify({"error": "Query parameter token is required"}), 400
+
+        session = db_session()
+        now = datetime.now(timezone.utc)
+        try:
+            invite_row = session.query(OrganizationMemberInvitation).filter(
+                OrganizationMemberInvitation.token_hash == hash_token(str(token_raw))
+            ).first()
+            if invite_row is None:
+                return jsonify({"error": "Invitation not found"}), 404
+
+            if invite_row.status == "pending" and invite_row.expires_at <= now:
+                invite_row.status = "expired"
+                session.commit()
+
+            if invite_row.status != "pending":
+                return jsonify({"error": f"This invitation is {invite_row.status}"}), 410
+
+            org = session.query(Organization).filter(Organization.id == invite_row.organization_id).first()
+            inviter_profile = session.query(Profile).filter(Profile.id == invite_row.invited_by).first()
+
+            return (
+                jsonify(
+                    {
+                        "email": invite_row.email,
+                        "member_role": invite_row.member_role,
+                        "organization_id": invite_row.organization_id,
+                        "organization_name": org.name if org else None,
+                        "invited_by_name": invite_inviter_display_name(inviter_profile),
+                        "personal_message": invite_row.personal_message,
+                        "expires_at": invite_row.expires_at.isoformat() if invite_row.expires_at else None,
+                        "status": invite_row.status,
+                    }
+                ),
+                200,
+            )
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+
+@organizations_ns.route("/member-invitations/accept")
+class OrganizationMemberInvitationAcceptResource(Resource):
+    def post(self):
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        uid, bearer_email = get_authenticated_user()
+        if uid is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        bearer_email_normalized = normalize_email(bearer_email)
+        if bearer_email_normalized is None:
+            return jsonify({"error": "Bearer token does not include an email"}), 401
+
+        payload = request.get_json(silent=True) or {}
+        token_raw = payload.get("token") or request.args.get("token")
+        if not token_raw:
+            return jsonify({"error": "Field token is required"}), 400
+
+        session = db_session()
+        now = datetime.now(timezone.utc)
+        try:
+            invite_row = session.query(OrganizationMemberInvitation).filter(
+                OrganizationMemberInvitation.token_hash == hash_token(str(token_raw))
+            ).first()
+
+            if invite_row is None:
+                return jsonify({"error": "Invitation not found"}), 404
+
+            if invite_row.status == "pending" and invite_row.expires_at <= now:
+                invite_row.status = "expired"
+
+            if invite_row.status != "pending":
+                session.commit()
+                return jsonify({"error": f"This invitation is {invite_row.status}"}), 410
+
+            if bearer_email_normalized != invite_row.email:
+                return jsonify({"error": "Signed-in email does not match the invitation"}), 403
+
+            org = session.query(Organization).filter(Organization.id == invite_row.organization_id).first()
+            if org is None:
+                return jsonify({"error": "Organization not found"}), 404
+
+            ensure_profile_row(session, uid)
+
+            member_row = session.query(OrganizationMember).filter(
+                OrganizationMember.organization_id == invite_row.organization_id,
+                OrganizationMember.user_id == uid,
+            ).first()
+
+            assigned_role = invite_row.member_role
+
+            if member_row:
+                member_row.member_role = assigned_role
+            else:
+                session.add(
+                    OrganizationMember(
+                        organization_id=invite_row.organization_id,
+                        user_id=uid,
+                        member_role=assigned_role,
+                    )
+                )
+
+            invite_row.status = "accepted"
+            invite_row.accepted_at = now
+            invite_row.accepted_user_id = uid
+            session.commit()
+
+            return jsonify(
+                {
+                    "organization_id": org.id,
+                    "organization_name": org.name,
+                    "member_role": assigned_role,
+                    "email": bearer_email_normalized,
+                }
+            ), 200
+
+        except IntegrityError as exc:
+            session.rollback()
+            return jsonify({"error": "Could not finalize membership", "detail": str(getattr(exc, "orig", exc))}), 409
+        except SQLAlchemyError as exc:
+            session.rollback()
             return jsonify({"error": str(exc)}), 500
         finally:
             session.close()

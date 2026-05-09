@@ -7,7 +7,8 @@ import { GlowButton } from '@/components/lms/GlowButton';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Organization, OrganizationRole } from '@/types/organizations';
-import { createOrganizationInvite } from '@/lib/invites';
+import { getSupabaseBrowserClient } from '@/lib/supabase/browser-client';
+import { enqueueMockInvitationFromBackend } from '@/lib/mock-email';
 import { toast } from 'sonner';
 
 interface InviteMemberModalProps {
@@ -22,7 +23,7 @@ export function InviteMemberModal({
   isOpen, 
   onClose, 
   organization, 
-  invitedByName,
+  invitedByName: _invitedByName,
   currentUserRole 
 }: InviteMemberModalProps) {
   const [email, setEmail] = useState('');
@@ -75,43 +76,60 @@ export function InviteMemberModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    console.log('[InviteMemberModal] Submit clicked');
-    console.log('[InviteMemberModal] Email:', email);
-    console.log('[InviteMemberModal] Selected Role:', selectedRole);
-    console.log('[InviteMemberModal] Organization:', organization);
-    
-    if (!validateEmail(email)) {
-      console.log('[InviteMemberModal] Email validation failed');
-      return;
-    }
-    
+
+    if (!validateEmail(email)) return;
+
     setIsSubmitting(true);
-    
+
     try {
-      // Create invitation
-      console.log('[InviteMemberModal] Creating invitation...');
-      const invitation = createOrganizationInvite(
-        email,
-        organization.id,
-        selectedRole,
-        'current-user-id',
-        invitedByName
+      const supabase = getSupabaseBrowserClient();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        toast.error('Your session expired. Please sign in again.');
+        setIsSubmitting(false);
+        return;
+      }
+
+      const response = await fetch(`/api/org-service/orgs/${organization.id}/invite`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          email: email.trim(),
+          role: selectedRole,
+          personal_message: message.trim() ? message.trim() : undefined,
+        }),
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        mock_email?: { to: string; subject: string; body: string; link: string };
+      };
+
+      if (!response.ok) {
+        throw new Error(typeof payload?.error === 'string' ? payload.error : `Invite failed (${response.status})`);
+      }
+
+      if (payload.mock_email) {
+        enqueueMockInvitationFromBackend(payload.mock_email);
+      }
+
+      toast.success(
+        `Invitation sent to ${email} as ${getAvailableRoles().find((r) => r.role === selectedRole)?.label}`
       );
-      
-      console.log('[InviteMemberModal] Invitation created:', invitation);
-      console.log('[InviteMemberModal] Invitation token:', invitation.token);
-      
-      toast.success(`Invitation sent to ${email} as ${getAvailableRoles().find(r => r.role === selectedRole)?.label}`);
-      
-      // Reset form
+
       setEmail('');
       setMessage('');
       setSelectedRole('student');
       onClose();
     } catch (error) {
-      console.error('[InviteMemberModal] Error creating invitation:', error);
-      toast.error('Failed to send invitation. Please try again.');
+      console.error('[InviteMemberModal] Error sending invitation:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to send invitation.');
     } finally {
       setIsSubmitting(false);
     }

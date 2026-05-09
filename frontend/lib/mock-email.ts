@@ -56,6 +56,37 @@ function acceptInvitePath(token: string): string {
   return `/accept-invite?${q}`;
 }
 
+export interface BackendMockInvitationEmail {
+  to: string;
+  subject: string;
+  body: string;
+  /** Path + query relative to site root, e.g. /accept-invite?token=... */
+  link: string;
+  invite_url_absolute?: string;
+}
+
+/**
+ * Persist a backend-generated envelope (SMTP disabled/failed or dev capture) into the mock inbox.
+ */
+export function enqueueMockInvitationFromBackend(mock: BackendMockInvitationEmail): void {
+  if (typeof window === 'undefined') return;
+
+  const email: MockEmail = {
+    id: `mock-email-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    to: mock.to,
+    subject: mock.subject,
+    body: mock.body,
+    link: mock.link.startsWith('/') ? mock.link : `/${mock.link}`,
+    createdAt: new Date().toISOString(),
+    read: false,
+  };
+
+  const emails = loadEmails();
+  emails.push(email);
+  saveEmails(emails);
+  console.log('[MockEmail] Queued invitation from backend', { to: mock.to, subject: mock.subject });
+}
+
 export function sendMockInvitation(
   to: string,
   organizationName: string,

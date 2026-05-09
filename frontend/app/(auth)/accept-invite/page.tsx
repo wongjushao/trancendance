@@ -2,12 +2,24 @@
 
 import { useState, useEffect, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Building2, UserPlus, CheckCircle, AlertCircle, Loader2, Mail } from "lucide-react";
+import { Building2, UserPlus, AlertCircle, Loader2, Mail } from "lucide-react";
 import { GlowButton } from "@/components/lms/GlowButton";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 import { setUserRoleData } from "@/lib/role";
-import { getInvitationByToken, acceptInvitation } from "@/lib/invites";
-import { toast } from "sonner";
+import {
+  acceptInvitation,
+  acceptOrganizationMemberInvitationOnBackend,
+  fetchOrganizationMemberInvitationFromBackend,
+  getInvitationByToken,
+} from "@/lib/invites";
+import {
+  clearPendingOrgInvitation,
+  writePendingOrgInvitation,
+} from "@/lib/org-invitation-pending";
+
+function normalizeEmail(email: string) {
+  return email.trim().toLowerCase();
+}
 
 interface InvitationData {
   token: string;
@@ -17,6 +29,8 @@ interface InvitationData {
   organizationName: string;
   invitedByName: string;
   expiresAt: Date;
+  inviteSource: 'backend' | 'local';
+  personalMessage?: string | null;
 }
 
 function AcceptInviteContent() {
@@ -29,8 +43,8 @@ function AcceptInviteContent() {
   const [isAccepting, setIsAccepting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [user, setUser] = useState<any>(null);
+  const [authChecked, setAuthChecked] = useState(false);
 
-  // Load invitation
   useEffect(() => {
     const loadInvitation = async () => {
       if (!token) {
@@ -40,49 +54,92 @@ function AcceptInviteContent() {
       }
 
       setIsLoading(true);
-      
-      const invite = getInvitationByToken(token);
-      
-      if (!invite) {
-        setError('Invitation not found or has expired');
+
+      const backendResult = await fetchOrganizationMemberInvitationFromBackend(token);
+      if (backendResult.ok) {
+        const d = backendResult.data;
+        const expiresAt = new Date(d.expires_at);
+        if (Number.isNaN(expiresAt.getTime()) || expiresAt <= new Date()) {
+          setError('This invitation has expired');
+          setIsLoading(false);
+          return;
+        }
+        const orgName = d.organization_name || 'Unknown organization';
+        setInvitation({
+          token,
+          email: normalizeEmail(d.email),
+          role: d.member_role as InvitationData['role'],
+          organizationId: d.organization_id,
+          organizationName: orgName,
+          invitedByName: d.invited_by_name || 'Someone',
+          expiresAt,
+          inviteSource: 'backend',
+          personalMessage: d.personal_message ?? null,
+        });
         setIsLoading(false);
         return;
       }
-      
+
+      const invite = getInvitationByToken(token);
+      if (!invite) {
+        setError(backendResult.message || 'Invitation not found or has expired');
+        setIsLoading(false);
+        return;
+      }
+
       if (invite.status !== 'pending') {
         setError(`This invitation is already ${invite.status}`);
         setIsLoading(false);
         return;
       }
-      
+
       if (new Date(invite.expires_at) < new Date()) {
         setError('This invitation has expired');
         setIsLoading(false);
         return;
       }
-      
+
       setInvitation({
         token: invite.token,
-        email: invite.email,
-        role: invite.role as 'student' | 'teacher' | 'admin' | 'sub_admin',
+        email: normalizeEmail(invite.email),
+        role: invite.role as InvitationData['role'],
         organizationId: invite.organization_id,
         organizationName: invite.organization_name,
         invitedByName: invite.invited_by_name,
         expiresAt: new Date(invite.expires_at),
+        inviteSource: 'local',
       });
-      
+
       setIsLoading(false);
     };
-    
+
     loadInvitation();
   }, [token]);
+
+  useEffect(() => {
+    if (!authChecked || !invitation || !token || user) return;
+
+    writePendingOrgInvitation({
+      token: invitation.token,
+      email: invitation.email,
+      role: invitation.role,
+      organizationId: invitation.organizationId,
+      organizationName: invitation.organizationName,
+      invitedByName: invitation.invitedByName,
+      inviteSource: invitation.inviteSource,
+    });
+    router.replace(`/register?invite_token=${encodeURIComponent(token)}`);
+  }, [authChecked, invitation, token, user, router]);
 
   // Check if user is logged in
   useEffect(() => {
     const checkUser = async () => {
       const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       setUser(user);
+      setAuthChecked(true);
     };
     checkUser();
   }, []);
@@ -95,45 +152,70 @@ function AcceptInviteContent() {
     
     // If user is not logged in, store invitation and redirect to register
     if (!user) {
-      sessionStorage.setItem('pending_invitation', JSON.stringify({
+      writePendingOrgInvitation({
         token: invitation.token,
         email: invitation.email,
         role: invitation.role,
         organizationId: invitation.organizationId,
         organizationName: invitation.organizationName,
         invitedByName: invitation.invitedByName,
-      }));
-      router.push('/register');
+        inviteSource: invitation.inviteSource,
+      });
+      router.replace(`/register?invite_token=${encodeURIComponent(invitation.token)}`);
+      setIsAccepting(false);
       return;
     }
-    
-    // Check email match
-    if (user.email !== invitation.email) {
+
+    if (normalizeEmail(user.email ?? '') !== invitation.email) {
       setError(`This invitation was sent to ${invitation.email}. Please log in with that email address to accept.`);
       setIsAccepting(false);
       return;
     }
-    
+
     try {
-      const result = acceptInvitation(token, user.id, user.email);
-      
-      if (!result.success) {
-        throw new Error(result.message);
+      if (invitation.inviteSource === 'backend') {
+        const supabase = getSupabaseBrowserClient();
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        const accessToken = session?.access_token;
+        if (!accessToken) {
+          throw new Error('Your session expired. Please sign in again.');
+        }
+
+        const result = await acceptOrganizationMemberInvitationOnBackend(accessToken, token);
+        if (!result.ok) {
+          throw new Error(result.message);
+        }
+
+        setUserRoleData({
+          role: invitation.role as unknown as never,
+          organizationId: result.organization_id,
+          organizationName: result.organization_name,
+          pendingRole: null,
+          pendingOrganizationId: null,
+          pendingOrganizationName: null,
+        });
+      } else {
+        const result = acceptInvitation(token, user.id, user.email);
+
+        if (!result.success) {
+          throw new Error(result.message);
+        }
+
+        setUserRoleData({
+          role: invitation.role as unknown as never,
+          organizationId: invitation.organizationId,
+          organizationName: invitation.organizationName,
+          pendingRole: null,
+          pendingOrganizationId: null,
+          pendingOrganizationName: null,
+        });
       }
-      
-      // Update user role data
-      setUserRoleData({
-        role: invitation.role as any,
-        organizationId: invitation.organizationId,
-        organizationName: invitation.organizationName,
-        pendingRole: null,
-        pendingOrganizationId: null,
-        pendingOrganizationName: null,
-      });
-      
-      sessionStorage.removeItem('pending_invitation');
-      
-      // Redirect to confirmation page - using absolute path
+
+      clearPendingOrgInvitation();
+
       const params = new URLSearchParams();
       params.set('orgId', invitation.organizationId.toString());
       params.set('orgName', invitation.organizationName);
@@ -204,7 +286,17 @@ function AcceptInviteContent() {
                 </div>
                 <p className="text-white">{invitation.organizationName}</p>
               </div>
-              
+
+              {invitation.personalMessage ? (
+                <div className="p-4 bg-[#12121A] rounded-xl">
+                  <div className="flex items-center gap-3 mb-3">
+                    <Mail className="w-5 h-5 text-purple-400" />
+                    <span className="text-white font-medium">Personal note</span>
+                  </div>
+                  <p className="text-white whitespace-pre-wrap text-sm">{invitation.personalMessage}</p>
+                </div>
+              ) : null}
+
               <div className="p-4 bg-[#12121A] rounded-xl">
                 <div className="flex items-center gap-3 mb-3">
                   <UserPlus className="w-5 h-5 text-purple-400" />
@@ -222,7 +314,7 @@ function AcceptInviteContent() {
               </div>
             </div>
 
-            {user && user.email !== invitation.email && (
+            {user && normalizeEmail(user.email ?? '') !== invitation.email && (
               <div className="p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-xl mb-6">
                 <p className="text-yellow-400 text-sm text-center">
                   You're logged in as {user.email}. This invitation was sent to {invitation.email}.
@@ -243,7 +335,7 @@ function AcceptInviteContent() {
               </div>
             )}
 
-            {user && user.email === invitation.email && (
+            {user && normalizeEmail(user.email ?? '') === invitation.email && (
               <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-xl mb-6">
                 <p className="text-green-400 text-sm text-center">
                   You're logged in as {user.email}. Accepting this invitation will add you to the organization.
@@ -256,7 +348,7 @@ function AcceptInviteContent() {
               fullWidth
               onClick={handleAccept}
               isLoading={isAccepting}
-              disabled={user && user.email !== invitation.email}
+              disabled={!!user && normalizeEmail(user.email ?? '') !== invitation.email}
             >
               {!user ? 'Create Account & Accept' : 'Accept Invitation'}
             </GlowButton>

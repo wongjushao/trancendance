@@ -48,8 +48,13 @@ export async function GET(request: NextRequest) {
   const code = requestUrl.searchParams.get("code");
   const error = requestUrl.searchParams.get("error");
   const errorDescription = requestUrl.searchParams.get("error_description");
+  const inviteTokenRaw = requestUrl.searchParams.get("invite_token");
 
-  console.log("[Auth Callback] Processing request", { hasCode: !!code, error });
+  console.log("[Auth Callback] Processing request", {
+    hasCode: !!code,
+    error,
+    hasInviteToken: !!inviteTokenRaw,
+  });
 
   if (error) {
     console.error("[Auth Callback] OAuth error:", error, errorDescription);
@@ -144,7 +149,15 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // No MFA required, proceed to dashboard
+    // No MFA required — finish org invite onboarding if user registered from invitation email
+    if (inviteTokenRaw && inviteTokenRaw.trim()) {
+      const qp = new URLSearchParams({
+        token: inviteTokenRaw.trim(),
+      }).toString();
+      console.log("[Auth Callback] invite_token present, redirecting to accept-invite");
+      return NextResponse.redirect(new URL(`/accept-invite?${qp}`, getSiteOrigin()));
+    }
+
     console.log("[Auth Callback] No MFA required, redirecting to dashboard");
     return NextResponse.redirect(new URL("/dashboard", getSiteOrigin()));
     

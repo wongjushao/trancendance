@@ -185,3 +185,61 @@ export function getUserInvitesForOrganization(organizationId: number, userId: st
   const invitations = loadInvitations();
   return invitations.filter(inv => inv.organization_id === organizationId && inv.status === 'pending');
 }
+
+
+export type BackendMemberInvitationDetails = {
+  email: string;
+  member_role: string;
+  organization_id: number;
+  organization_name: string | null;
+  invited_by_name: string;
+  personal_message?: string | null;
+  expires_at: string;
+  status: string;
+};
+
+
+export async function fetchOrganizationMemberInvitationFromBackend(
+  token: string
+): Promise<{ ok: true; data: BackendMemberInvitationDetails } | { ok: false; status: number; message: string }> {
+  const res = await fetch(
+    `/api/org-service/member-invitations?token=${encodeURIComponent(token)}`
+  );
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const message =
+      typeof payload?.error === 'string' ? payload.error : `Request failed (${res.status})`;
+    return { ok: false, status: res.status, message };
+  }
+  return { ok: true, data: payload as BackendMemberInvitationDetails };
+}
+
+
+export async function acceptOrganizationMemberInvitationOnBackend(
+  accessToken: string,
+  invitationToken: string
+): Promise<
+  | { ok: true; organization_id: number; organization_name: string; member_role: string }
+  | { ok: false; status: number; message: string }
+> {
+  const res = await fetch('/api/org-service/member-invitations/accept', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({ token: invitationToken }),
+  });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const message =
+      typeof payload?.error === 'string' ? payload.error : `Request failed (${res.status})`;
+    return { ok: false, status: res.status, message };
+  }
+  return {
+    ok: true,
+    organization_id: payload.organization_id as number,
+    organization_name: payload.organization_name as string,
+    member_role: payload.member_role as string,
+  };
+}
