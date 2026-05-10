@@ -1,0 +1,108 @@
+# Supabase Calls Inventory
+
+## Files with Supabase calls:
+
+
+frontend/components/assignment/AssignmentSubmission.tsx
+frontend/components/lms/TopNav.tsx
+frontend/components/lms/Sidebar.tsx
+frontend/components/course/QuizComponent.tsx
+frontend/components/course/CoursePreview.tsx
+frontend/components/course/CourseProgress.tsx
+frontend/components/course/ManageStudents.tsx
+frontend/components/course/LessonPlayer.tsx
+frontend/components/course/CourseBasicForm.tsx
+frontend/components/SignOutButton.tsx
+frontend/components/organization/InviteMemberModal.tsx
+frontend/components/ui/file-upload.tsx
+frontend/components/settings/SkillsSelector.tsx
+frontend/app/_landing/LandingAuthed.tsx
+frontend/app/(auth)/accept-invite/page.tsx
+frontend/app/(auth)/register/page.tsx
+frontend/app/(auth)/reset-password/page.tsx
+frontend/app/(auth)/login/page.tsx
+frontend/app/(auth)/forgot-password/page.tsx
+frontend/app/(main)/dashboard/page.tsx
+frontend/app/(main)/profile/ProfileClient.tsx
+frontend/app/(main)/profile/[identifier]/page.tsx
+frontend/app/(main)/profile/page.tsx
+frontend/app/(main)/chat/rooms/[roomId]/page.tsx
+frontend/app/(main)/chat/rooms/page.tsx
+frontend/app/(main)/layout.tsx
+frontend/app/(main)/assignments/page.tsx
+frontend/app/(main)/organizations/propose/page.tsx
+frontend/app/(main)/organizations/page.tsx
+frontend/app/(main)/organizations/verify/page.tsx
+frontend/app/(main)/organizations/[id]/members/page.tsx
+frontend/app/(main)/organizations/[id]/setup/page.tsx
+frontend/app/(main)/organizations/[id]/page.tsx
+frontend/app/(main)/organizations/[id]/admin/page.tsx
+frontend/app/(main)/organizations/[id]/courses/page.tsx
+frontend/app/(main)/settings/page.tsx
+frontend/app/(main)/courses/create/page.tsx
+frontend/app/(main)/courses/page.tsx
+frontend/app/(main)/courses/[id]/analytics/page.tsx
+frontend/app/(main)/courses/[id]/chat/page.tsx
+frontend/app/(main)/courses/[id]/offerings/[offeringId]/students/page.tsx
+frontend/app/(main)/courses/[id]/offerings/[offeringId]/schedules/page.tsx
+frontend/app/(main)/courses/[id]/offerings/[offeringId]/edit/page.tsx
+frontend/app/(main)/courses/[id]/offerings/create/page.tsx
+frontend/app/(main)/courses/[id]/learn/page.tsx
+frontend/app/(main)/courses/[id]/assignments/[assignmentId]/submissions/page.tsx
+frontend/app/(main)/courses/[id]/reviews/create/page.tsx
+frontend/app/(main)/courses/[id]/reviews/page.tsx
+frontend/app/(main)/courses/[id]/edit/page.tsx
+frontend/app/(main)/courses/[id]/page.tsx
+frontend/app/(main)/courses/[id]/enroll/page.tsx
+frontend/app/(main)/invite/accept/page.tsx
+frontend/app/(main)/messages/page.tsx
+frontend/app/auth/callback/route.ts
+frontend/app/auth/confirm/route.ts
+frontend/app/auth/mfa-verify/page.tsx
+frontend/app/onboarding/page.tsx
+frontend/app/page.tsx
+frontend/contexts/ChatContext.tsx
+frontend/proxy.ts
+frontend/lib/course-progress.ts
+frontend/lib/supabase/browser-client.ts
+frontend/lib/supabase/enrollment.ts
+frontend/lib/supabase/progress.ts
+frontend/lib/supabase/courses.ts
+frontend/lib/supabase/organization.ts
+frontend/lib/supabase/chat.ts
+frontend/lib/mfa-api.ts
+frontend/lib/useAvatar.ts
+frontend/lib/refresh-role.ts
+frontend/lib/onboarding.ts
+
+## Sample of actual calls:
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
+      const supabase = getSupabaseBrowserClient();
+      const { data: { user } } = await supabase.auth.getUser();
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
+  const supabase = getSupabaseBrowserClient();
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
+  const supabase = getSupabaseBrowserClient();
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
+  const supabase = getSupabaseBrowserClient();
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
+      const supabase = getSupabaseBrowserClient();
+      const { data: { session } } = await supabase.auth.getSession();
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
+      const supabase = getSupabaseBrowserClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      const supabase = getSupabaseBrowserClient();
+      const { data: { user } } = await supabase.auth.getUser();
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
+      const supabase = getSupabaseBrowserClient();
+      const supabase = getSupabaseBrowserClient();
+      const { error } = await supabase.auth.signOut();
+        const supabase = getSupabaseBrowserClient();
+        const { data: { session } } = await supabase.auth.getSession();
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
+        const supabase = getSupabaseBrowserClient();
+        const supabase = getSupabaseBrowserClient();
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
+  const supabase = getSupabaseBrowserClient();
+      const { data: { user } } = await supabase.auth.getUser();

@@ -1,3 +1,4 @@
+// Updated AssignmentSubmission component using backend API
 "use client";
 
 import { useState } from "react";
@@ -26,37 +27,42 @@ export function AssignmentSubmission({ assignmentId, onSubmitted, existingSubmis
   const [submitting, setSubmitting] = useState(false);
   const [showResubmit, setShowResubmit] = useState(false);
 
+  const getAuthToken = async () => {
+    const supabase = getSupabaseBrowserClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token;
+  };
+
   const handleFileUpload = async (selectedFile: File) => {
     setFile(selectedFile);
-    
     setUploading(true);
+    
     try {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) throw new Error("Not authenticated");
+      const token = await getAuthToken();
+      if (!token) throw new Error("Not authenticated");
 
-      const fileExt = selectedFile.name.split(".").pop();
-      const fileName = `${user.id}/${assignmentId}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
-      const filePath = `submissions/${fileName}`;
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+      formData.append('assignment_id', assignmentId.toString());
 
-      const { error: uploadError } = await supabase.storage
-        .from("submissions")
-        .upload(filePath, selectedFile, {
-          cacheControl: "3600",
-        });
+      const response = await fetch('/api/auth-service/upload-submission', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+        body: formData,
+      });
 
-      if (uploadError) throw uploadError;
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Upload failed');
+      }
 
-      const { data: { publicUrl } } = supabase.storage
-        .from("submissions")
-        .getPublicUrl(filePath);
-
+      const data = await response.json();
       setFile(null);
       toast.success("File uploaded successfully!");
       
-      // Auto-submit after upload
-      await submitAssignment(publicUrl, textContent);
+      await submitAssignment(data.file_url, textContent);
       
     } catch (error: any) {
       console.error("Error uploading file:", error);
@@ -73,46 +79,73 @@ export function AssignmentSubmission({ assignmentId, onSubmitted, existingSubmis
     }
 
     setSubmitting(true);
+    
     try {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) throw new Error("Not authenticated");
+      const token = await getAuthToken();
+      if (!token) throw new Error("Not authenticated");
 
-      if (existingSubmission) {
-        const { error } = await supabase
-          .from("submissions")
-          .update({
-            content_url: fileUrl || existingSubmission.content_url,
-            text_content: content || existingSubmission.text_content,
-            submitted_at: new Date().toISOString(),
-          })
-          .eq("id", existingSubmission.id);
-        
-        if (error) throw error;
-        toast.success("Assignment updated successfully!");
-      } else {
-        const { error } = await supabase
-          .from("submissions")
-          .insert({
-            assignment_id: assignmentId,
-            user_id: user.id,
-            content_url: fileUrl || null,
-            text_content: content || null,
-            submitted_at: new Date().toISOString(),
-          });
-        
-        if (error) throw error;
-        toast.success("Assignment submitted successfully!");
+      const response = await fetch('/api/org-service/submissions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          assignment_id: assignmentId,
+          text_content: content,
+          file_url: fileUrl,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Submission failed');
       }
+
+      const data = await response.json();
       
+      toast.success(existingSubmission ? "Assignment updated!" : "Assignment submitted!");
       setShowResubmit(false);
       onSubmitted?.();
+      
     } catch (error: any) {
       console.error("Error submitting assignment:", error);
       toast.error(error.message || "Failed to submit assignment");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleDeleteSubmission = async () => {
+    if (!existingSubmission?.id) return;
+    
+    if (!confirm("Are you sure you want to delete your submission? This will allow you to resubmit.")) {
+      return;
+    }
+    
+    try {
+      const token = await getAuthToken();
+      if (!token) throw new Error("Not authenticated");
+
+      const response = await fetch(`/api/org-service/submissions/${existingSubmission.id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Delete failed');
+      }
+
+      toast.success("Submission deleted. You can now resubmit.");
+      setShowResubmit(true);
+      onSubmitted?.();
+      
+    } catch (error: any) {
+      console.error("Error deleting submission:", error);
+      toast.error(error.message || "Failed to delete submission");
     }
   };
 
@@ -183,9 +216,9 @@ export function AssignmentSubmission({ assignmentId, onSubmitted, existingSubmis
           <GlowButton 
             variant="outline" 
             size="sm"
-            onClick={() => setShowResubmit(true)}
+            onClick={handleDeleteSubmission}
           >
-            Resubmit Assignment
+            Delete & Resubmit
           </GlowButton>
         </div>
       </div>
@@ -198,7 +231,7 @@ export function AssignmentSubmission({ assignmentId, onSubmitted, existingSubmis
       {showResubmit && existingSubmission && (
         <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 mb-2">
           <p className="text-sm text-yellow-400">
-            You are resubmitting this assignment. Your previous submission will be overwritten.
+            You are resubmitting this assignment. Your previous submission will be deleted.
           </p>
         </div>
       )}
@@ -280,6 +313,7 @@ export function AssignmentSubmission({ assignmentId, onSubmitted, existingSubmis
         <GlowButton 
           onClick={() => submitAssignment(undefined, textContent)}
           isLoading={submitting}
+          disabled={!textContent.trim() && !file}
         >
           {existingSubmission ? "Resubmit Assignment" : "Submit Assignment"}
         </GlowButton>
@@ -288,7 +322,6 @@ export function AssignmentSubmission({ assignmentId, onSubmitted, existingSubmis
   );
 }
 
-// Helper component to display Label
 function Label({ children, className }: { children: React.ReactNode; className?: string }) {
   return <div className={`text-sm font-medium ${className || ""}`}>{children}</div>;
 }

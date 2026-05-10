@@ -23,6 +23,7 @@ from backend.services.auth_service.auth_service.routes import (
     onboarding_ns,
     profile_ns,
     register_ns,
+    upload_ns, 
 )
 
 def is_valid_database_url(database_url: str) -> bool:
@@ -92,6 +93,7 @@ def create_app():
         avatar_ns,
         account_ns,
         mfa_ns,
+        upload_ns,
     ):
         api.add_namespace(namespace)
     

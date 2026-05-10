@@ -11,6 +11,7 @@ from .onboarding import onboarding_ns
 from .profile import profile_ns
 from .register import register_ns
 from .settings import settings_ns 
+from .upload import upload_ns 
 
 __all__ = [
     "AUTH_API_DESCRIPTION",
@@ -29,5 +30,6 @@ __all__ = [
     "profile_ns",
     "register_ns",
     "settings_ns",
+    "upload_ns",
 ]
 

@@ -11,6 +11,7 @@ from backend.common.models import (
     ClassMember,
     Course,
     CourseClass,
+    Organization,
     OrganizationMember,
     Profile,
 )
@@ -283,3 +284,199 @@ class BatchUserEmailsResource(Resource):
                 email_map[user_id] = user_email
 
         return jsonify({"users": email_map}), 200
+
+@users_ns.route("/users/me/role")
+class UserRoleResource(Resource):
+    def get(self):
+        """Get current user's role and organization context."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+        
+        user_id, email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+        
+        session = db_session()
+        try:
+            # Get user's organization memberships
+            memberships = session.query(
+                OrganizationMember.organization_id,
+                OrganizationMember.member_role,
+                Organization.name.label("organization_name")
+            ).join(
+                Organization, Organization.id == OrganizationMember.organization_id
+            ).filter(
+                OrganizationMember.user_id == user_id,
+                OrganizationMember.member_role != "pending"
+            ).all()
+            
+            if not memberships:
+                return jsonify({
+                    "role": "student",
+                    "organization_id": None,
+                    "organization_name": None,
+                    "has_organization": False,
+                    "memberships": []
+                }), 200
+            
+            # Determine highest role
+            role_priority = {
+                "admin": 4,
+                "sub_admin": 3,
+                "teacher": 2,
+                "student": 1
+            }
+            
+            highest_role = "student"
+            primary_org_id = None
+            primary_org_name = None
+            all_memberships = []
+            
+            for membership in memberships:
+                org_id = membership.organization_id
+                org_role = membership.member_role
+                org_name = membership.organization_name
+                
+                all_memberships.append({
+                    "organization_id": org_id,
+                    "organization_name": org_name,
+                    "role": org_role
+                })
+                
+                if role_priority.get(org_role, 0) > role_priority.get(highest_role, 0):
+                    highest_role = org_role
+                    primary_org_id = org_id
+                    primary_org_name = org_name
+            
+            # Normalize role for frontend
+            if highest_role == "sub_admin":
+                highest_role = "admin"
+            
+            return jsonify({
+                "role": highest_role,
+                "organization_id": primary_org_id,
+                "organization_name": primary_org_name,
+                "has_organization": len(memberships) > 0,
+                "memberships": all_memberships
+            }), 200
+            
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+@users_ns.route("/users/me/enrolled-courses")
+class UserEnrolledCoursesResource(Resource):
+    @users_ns.response(200, "Enrolled courses retrieved")
+    @users_ns.response(401, "Unauthorized")
+    def get(self):
+        """Get courses the current user is enrolled in."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        session = db_session()
+        try:
+            # Query class_members to find courses the user is enrolled in
+            enrolled = (
+                session.query(
+                    CourseClass.course_id,
+                    Course.title,
+                    Course.thumbnail,
+                    Course.level,
+                    ClassMember.enrolled_at,
+                    ClassMember.completed_at,
+                    Course.course_class_id
+                )
+                .join(CourseClass, CourseClass.id == ClassMember.course_class_id)
+                .join(Course, Course.id == CourseClass.course_id)
+                .filter(ClassMember.user_id == user_id)
+                .order_by(ClassMember.enrolled_at.desc())
+                .all()
+            )
+            
+            courses = []
+            for course in enrolled:
+                courses.append({
+                    "id": course.course_id,
+                    "title": course.title,
+                    "thumbnail": course.thumbnail,
+                    "level": course.level,
+                    "enrolled_at": course.enrolled_at.isoformat() if course.enrolled_at else None,
+                    "completed_at": course.completed_at.isoformat() if course.completed_at else None,
+                    "class_id": course.course_class_id,
+                    "status": "completed" if course.completed_at else "active"
+                })
+            
+            return jsonify({"courses": courses}), 200
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+
+@users_ns.route("/users/me/discover-courses")
+class UserDiscoverCoursesResource(Resource):
+    @users_ns.response(200, "Discover courses retrieved")
+    @users_ns.response(401, "Unauthorized")
+    def get(self):
+        """Get courses available for discovery (not enrolled in)."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        session = db_session()
+        try:
+            # Get IDs of courses the user is already enrolled in
+            enrolled_ids = (
+                session.query(CourseClass.course_id)
+                .join(ClassMember, ClassMember.course_class_id == CourseClass.id)
+                .filter(ClassMember.user_id == user_id)
+                .distinct()
+                .subquery()
+            )
+            
+            # Get published courses the user is not enrolled in
+            discoverable = (
+                session.query(
+                    Course.id,
+                    Course.title,
+                    Course.description,
+                    Course.thumbnail,
+                    Course.level,
+                    Course.category,
+                    Course.organization_id,
+                )
+                .filter(Course.status == 'published')
+                .filter(Course.id.notin_(enrolled_ids))
+                .order_by(Course.created_at.desc())
+                .limit(20)
+                .all()
+            )
+            
+            courses = []
+            for course in discoverable:
+                courses.append({
+                    "id": course.id,
+                    "title": course.title,
+                    "description": course.description,
+                    "thumbnail": course.thumbnail,
+                    "level": course.level,
+                    "category": course.category,
+                    "organization_id": course.organization_id,
+                })
+            
+            return jsonify({"courses": courses}), 200
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
