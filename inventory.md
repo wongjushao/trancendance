@@ -5,25 +5,31 @@
 
 
 
-frontend/app/(main)/dashboard/page.tsx
-
-
-frontend/app/(main)/profile/[identifier]/page.tsx
 frontend/app/(main)/profile/page.tsx
+
 frontend/app/(main)/chat/rooms/[roomId]/page.tsx
 frontend/app/(main)/chat/rooms/page.tsx
+
 frontend/app/(main)/layout.tsx
+
 frontend/app/(main)/assignments/page.tsx
+
 frontend/app/(main)/organizations/propose/page.tsx
+
 frontend/app/(main)/organizations/page.tsx
+
 frontend/app/(main)/organizations/verify/page.tsx
+
 frontend/app/(main)/organizations/[id]/members/page.tsx
 frontend/app/(main)/organizations/[id]/setup/page.tsx
 frontend/app/(main)/organizations/[id]/page.tsx
 frontend/app/(main)/organizations/[id]/admin/page.tsx
 frontend/app/(main)/organizations/[id]/courses/page.tsx
+
 frontend/app/(main)/settings/page.tsx
+
 frontend/app/(main)/courses/create/page.tsx
+
 frontend/app/(main)/courses/page.tsx
 frontend/app/(main)/courses/[id]/analytics/page.tsx
 frontend/app/(main)/courses/[id]/chat/page.tsx
@@ -38,6 +44,7 @@ frontend/app/(main)/courses/[id]/reviews/page.tsx
 frontend/app/(main)/courses/[id]/edit/page.tsx
 frontend/app/(main)/courses/[id]/page.tsx
 frontend/app/(main)/courses/[id]/enroll/page.tsx
+
 frontend/app/(main)/invite/accept/page.tsx
 frontend/app/(main)/messages/page.tsx
 frontend/app/auth/callback/route.ts

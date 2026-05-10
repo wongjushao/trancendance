@@ -230,3 +230,20 @@ class VerifyResetTokenResource(Resource):
 class ResetPasswordResource(Resource):
     def post(self):
         return reset_password()
+
+@auth_ns.route("/auth/me")
+class CurrentUserResource(Resource):
+    def get(self):
+        """Get current authenticated user info"""
+        token = extract_bearer_token()
+        if token is None:
+            return jsonify({"error": "Missing authorization header"}), 401
+        
+        user_id, email = verify_supabase_jwt(token)
+        if not user_id:
+            return jsonify({"error": "Invalid or expired token"}), 401
+        
+        return jsonify({
+            "id": str(user_id),
+            "email": email
+        }), 200

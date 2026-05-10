@@ -119,6 +119,35 @@ interface Lesson {
   class_title?: string;
 }
 
+// Helper to get auth token
+const getAuthToken = async () => {
+  const supabase = getSupabaseBrowserClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token;
+};
+
+// Helper for API calls
+const apiRequest = async (url: string, options: RequestInit = {}) => {
+  const token = await getAuthToken();
+  if (!token) throw new Error("Not authenticated");
+  
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error || `Request failed: ${response.status}`);
+  }
+  
+  return response.json();
+};
+
 // ============ MAIN COMPONENT ============
 
 export default function AssignmentsPage() {
@@ -189,68 +218,36 @@ export default function AssignmentsPage() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [assignmentToDelete, setAssignmentToDelete] = useState<TeacherAssignment | null>(null);
   
-
-    // Fetch user role from organization_members
-    useEffect(() => {
-      const fetchUserRoleFromOrganization = async () => {
-        try {
-          const { data: { user } } = await supabase.auth.getUser();
-          
-          if (!user) {
-            setLoadingAuth(false);
-            return;
-          }
-          
-          // First, get the user's organization memberships
-          const { data: orgMembers, error: orgError } = await supabase
-            .from("organization_members")
-            .select(`
-              member_role,
-              organization_id,
-              organizations!inner (
-                id,
-                name
-              )
-            `)
-            .eq("user_id", user.id);
-          
-          if (orgError) {
-            console.error("Error fetching organization memberships:", orgError);
-            setUserRole(null);
-          } else if (orgMembers && orgMembers.length > 0) {
-            // Get the first organization's role (or you might want to get the active organization)
-            console.log("User's organization roles:", orgMembers);
-            setUserRole(orgMembers[0].member_role);
-          } else {
-            // Check if user is a system admin (if you have system-wide roles)
-            const { data: userRoles, error: rolesError } = await supabase
-              .from("user_roles")
-              .select(`
-                role_id,
-                roles!inner (
-                  name
-                )
-              `)
-              .eq("user_id", user.id);
-            
-            if (!rolesError && userRoles && userRoles.length > 0) {
-              const systemRole = userRoles[0].roles?.name;
-              setUserRole(systemRole || null);
-            } else {
-              // Default to student if no role found
-              setUserRole("student");
-            }
-          }
-        } catch (error) {
-          console.error("Error fetching user role:", error);
-          setUserRole("student");
-        } finally {
+  // Fetch user role from backend API
+  useEffect(() => {
+    const fetchUserRole = async () => {
+      try {
+        const token = await getAuthToken();
+        if (!token) {
           setLoadingAuth(false);
+          return;
         }
-      };
-      
-      fetchUserRoleFromOrganization();
-    }, [supabase]);
+        
+        const response = await fetch('/api/org-service/users/me/role', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          setUserRole(data.role);
+        } else {
+          setUserRole("student");
+        }
+      } catch (error) {
+        console.error("Error fetching user role:", error);
+        setUserRole("student");
+      } finally {
+        setLoadingAuth(false);
+      }
+    };
+    
+    fetchUserRole();
+  }, []);
 
   // Load lessons when course changes (teacher form)
   useEffect(() => {
@@ -261,8 +258,7 @@ export default function AssignmentsPage() {
     }
   }, [assignmentForm.course_id, assignmentModalOpen]);
   
-
-  // Load data based on active tab - MOVED BEFORE CONDITIONAL RETURNS
+  // Load data based on active tab
   useEffect(() => {
     if (!loadingAuth) {
       if (activeTab === "learning") {
@@ -272,174 +268,121 @@ export default function AssignmentsPage() {
       }
     }
   }, [activeTab, loadingAuth, canTeach]);
-
-  // ============ STUDENT FUNCTIONS ============
   
+  // ============ STUDENT FUNCTIONS ============
+
   const fetchStudentAssignments = async () => {
     setLoading(true);
     
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      setLoading(false);
-      return;
-    }
-    
     try {
-      // Get all class members for the user (enrolled courses via offerings)
-      const { data: classMembers } = await supabase
-        .from("class_members")
-        .select(`
-          id,
-          course_class_id,
-          course_classes!inner (
-            id,
-            course_id,
-            courses!inner (
-              id,
-              title
-            )
-          )
-        `)
-        .eq("user_id", user.id);
+      const token = await getAuthToken();
+      if (!token) {
+        setLoading(false);
+        return;
+      }
       
-      if (!classMembers || classMembers.length === 0) {
+      // Get user's enrolled courses via backend
+      const enrolledResponse = await fetch('/api/org-service/users/me/enrolled-courses', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (!enrolledResponse.ok) throw new Error("Failed to fetch enrolled courses");
+      
+      const enrolledData = await enrolledResponse.json();
+      const enrolledCourses = enrolledData.courses || [];
+      
+      if (enrolledCourses.length === 0) {
         setStudentAssignments([]);
         setLoading(false);
         return;
       }
       
-      // Get all unique course IDs
-      const courseIds = [...new Set(
-        classMembers
-          .map(cm => cm.course_classes?.courses?.id)
-          .filter(id => id != null)
-      )];
+      // Fetch assignments for each enrolled course
+      // The course detail endpoint already includes submission data
+      let allAssignments: any[] = [];
       
-      if (courseIds.length === 0) {
-        setStudentAssignments([]);
-        setLoading(false);
-        return;
-      }
-      
-      // Get all assignments for these courses
-      const { data: assignmentsData, error: assignmentsError } = await supabase
-        .from("assignments")
-        .select(`
-          *,
-          lesson:lesson_id (
-            id,
-            title,
-            class:class_id (
-              id,
-              title,
-              module:module_id (
-                id,
-                title,
-                course:course_id (
-                  id,
-                  title
-                )
-              )
-            )
-          )
-        `)
-        .in("course_id", courseIds);
-      
-      if (assignmentsError) throw assignmentsError;
-      
-      // Get submissions for these assignments
-      const assignmentIds = assignmentsData?.map(a => a.id) || [];
-      let submissionsMap = new Map<number, Submission>();
-
-      if (assignmentIds.length > 0) {
-        const { data: submissionsData, error: subError } = await supabase
-          .from("submissions")
-          .select(`
-            id,
-            assignment_id,
-            grade,
-            feedback,
-            submitted_at,
-            content_url,
-            text_content
-          `)
-          .in("assignment_id", assignmentIds)
-          .eq("user_id", user.id);
-        
-        if (subError) {
-          console.error("Error fetching submissions:", subError);
-        } else {
-          submissionsData?.forEach(sub => {
-            submissionsMap.set(sub.assignment_id, sub);
+      for (const course of enrolledCourses) {
+        try {
+          const response = await fetch(`/api/org-service/courses/${course.id}/detail`, {
+            headers: { 'Authorization': `Bearer ${token}` }
           });
+          
+          if (response.ok) {
+            const courseData = await response.json();
+            const assignments = courseData.assignments || [];
+            
+            allAssignments.push(...assignments.map((a: any) => ({
+              id: a.id,
+              title: a.title,
+              description: a.description || "",
+              due_at: a.due_at,
+              points: a.points,
+              lesson_id: a.lesson_id || 0,
+              lesson_title: a.lesson_title || "Assignment",
+              course_id: course.id,
+              course_title: course.title,
+              // Submission data is already included in the assignment from the backend
+              status: a.status || "pending",
+              submitted_at: a.submitted_at,
+              grade: a.grade,
+              feedback: a.feedback,
+              submission_id: a.submission_id,
+              content_url: a.content_url,
+              text_content: a.text_content,
+            })));
+          }
+        } catch (err) {
+          console.error(`Error fetching assignments for course ${course.id}:`, err);
         }
       }
       
-      // Format assignments with status - FIXED TIMEZONE HANDLING
+      // Format assignments with status (in case backend didn't compute it)
       const now = new Date();
-      // Set to start of day for fair comparison, or use UTC
       const nowUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
       
-      const formattedAssignments: StudentAssignment[] = (assignmentsData || []).map(assignment => {
-        const submission = submissionsMap.get(assignment.id);
-        
-        // Parse due date - ensure it's compared correctly
-        let dueDate = new Date(assignment.due_at);
+      const formattedAssignments: StudentAssignment[] = allAssignments.map(assignment => {
         let isOverdue = false;
-        
         if (assignment.due_at) {
-          // Compare dates without time for fairness, or use UTC
+          const dueDate = new Date(assignment.due_at);
           const dueDateUTC = new Date(Date.UTC(dueDate.getUTCFullYear(), dueDate.getUTCMonth(), dueDate.getUTCDate()));
           isOverdue = dueDateUTC < nowUTC;
         }
         
-        let status: StudentAssignment["status"] = "pending";
+        // Use status from backend if available, otherwise compute
+        let status = assignment.status;
         
-        console.log(`Assignment ${assignment.id}:`, {
-          title: assignment.title,
-          hasSubmission: !!submission,
-          submissionGrade: submission?.grade,
-          dueDate: assignment.due_at,
-          isOverdue,
-          now: nowUTC.toISOString()
-        });
-        
-        if (submission) {
-          if (submission.grade !== null) {
-            status = "graded";
+        if (!status || status === "pending") {
+          if (assignment.submission_id) {
+            if (assignment.grade !== null && assignment.grade !== undefined) {
+              status = "graded";
+            } else {
+              status = "submitted";
+            }
+          } else if (isOverdue) {
+            status = "overdue";
           } else {
-            status = "submitted";
+            status = "pending";
           }
-        } else if (isOverdue) {
-          status = "overdue";
-        } else {
-          status = "pending";
         }
         
         return {
           id: assignment.id,
           title: assignment.title,
           description: assignment.description || "",
-          course_id: assignment.lesson?.class?.module?.course?.id || assignment.course_id,
-          course_title: assignment.lesson?.class?.module?.course?.title || "Unknown Course",
-          lesson_id: assignment.lesson_id || 0,
-          lesson_title: assignment.lesson?.title || "Unknown Lesson",
+          course_id: assignment.course_id,
+          course_title: assignment.course_title,
+          lesson_id: assignment.lesson_id,
+          lesson_title: assignment.lesson_title,
           due_at: assignment.due_at,
           points: assignment.points,
-          status,
-          submitted_at: submission?.submitted_at,
-          grade: submission?.grade,
-          feedback: submission?.feedback,
-          submission_id: submission?.id,
-          content_url: submission?.content_url,
-          text_content: submission?.text_content,
+          status: status as StudentAssignment["status"],
+          submitted_at: assignment.submitted_at,
+          grade: assignment.grade,
+          feedback: assignment.feedback,
+          submission_id: assignment.submission_id,
+          content_url: assignment.content_url,
+          text_content: assignment.text_content,
         };
-      });
-      
-      // DEBUG: Log all assignments and their status
-      console.log("=== ALL ASSIGNMENTS WITH STATUS ===");
-      formattedAssignments.forEach(a => {
-        console.log(`- ${a.title}: status=${a.status}, due=${a.due_at}, hasSubmission=${!!a.submission_id}`);
       });
       
       setStudentAssignments(formattedAssignments);
@@ -463,143 +406,82 @@ export default function AssignmentsPage() {
   const fetchTeacherAssignments = async () => {
     setLoading(true);
     
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      setLoading(false);
-      return;
-    }
-    
     try {
-      // Get courses where user is instructor (via course_classes)
-      const { data: courseClasses } = await supabase
-        .from("course_classes")
-        .select(`
-          course_id,
-          courses:course_id (
-            id,
-            title
-          )
-        `)
-        .eq("instructor_id", user.id);
+      const token = await getAuthToken();
+      if (!token) {
+        setLoading(false);
+        return;
+      }
       
-      const uniqueCourses = new Map<number, Course>();
-      courseClasses?.forEach(cc => {
-        if (cc.courses && !uniqueCourses.has(cc.courses.id)) {
-          uniqueCourses.set(cc.courses.id, {
-            id: cc.courses.id,
-            title: cc.courses.title,
+      // Get user's created courses
+      const createdResponse = await fetch('/api/org-service/users/me/created-courses', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (!createdResponse.ok) throw new Error("Failed to fetch created courses");
+      
+      const createdData = await createdResponse.json();
+      const myCourses = createdData.courses || [];
+      
+      setTeacherCourses(myCourses.map((c: any) => ({ id: c.id, title: c.title })));
+      
+      if (myCourses.length === 0) {
+        setTeacherAssignments([]);
+        setLoading(false);
+        return;
+      }
+      
+      // Fetch assignments for all created courses
+      let allAssignments: any[] = [];
+      
+      for (const course of myCourses) {
+        try {
+          const response = await fetch(`/api/org-service/courses/${course.id}/detail`, {
+            headers: { 'Authorization': `Bearer ${token}` }
           });
-        }
-      });
-      
-      // Also check courses created by user
-      const { data: createdCourses } = await supabase
-        .from("courses")
-        .select("id, title")
-        .eq("created_by", user.id);
-      
-      createdCourses?.forEach(course => {
-        if (!uniqueCourses.has(course.id)) {
-          uniqueCourses.set(course.id, course);
-        }
-      });
-      
-      const courseList = Array.from(uniqueCourses.values());
-      setTeacherCourses(courseList);
-      
-      if (courseList.length === 0) {
-        setTeacherAssignments([]);
-        setLoading(false);
-        return;
-      }
-      
-      const courseIds = courseList.map(c => c.id);
-      
-      // --- OPTIMIZATION: Get ALL assignments in one query ---
-      const { data: assignmentsData, error: assignmentsError } = await supabase
-        .from("assignments")
-        .select(`
-          *,
-          lesson:lesson_id (
-            id,
-            title,
-            class:class_id (
-              id,
-              title
-            )
-          ),
-          course:courses!course_id (
-            id,
-            title
-          )
-        `)
-        .in("course_id", courseIds);
-      
-      if (assignmentsError) throw assignmentsError;
-      
-      if (!assignmentsData || assignmentsData.length === 0) {
-        setTeacherAssignments([]);
-        setLoading(false);
-        return;
-      }
-      
-      const assignmentIds = assignmentsData.map(a => a.id);
-      
-      // --- OPTIMIZATION: Get ALL submissions for ALL assignments in ONE query ---
-      const { data: allSubmissions, error: submissionsError } = await supabase
-        .from("submissions")
-        .select("assignment_id, id, grade")
-        .in("assignment_id", assignmentIds);
-      
-      if (submissionsError) {
-        console.error("Error fetching submissions:", submissionsError);
-      }
-      
-      // Build stats maps from the single query result
-      const submissionsByAssignment = new Map<number, { total: number; graded: number; gradeSum: number }>();
-      
-      // Initialize map for all assignments
-      assignmentIds.forEach(id => {
-        submissionsByAssignment.set(id, { total: 0, graded: 0, gradeSum: 0 });
-      });
-      
-      // Process all submissions in one pass
-      allSubmissions?.forEach((sub: any) => {
-        const stats = submissionsByAssignment.get(sub.assignment_id);
-        if (stats) {
-          stats.total++;
-          if (sub.grade !== null) {
-            stats.graded++;
-            stats.gradeSum += sub.grade;
+          
+          if (response.ok) {
+            const courseData = await response.json();
+            const assignments = courseData.assignments || [];
+            allAssignments.push(...assignments.map((a: any) => ({
+              ...a,
+              course_title: courseData.course.title,
+              course_id: course.id,
+            })));
           }
+        } catch (err) {
+          console.error(`Error fetching assignments for course ${course.id}:`, err);
         }
-      });
+      }
       
-      // Build teacher assignments using the pre-processed stats
-      const assignmentsWithStats: TeacherAssignment[] = assignmentsData.map(assignment => {
-        const stats = submissionsByAssignment.get(assignment.id) || { total: 0, graded: 0, gradeSum: 0 };
-        const pendingCount = stats.total - stats.graded;
-        const avgGrade = stats.graded > 0 ? stats.gradeSum / stats.graded : 0;
-        
+      // For each assignment, get submission stats from the course detail
+      // The API already returns assignment status with submission counts
+      const assignmentsWithStats: TeacherAssignment[] = allAssignments.map(assignment => {
         const dueDate = new Date(assignment.due_at);
         const now = new Date();
         const status = dueDate < now ? "overdue" : "pending";
+        
+        // Use provided stats or calculate from submissions if available
+        const totalSubmissions = assignment.total_submissions || 0;
+        const gradedCount = assignment.graded_count || 0;
+        const pendingCount = assignment.pending_count || 0;
+        const avgGrade = assignment.average_grade || 0;
         
         return {
           id: assignment.id,
           title: assignment.title,
           description: assignment.description || "",
           course_id: assignment.course_id,
-          course_title: assignment.course?.title || "Unknown Course",
+          course_title: assignment.course_title,
           lesson_id: assignment.lesson_id || 0,
-          lesson_title: assignment.lesson?.title || "Unknown Lesson",
+          lesson_title: assignment.lesson_title || "Assignment",
           due_at: assignment.due_at,
           points: assignment.points,
           status,
-          total_submissions: stats.total,
-          graded_count: stats.graded,
+          total_submissions: totalSubmissions,
+          graded_count: gradedCount,
           pending_count: pendingCount,
-          average_grade: Math.round(avgGrade),
+          average_grade: avgGrade,
         };
       });
       
@@ -615,54 +497,38 @@ export default function AssignmentsPage() {
   
   const fetchLessonsForCourse = async (courseId: number) => {
     try {
-      const { data: modules } = await supabase
-        .from("modules")
-        .select(`
-          id,
-          classes!inner (
-            id,
-            title,
-            lessons!inner (
-              id,
-              title
-            )
-          )
-        `)
-        .eq("course_id", courseId);
+      const token = await getAuthToken();
+      if (!token) return;
       
-      const lessonList: Lesson[] = [];
-      modules?.forEach(module => {
-        module.classes?.forEach(classItem => {
-          classItem.lessons?.forEach(lesson => {
-            lessonList.push({
-              id: lesson.id,
-              title: lesson.title,
-              class_id: classItem.id,
-              class_title: classItem.title,
+      const response = await fetch(`/api/org-service/courses/${courseId}/modules?include_lessons=true`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        const modules = await response.json();
+        const lessonList: Lesson[] = [];
+        
+        modules.forEach((module: any) => {
+          module.classes?.forEach((classItem: any) => {
+            classItem.lessons?.forEach((lesson: any) => {
+              lessonList.push({
+                id: lesson.id,
+                title: lesson.title,
+                class_id: classItem.id,
+                class_title: classItem.title,
+              });
             });
           });
         });
-      });
-      
-      setTeacherLessons(lessonList);
+        
+        setTeacherLessons(lessonList);
+      }
     } catch (error) {
       console.error("Error fetching lessons:", error);
     }
   };
   
-  const handleCreateAssignment = () => {
-    setEditingAssignment(null);
-    setAssignmentForm({
-      title: "",
-      description: "",
-      course_id: teacherCourses[0]?.id.toString() || "",
-      lesson_id: "",
-      due_at: "",
-      points: 100,
-    });
-    setAssignmentModalOpen(true);
-  };
-  
+
   const handleEditAssignment = (assignment: TeacherAssignment) => {
     setEditingAssignment(assignment);
     setAssignmentForm({
@@ -689,8 +555,8 @@ export default function AssignmentsPage() {
     setSavingAssignment(true);
     
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not authenticated");
+      const token = await getAuthToken();
+      if (!token) throw new Error("Not authenticated");
       
       const assignmentData = {
         title: assignmentForm.title.trim(),
@@ -701,30 +567,37 @@ export default function AssignmentsPage() {
         points: assignmentForm.points,
       };
       
+      let url = '/api/org-service/assignments';
+      let method = 'POST';
+      
       if (editingAssignment) {
-        const { error } = await supabase
-          .from("assignments")
-          .update(assignmentData)
-          .eq("id", editingAssignment.id);
-        
-        if (error) throw error;
-        toast.success("Assignment updated successfully");
-      } else {
-        const { error } = await supabase
-          .from("assignments")
-          .insert(assignmentData);
-        
-        if (error) throw error;
-        toast.success("Assignment created successfully");
+        url = `/api/org-service/assignments/${editingAssignment.id}`;
+        method = 'PUT';
       }
+      
+      const response = await fetch(url, {
+        method,
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(assignmentData),
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to save assignment");
+      }
+      
+      toast.success(editingAssignment ? "Assignment updated successfully" : "Assignment created successfully");
       
       setAssignmentModalOpen(false);
       await fetchTeacherAssignments();
       await fetchStudentAssignments();
       
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error saving assignment:", error);
-      toast.error("Failed to save assignment");
+      toast.error(error.message || "Failed to save assignment");
     } finally {
       setSavingAssignment(false);
     }
@@ -734,23 +607,18 @@ export default function AssignmentsPage() {
     if (!assignmentToDelete) return;
     
     try {
-      // Delete submissions first
-      const { error: submissionsError } = await supabase
-        .from("submissions")
-        .delete()
-        .eq("assignment_id", assignmentToDelete.id);
+      const token = await getAuthToken();
+      if (!token) throw new Error("Not authenticated");
       
-      if (submissionsError && submissionsError.code !== "PGRST116") {
-        throw submissionsError;
+      const response = await fetch(`/api/org-service/assignments/${assignmentToDelete.id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to delete assignment");
       }
-      
-      // Delete assignment
-      const { error } = await supabase
-        .from("assignments")
-        .delete()
-        .eq("id", assignmentToDelete.id);
-      
-      if (error) throw error;
       
       toast.success("Assignment deleted successfully");
       setDeleteConfirmOpen(false);
@@ -758,27 +626,17 @@ export default function AssignmentsPage() {
       await fetchTeacherAssignments();
       await fetchStudentAssignments();
       
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error deleting assignment:", error);
-      toast.error("Failed to delete assignment");
+      toast.error(error.message || "Failed to delete assignment");
     }
   };
   
   // ============ STUDENT SUBMISSION FUNCTIONS ============
   
   const handleViewAssignment = (assignment: StudentAssignment) => {
-    console.log("=== handleViewAssignment called ===");
-    console.log("Assignment:", { 
-      id: assignment.id, 
-      title: assignment.title, 
-      status: assignment.status,
-      statusCheck: assignment.status === "pending" || assignment.status === "overdue"
-    });
-    
     // Only open modal for pending or overdue assignments (not submitted/graded)
     if (assignment.status === "pending" || assignment.status === "overdue") {
-      console.log("Opening modal for assignment:", assignment.id);
-      
       setSelectedAssignment(assignment);
       
       if (assignment.submission_id) {
@@ -805,8 +663,6 @@ export default function AssignmentsPage() {
       setShowResubmit(false);
       setSubmissionModalOpen(true);
     } else {
-      console.log("NOT opening modal. Status is:", assignment.status);
-      // Optional toast for user feedback
       if (assignment.status === "submitted") {
         toast.info("You've already submitted this assignment");
       } else if (assignment.status === "graded") {
@@ -820,25 +676,27 @@ export default function AssignmentsPage() {
     setUploading(true);
     
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not authenticated");
+      const token = await getAuthToken();
+      if (!token) throw new Error("Not authenticated");
       
-      const fileExt = file.name.split(".").pop();
-      const fileName = `${user.id}/${selectedAssignment!.id}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
-      const filePath = `submissions/${fileName}`;
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('assignment_id', selectedAssignment!.id.toString());
       
-      const { error: uploadError } = await supabase.storage
-        .from("submissions")
-        .upload(filePath, file);
+      const response = await fetch('/api/auth-service/upload-submission', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+        body: formData,
+      });
       
-      if (uploadError) throw uploadError;
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Upload failed");
+      }
       
-      const { data: { publicUrl } } = supabase.storage
-        .from("submissions")
-        .getPublicUrl(filePath);
-      
+      const data = await response.json();
       setUploadedFile(null);
-      await submitAssignment(publicUrl, textContent);
+      await submitAssignment(data.file_url, textContent);
       
     } catch (error: any) {
       console.error("Error uploading file:", error);
@@ -857,42 +715,53 @@ export default function AssignmentsPage() {
     setSubmitting(true);
     
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not authenticated");
+      const token = await getAuthToken();
+      if (!token) throw new Error("Not authenticated");
+      
+      const submissionData: any = {
+        assignment_id: selectedAssignment!.id,
+        text_content: content || null,
+        file_url: fileUrl || null,
+      };
+      
+      let response;
       
       if (existingSubmission && !showResubmit) {
         // Update existing submission
-        const { error } = await supabase
-          .from("submissions")
-          .update({
-            content_url: fileUrl || existingSubmission.content_url,
-            text_content: content || existingSubmission.text_content,
-            submitted_at: new Date().toISOString(),
-          })
-          .eq("id", existingSubmission.id);
-        
-        if (error) throw error;
-        toast.success("Assignment updated successfully!");
+        response = await fetch(`/api/org-service/submissions/${existingSubmission.id}`, {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(submissionData),
+        });
       } else {
         // Delete old submission if resubmitting
         if (existingSubmission && showResubmit) {
-          await supabase.from("submissions").delete().eq("id", existingSubmission.id);
+          await fetch(`/api/org-service/submissions/${existingSubmission.id}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` },
+          });
         }
         
         // Create new submission
-        const { error } = await supabase
-          .from("submissions")
-          .insert({
-            assignment_id: selectedAssignment!.id,
-            user_id: user.id,
-            content_url: fileUrl || null,
-            text_content: content || null,
-            submitted_at: new Date().toISOString(),
-          });
-        
-        if (error) throw error;
-        toast.success("Assignment submitted successfully!");
+        response = await fetch('/api/org-service/submissions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(submissionData),
+        });
       }
+      
+      if (!response?.ok) {
+        const error = await response?.json().catch(() => ({}));
+        throw new Error(error?.error || "Failed to submit assignment");
+      }
+      
+      toast.success(existingSubmission && !showResubmit ? "Assignment updated successfully!" : "Assignment submitted successfully!");
       
       // Refresh assignments
       await fetchStudentAssignments();
@@ -919,33 +788,47 @@ export default function AssignmentsPage() {
     setLoadingSubmissions(true);
     
     try {
-      // Get submissions with user profile data in a single query
-      const { data: submissionsData, error } = await supabase
-        .from("submissions")
-        .select(`
-          *,
-          profiles!user_id (
-            username
-          )
-        `)
-        .eq("assignment_id", assignment.id)
-        .order("submitted_at", { ascending: false });
+      const token = await getAuthToken();
+      if (!token) throw new Error("Not authenticated");
       
-      if (error) throw error;
+      const response = await fetch(`/api/org-service/course-classes/${assignment.id}/students`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       
-      const formattedSubmissions: Submission[] = (submissionsData || []).map(sub => ({
-        id: sub.id,
-        assignment_id: sub.assignment_id,
-        user_id: sub.user_id,
-        user_name: sub.profiles?.username || "Unknown User",
-        user_email: "", // Not needed, but keeping for type compatibility
-        content_url: sub.content_url,
-        text_content: sub.text_content,
-        grade: sub.grade,
-        feedback: sub.feedback,
-        submitted_at: sub.submitted_at,
-        status: sub.grade !== null ? "graded" : "submitted",
-      }));
+      if (!response.ok) throw new Error("Failed to load submissions");
+      
+      const data = await response.json();
+      const students = data.students || [];
+      
+      // Get submissions for each student
+      const formattedSubmissions: Submission[] = [];
+      
+      for (const student of students) {
+        try {
+          const subResponse = await fetch(`/api/org-service/submissions/${assignment.id}/user/${student.user_id}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          
+          if (subResponse.ok) {
+            const submission = await subResponse.json();
+            formattedSubmissions.push({
+              id: submission.id,
+              assignment_id: assignment.id,
+              user_id: student.user_id,
+              user_name: student.user?.first_name ? `${student.user.first_name} ${student.user.last_name || ''}`.trim() : student.user?.username || 'Student',
+              user_email: student.user?.email || '',
+              content_url: submission.content_url,
+              text_content: submission.text_content,
+              grade: submission.grade,
+              feedback: submission.feedback,
+              submitted_at: submission.submitted_at,
+              status: submission.grade !== null ? "graded" : "submitted",
+            });
+          }
+        } catch (err) {
+          // No submission for this student
+        }
+      }
       
       setSubmissions(formattedSubmissions);
       
@@ -968,15 +851,25 @@ export default function AssignmentsPage() {
     setSubmittingGrade(true);
     
     try {
-      const { error } = await supabase
-        .from("submissions")
-        .update({
+      const token = await getAuthToken();
+      if (!token) throw new Error("Not authenticated");
+      
+      const response = await fetch(`/api/org-service/submissions/${selectedSubmission.id}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
           grade: gradeValue,
           feedback: feedbackValue.trim() || null,
-        })
-        .eq("id", selectedSubmission.id);
+        }),
+      });
       
-      if (error) throw error;
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to submit grade");
+      }
       
       toast.success(`Grade submitted for ${selectedSubmission.user_name}`);
       
@@ -995,9 +888,9 @@ export default function AssignmentsPage() {
       await fetchTeacherAssignments();
       await fetchStudentAssignments();
       
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error submitting grade:", error);
-      toast.error("Failed to submit grade");
+      toast.error(error.message || "Failed to submit grade");
     } finally {
       setSubmittingGrade(false);
     }
@@ -1246,7 +1139,6 @@ export default function AssignmentsPage() {
                               )}
                             </div>
                             
-                            {/* Rest of your card content stays the same */}
                             {assignment.description && (
                               <div 
                                 className="text-gray-400 text-sm mb-3 prose prose-invert prose-sm max-w-none line-clamp-2"
@@ -1306,7 +1198,6 @@ export default function AssignmentsPage() {
         {/* ========== TEACHER TAB ========== */}
         {canTeach && (
           <TabsContent value="grading" className="space-y-6">
-
             {/* Teacher Stats Cards */}
             <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
               <GlowCard>
@@ -1414,10 +1305,6 @@ export default function AssignmentsPage() {
                         ? "Try adjusting your filters"
                         : "Create your first assignment to get started"}
                     </p>
-                    <GlowButton onClick={handleCreateAssignment} className="mt-4">
-                      <Plus className="w-4 h-4 mr-2" />
-                      Create Assignment
-                    </GlowButton>
                   </div>
                 </GlowCard>
               ) : (
@@ -1444,7 +1331,6 @@ export default function AssignmentsPage() {
                               )}
                             </div>
                             
-                            {/* FIXED: Render HTML description properly for teacher view */}
                             {assignment.description && (
                               <div 
                                 className="text-gray-400 text-sm mb-3 prose prose-invert prose-sm max-w-none line-clamp-2"
@@ -1616,7 +1502,6 @@ export default function AssignmentsPage() {
                     <SelectValue placeholder="Select a lesson" />
                   </SelectTrigger>
                   <SelectContent>
-                    {/* FIXED: Use a placeholder value instead of empty string */}
                     <SelectItem value="__none__">None</SelectItem>
                     {teacherLessons.map(lesson => (
                       <SelectItem key={lesson.id} value={lesson.id.toString()}>
