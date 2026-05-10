@@ -3,12 +3,11 @@
 ## Files with Supabase calls:
 
 
-frontend/components/course/QuizComponent.tsx
 frontend/components/course/CoursePreview.tsx
 frontend/components/course/CourseProgress.tsx
 frontend/components/course/ManageStudents.tsx
 frontend/components/course/LessonPlayer.tsx
-frontend/components/course/CourseBasicForm.tsx
+
 frontend/components/SignOutButton.tsx
 frontend/components/organization/InviteMemberModal.tsx
 frontend/components/ui/file-upload.tsx

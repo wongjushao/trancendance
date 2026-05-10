@@ -1535,3 +1535,187 @@ class CourseUpdateResource(Resource):
             return jsonify({"error": str(exc)}), 500
         finally:
             session.close()
+
+# ========== LESSON PROGRESS ENDPOINTS ==========
+
+@courses_ns.route("/class-members/<int:course_class_id>/user/<user_id>")
+class ClassMemberByUserResource(Resource):
+    @courses_ns.response(200, "Class member found")
+    @courses_ns.response(404, "Class member not found")
+    def get(self, course_class_id: int, user_id: str):
+        """Get class member by course class ID and user ID."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        authenticated_user_id, _email = get_authenticated_user()
+        if authenticated_user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        try:
+            user_uuid = uuid.UUID(user_id)
+        except (ValueError, TypeError):
+            return jsonify({"error": "Invalid user ID format"}), 400
+
+        session = db_session()
+        try:
+            class_member = session.query(ClassMember).filter(
+                ClassMember.course_class_id == course_class_id,
+                ClassMember.user_id == user_uuid
+            ).first()
+
+            if not class_member:
+                return jsonify({"error": "Class member not found"}), 404
+
+            return jsonify({
+                "id": class_member.id,
+                "course_class_id": class_member.course_class_id,
+                "user_id": str(class_member.user_id),
+                "role": class_member.role,
+                "enrolled_at": class_member.enrolled_at.isoformat() if class_member.enrolled_at else None,
+            }), 200
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+
+@courses_ns.route("/lesson-progress")
+class LessonProgressResource(Resource):
+    @courses_ns.response(200, "Lesson progress retrieved")
+    @courses_ns.response(401, "Unauthorized")
+    def get(self):
+        """Get lesson progress by lesson_id and class_member_id."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        lesson_id = request.args.get("lesson_id", type=int)
+        class_member_id = request.args.get("class_member_id", type=int)
+
+        if not lesson_id or not class_member_id:
+            return jsonify({"error": "lesson_id and class_member_id are required"}), 400
+
+        session = db_session()
+        try:
+            progress = session.query(LessonProgress).filter(
+                LessonProgress.lesson_id == lesson_id,
+                LessonProgress.class_member_id == class_member_id,
+                LessonProgress.user_id == user_id
+            ).first()
+
+            if not progress:
+                return jsonify({
+                    "status": "not_started",
+                    "progress_percent": 0,
+                    "completed_at": None
+                }), 200
+
+            return jsonify({
+                "id": progress.id,
+                "lesson_id": progress.lesson_id,
+                "class_member_id": progress.class_member_id,
+                "status": progress.status,
+                "progress_percent": progress.progress_percent,
+                "last_accessed_at": progress.last_accessed_at.isoformat() if progress.last_accessed_at else None,
+                "completed_at": progress.completed_at.isoformat() if progress.completed_at else None,
+            }), 200
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+    @courses_ns.response(200, "Lesson progress updated")
+    @courses_ns.response(401, "Unauthorized")
+    def post(self):
+        """Create or update lesson progress."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        payload = request.get_json(silent=True) or {}
+        lesson_id = payload.get("lesson_id")
+        class_member_id = payload.get("class_member_id")
+        status = payload.get("status")
+        progress_percent = payload.get("progress_percent")
+        completed_at = payload.get("completed_at")
+
+        if not lesson_id or not class_member_id:
+            return jsonify({"error": "lesson_id and class_member_id are required"}), 400
+
+        if status not in ["not_started", "in_progress", "completed"]:
+            return jsonify({"error": "status must be not_started, in_progress, or completed"}), 400
+
+        session = db_session()
+        try:
+            # Verify class member belongs to the user
+            class_member = session.query(ClassMember).filter(
+                ClassMember.id == class_member_id,
+                ClassMember.user_id == user_id
+            ).first()
+
+            if not class_member:
+                return jsonify({"error": "Invalid class member"}), 403
+
+            # Check if progress record exists
+            existing = session.query(LessonProgress).filter(
+                LessonProgress.lesson_id == lesson_id,
+                LessonProgress.class_member_id == class_member_id,
+                LessonProgress.user_id == user_id
+            ).first()
+
+            now = datetime.now(timezone.utc)
+
+            if existing:
+                # Update existing
+                existing.status = status
+                existing.progress_percent = progress_percent
+                existing.last_accessed_at = now
+                if status == "completed" and not existing.completed_at:
+                    existing.completed_at = now
+                session.commit()
+                session.refresh(existing)
+                return jsonify({
+                    "message": "Progress updated",
+                    "progress": {
+                        "id": existing.id,
+                        "status": existing.status,
+                        "progress_percent": existing.progress_percent
+                    }
+                }), 200
+            else:
+                # Create new
+                new_progress = LessonProgress(
+                    user_id=user_id,
+                    lesson_id=lesson_id,
+                    class_member_id=class_member_id,
+                    status=status,
+                    progress_percent=progress_percent or 0,
+                    last_accessed_at=now,
+                    completed_at=now if status == "completed" else None
+                )
+                session.add(new_progress)
+                session.commit()
+                session.refresh(new_progress)
+                return jsonify({
+                    "message": "Progress created",
+                    "progress": {
+                        "id": new_progress.id,
+                        "status": new_progress.status,
+                        "progress_percent": new_progress.progress_percent
+                    }
+                }), 201
+
+        except SQLAlchemyError as exc:
+            session.rollback()
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()

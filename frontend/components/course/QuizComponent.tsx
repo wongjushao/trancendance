@@ -66,26 +66,38 @@ export function QuizComponent({
   const totalQuestions = quizData.questions.length;
   const currentAnswer = answers[currentQuestion?.id];
 
+  const getAuthToken = async () => {
+    const supabase = getSupabaseBrowserClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token;
+  };
+
   // Get current user and class member ID
   useEffect(() => {
     const initialize = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      const token = await getAuthToken();
+      if (!token) return;
+
+      // Get user profile
+      const profileResponse = await fetch('/api/auth-service/profile', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (!profileResponse.ok) return;
+      const user = await profileResponse.json();
 
       // Get class member ID for this offering
-      const { data: classMember } = await supabase
-        .from("class_members")
-        .select("id")
-        .eq("course_class_id", courseClassId)
-        .eq("user_id", user.id)
-        .single();
+      const classMemberResponse = await fetch(`/api/org-service/class-members/${courseClassId}/user/${user.id}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
 
-      if (classMember) {
+      if (classMemberResponse.ok) {
+        const classMember = await classMemberResponse.json();
         setClassMemberId(classMember.id);
       }
 
       // Load previous quiz attempts
-      await loadPreviousAttempts(user.id);
+      await loadPreviousAttempts(user.id, token);
     };
 
     initialize();
@@ -111,25 +123,17 @@ export function QuizComponent({
     return () => clearInterval(timer);
   }, [timeRemaining, submitted]);
 
-  const loadPreviousAttempts = async (userId: string) => {
-    // Get previous attempts from lesson_progress? 
-    // Or store quiz attempts in a separate table?
-    // For now, we'll check lesson_progress for quiz completion status
-    const { data: progress } = await supabase
-      .from("lesson_progress")
-      .select("status, completed_at")
-      .eq("lesson_id", lessonId)
-      .eq("user_id", userId)
-      .eq("class_member_id", classMemberId || 0)
-      .single();
+  const loadPreviousAttempts = async (userId: string, token: string) => {
+    const progressResponse = await fetch(`/api/org-service/lesson-progress?lesson_id=${lessonId}&class_member_id=${classMemberId || 0}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
 
-    if (progress && progress.status === "completed") {
-      // User already completed this quiz
-      setSubmitted(true);
-      setShowResults(true);
-      // We would need to load previous score from somewhere
-      // This suggests we need a quiz_attempts table, but per your constraint,
-      // we'll work with existing tables and note this limitation
+    if (progressResponse.ok) {
+      const progress = await progressResponse.json();
+      if (progress && progress.status === "completed") {
+        setSubmitted(true);
+        setShowResults(true);
+      }
     }
   };
 
@@ -209,13 +213,21 @@ export function QuizComponent({
     setSubmitted(true);
     setShowResults(true);
 
-    // Get current user
-    const { data: { user } } = await supabase.auth.getUser();
+    const token = await getAuthToken();
+    const profileResponse = await fetch('/api/auth-service/profile', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const user = await profileResponse.json();
+
     if (user && classMemberId) {
-      // Update lesson progress
-      const { error: progressError } = await supabase
-        .from("lesson_progress")
-        .upsert({
+      // Update lesson progress via backend API
+      const progressResponse = await fetch('/api/org-service/lesson-progress', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
           user_id: user.id,
           lesson_id: lessonId,
           class_member_id: classMemberId,
@@ -223,12 +235,11 @@ export function QuizComponent({
           progress_percent: hasPassed ? 100 : calculatedScore,
           completed_at: hasPassed ? new Date().toISOString() : null,
           last_accessed_at: new Date().toISOString(),
-        }, {
-          onConflict: "user_id,lesson_id,class_member_id",
-        });
+        })
+      });
 
-      if (progressError) {
-        console.error("Error updating progress:", progressError);
+      if (!progressResponse.ok) {
+        console.error("Error updating progress:", await progressResponse.text());
       } else if (hasPassed && onComplete) {
         onComplete(calculatedScore, hasPassed);
       }
