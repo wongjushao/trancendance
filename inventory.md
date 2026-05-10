@@ -5,25 +5,22 @@
 
 
 
-frontend/app/(main)/profile/page.tsx
 
-frontend/app/(main)/chat/rooms/[roomId]/page.tsx
-frontend/app/(main)/chat/rooms/page.tsx
 
-frontend/app/(main)/layout.tsx
 
-frontend/app/(main)/assignments/page.tsx
 
-frontend/app/(main)/organizations/propose/page.tsx
 
-frontend/app/(main)/organizations/page.tsx
 
-frontend/app/(main)/organizations/verify/page.tsx
+
 
 frontend/app/(main)/organizations/[id]/members/page.tsx
+
 frontend/app/(main)/organizations/[id]/setup/page.tsx
+
 frontend/app/(main)/organizations/[id]/page.tsx
+
 frontend/app/(main)/organizations/[id]/admin/page.tsx
+
 frontend/app/(main)/organizations/[id]/courses/page.tsx
 
 frontend/app/(main)/settings/page.tsx

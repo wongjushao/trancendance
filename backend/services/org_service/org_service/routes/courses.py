@@ -279,6 +279,96 @@ review_upsert_model = courses_ns.model(
 
 @courses_ns.route("/courses")
 class CourseListResource(Resource):
+    @courses_ns.response(200, "Courses retrieved")
+    @courses_ns.response(401, "Unauthorized")
+    def get(self):
+        """Get courses, optionally filtered by organization_id."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        # Get query parameters
+        organization_id = request.args.get("organization_id", type=int)
+        status_filter = request.args.get("status")
+        limit = request.args.get("limit", 50, type=int)
+        offset = request.args.get("offset", 0, type=int)
+
+        session = db_session()
+        try:
+            query = session.query(Course)
+
+            # Apply organization filter
+            if organization_id:
+                query = query.filter(Course.organization_id == organization_id)
+
+                # Check if user has access to this organization
+                membership = session.query(OrganizationMember).filter(
+                    OrganizationMember.organization_id == organization_id,
+                    OrganizationMember.user_id == user_id
+                ).first()
+                
+                if not membership:
+                    return jsonify({"error": "You do not have access to this organization"}), 403
+
+            # Apply status filter
+            if status_filter:
+                query = query.filter(Course.status == status_filter)
+            else:
+                # By default, exclude archived unless explicitly requested
+                query = query.filter(Course.status != "archived")
+
+            # Get total count before pagination
+            total = query.count()
+
+            # Apply pagination and ordering
+            courses = query.order_by(Course.created_at.desc()).offset(offset).limit(limit).all()
+
+            # Get organization names and instructor info
+            org_ids = list(set([c.organization_id for c in courses]))
+            org_map = {}
+            if org_ids:
+                orgs = session.query(Organization).filter(Organization.id.in_(org_ids)).all()
+                org_map = {org.id: org.name for org in orgs}
+
+            courses_list = []
+            for course in courses:
+                instructor = get_instructor_info(session, course.created_by)
+                
+                courses_list.append({
+                    "id": course.id,
+                    "title": course.title,
+                    "description": course.description,
+                    "category": course.category,
+                    "level": course.level,
+                    "thumbnail": course.thumbnail,
+                    "visibility": course.visibility,
+                    "status": course.status,
+                    "organization_id": course.organization_id,
+                    "organization_name": org_map.get(course.organization_id, ""),
+                    "created_by": str(course.created_by),
+                    "created_at": course.created_at.isoformat() if course.created_at else None,
+                    "instructor_name": instructor["name"],
+                    "instructor_avatar": instructor["avatar"],
+                    "rating": 0,  # Would need calculation
+                    "students_count": 0,  # Would need calculation
+                })
+
+            return jsonify({
+                "courses": courses_list,
+                "total": total,
+                "limit": limit,
+                "offset": offset
+            }), 200
+
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
     @courses_ns.expect(course_create_model, validate=False)
     @courses_ns.response(201, "Course created")
     @courses_ns.response(400, "Invalid request body")

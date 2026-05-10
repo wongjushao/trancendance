@@ -60,6 +60,13 @@ import { InviteMemberModal } from "@/components/organization/InviteMemberModal";
 import { toast } from "sonner";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 
+// Helper to get auth token
+const getAuthToken = async () => {
+  const supabase = getSupabaseBrowserClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token;
+};
+
 interface OrganizationData {
   id: number;
   name: string;
@@ -157,59 +164,79 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
   const [deletionStep, setDeletionStep] = useState<'select' | 'confirm' | 'cooldown' | 'recovery-request'>('select');
   const [recoveryReason, setRecoveryReason] = useState('');
 
-  // ADD THIS FUNCTION - Fetch members after approval
+  // ==================== API HELPER ====================
+  const apiRequest = async (url: string, options: RequestInit = {}) => {
+    const token = await getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+    
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        ...options.headers,
+      },
+    });
+    
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: response.statusText }));
+      throw new Error(error.error || `Request failed: ${response.status}`);
+    }
+    
+    return response.json();
+  };
+
+  // ==================== FETCH MEMBERS ====================
   const fetchMembers = async () => {
     try {
-      const { data: memberData, error } = await supabase
-        .from("organization_members")
-        .select(`
-          id,
-          user_id,
-          member_role,
-          created_at,
-          user:profiles!organization_members_user_id_fkey (
-            id,
-            first_name,
-            last_name,
-            username,
-            avatar_url
-          )
-        `)
-        .eq("organization_id", organizationId);
+      const token = await getAuthToken();
+      if (!token) return;
 
-      if (error) throw error;
+      // Get organization members via backend API
+      const response = await fetch(`/api/org-service/orgs/${organizationId}/members`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
 
-      if (memberData) {
-        // Get student course counts
-        const { data: classMembers } = await supabase
-          .from("class_members")
-          .select("user_id, role");
+      if (!response.ok) {
+        console.error("Failed to fetch members:", response.status);
+        return;
+      }
 
-        const studentCourseCount = new Map<string, number>();
-        classMembers?.forEach(cm => {
-          if (cm.role === 'student') {
-            studentCourseCount.set(cm.user_id, (studentCourseCount.get(cm.user_id) || 0) + 1);
-          }
-        });
-
-        // Get instructor course counts
-        const { data: orgCourses } = await supabase
-          .from("courses")
-          .select("id, created_by")
-          .eq("organization_id", organizationId);
-
-        const instructorCourseCount = new Map<string, number>();
-        orgCourses?.forEach(course => {
-          instructorCourseCount.set(course.created_by, (instructorCourseCount.get(course.created_by) || 0) + 1);
-        });
-
+      const membersData = await response.json();
+      
+      if (membersData && membersData.members) {
         // Collect user IDs for email fetch
-        const userIds = memberData.map((m: any) => m.user_id);
+        const userIds = membersData.members.map((m: any) => m.user_id);
         
         // Fetch emails from backend API
         await fetchMemberEmails(userIds);
 
-        const formattedMembers: Member[] = memberData.map((m: any) => {
+        // Get student course counts via backend
+        let studentCourseCount = new Map<string, number>();
+        let instructorCourseCount = new Map<string, number>();
+        
+        try {
+          // Get all courses in this organization to count instructor courses
+          const coursesResponse = await fetch(`/api/org-service/courses?organization_id=${organizationId}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          
+          if (coursesResponse.ok) {
+            const coursesData = await coursesResponse.json();
+            coursesData.courses?.forEach((course: any) => {
+              if (course.created_by) {
+                instructorCourseCount.set(course.created_by, (instructorCourseCount.get(course.created_by) || 0) + 1);
+              }
+            });
+          }
+          
+          // For student counts, we'd need a separate endpoint
+          // For now, use mock or fetch from enrollment API
+        } catch (err) {
+          console.error("Error fetching course counts:", err);
+        }
+
+        const formattedMembers: Member[] = membersData.members.map((m: any) => {
           let courseCount = 0;
           
           if (m.member_role === "student") {
@@ -235,7 +262,7 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
             id: m.user_id,
             user_id: m.user_id,
             name: name,
-            email: "", // Will be populated from memberEmails state
+            email: memberEmails[m.user_id] || "",
             role: m.member_role as Member["role"],
             avatar: m.user?.avatar_url || avatar,
             joinedAt: new Date(m.created_at).toISOString().split("T")[0],
@@ -255,12 +282,14 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
     if (!userIds.length) return;
     
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const token = await getAuthToken();
+      if (!token) return;
       
+      // This endpoint already exists
       const response = await fetch('/api/org-service/users/batch-emails', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${session?.access_token}`,
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ user_ids: userIds }),
@@ -277,8 +306,457 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
     }
   };
 
+  // ==================== FETCH COURSES ====================
+  const fetchOrganizationCourses = async () => {
+    try {
+      const token = await getAuthToken();
+      if (!token) return;
 
+      const response = await fetch(`/api/org-service/courses?organization_id=${organizationId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
 
+      if (!response.ok) {
+        console.error("Failed to fetch courses:", response.status);
+        return;
+      }
+
+      const data = await response.json();
+      const orgCourses = data.courses || [];
+
+      const formattedCourses: Course[] = await Promise.all(orgCourses.map(async (c: any) => {
+        let instructorName = "Unknown Instructor";
+        if (c.created_by) {
+          try {
+            const profileResponse = await fetch(`/api/auth-service/profile/public/${c.created_by}`, {
+              headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (profileResponse.ok) {
+              const profile = await profileResponse.json();
+              instructorName = profile.first_name 
+                ? `${profile.first_name} ${profile.last_name || ""}`.trim()
+                : profile.username || "Instructor";
+            }
+          } catch (err) {
+            console.error("Error fetching instructor:", err);
+          }
+        }
+
+        // Get student count via course detail endpoint
+        let studentCount = 0;
+        try {
+          const detailResponse = await fetch(`/api/org-service/courses/${c.id}/detail`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (detailResponse.ok) {
+            const detail = await detailResponse.json();
+            studentCount = detail.course?.students_count || 0;
+          }
+        } catch (err) {
+          console.error("Error fetching course detail:", err);
+        }
+
+        return {
+          id: c.id,
+          title: c.title,
+          description: c.description || "",
+          thumbnail: c.thumbnail || "https://images.unsplash.com/photo-1633356122544-f134324a6cee?w=400",
+          instructor: instructorName,
+          students: studentCount,
+          rating: c.rating || 0,
+          status: c.status as "published" | "draft",
+          createdAt: c.created_at.split("T")[0],
+        };
+      }));
+
+      setCourses(formattedCourses);
+    } catch (error) {
+      console.error("Error fetching courses:", error);
+    }
+  };
+
+  // ==================== FETCH DOMAINS ====================
+  const fetchDomains = async () => {
+    try {
+      const token = await getAuthToken();
+      if (!token) return;
+
+      const response = await fetch(`/api/org-service/orgs/${organizationId}/domains`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setDomains(data.domains || []);
+      }
+    } catch (error) {
+      console.error("Error fetching domains:", error);
+    }
+  };
+
+  // ==================== DELETE MEMBER ====================
+  const handleRemoveMember = async (memberId: string, memberName: string, memberRole: string) => {
+    if (memberRole === "admin") {
+      toast.error("Cannot remove admin members");
+      return;
+    }
+    
+    try {
+      const token = await getAuthToken();
+      if (!token) return;
+      
+      const response = await fetch(`/api/org-service/orgs/${organizationId}/members/${memberId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to remove member");
+      }
+
+      setMembers(prev => prev.filter(m => m.id !== memberId));
+      toast.success(`${memberName} has been removed from the organization`);
+    } catch (error) {
+      console.error("Error removing member:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to remove member");
+    }
+  };
+
+  // ==================== UPDATE MEMBER ROLE ====================
+  const handleUpdateMember = async () => {
+    if (!editingMember) return;
+    
+    try {
+      const token = await getAuthToken();
+      if (!token) return;
+      
+      const response = await fetch(`/api/org-service/orgs/${organizationId}/members/${editingMember.user_id}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ member_role: editingMember.role }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to update member");
+      }
+      
+      setMembers(prev =>
+        prev.map(member =>
+          member.id === editingMember.id ? { ...member, role: editingMember.role } : member
+        )
+      );
+      toast.success(`${editingMember.name}'s role updated to ${editingMember.role}`);
+      setEditingMember(null);
+    } catch (error) {
+      console.error("Error updating member:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to update member");
+    }
+  };
+
+  // ==================== PUBLISH COURSE ====================
+  const handlePublishCourse = async (courseId: number) => {
+    try {
+      const token = await getAuthToken();
+      if (!token) return;
+      
+      const response = await fetch(`/api/org-service/courses/${courseId}/publish`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to publish course");
+      }
+
+      setCourses(prev =>
+        prev.map(course =>
+          course.id === courseId ? { ...course, status: "published" } : course
+        )
+      );
+      toast.success("Course published successfully!");
+    } catch (error) {
+      console.error("Error publishing course:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to publish course");
+    }
+  };
+
+  // ==================== UPDATE ORGANIZATION SETTINGS ====================
+  const handleSaveSettings = async () => {
+    setSavingSettings(true);
+    
+    try {
+      const token = await getAuthToken();
+      if (!token) return;
+      
+      const response = await fetch(`/api/org-service/orgs/${organizationId}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: settingsForm.name,
+          description: settingsForm.description || null,
+          slug: settingsForm.slug || null,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to update organization");
+      }
+      
+      const updatedOrg = await response.json();
+      setOrganization({ ...organization!, ...updatedOrg });
+      toast.success("Organization settings updated successfully");
+    } catch (error) {
+      console.error("Error updating organization:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to update organization settings");
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  // ==================== ADD DOMAIN ====================
+  const handleAddDomain = async () => {
+    if (!newDomain.trim()) {
+      toast.error("Please enter a domain");
+      return;
+    }
+
+    const domainRegex = /^[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$/;
+    if (!domainRegex.test(newDomain)) {
+      toast.error("Please enter a valid domain (e.g., example.com)");
+      return;
+    }
+
+    if (domains.some(d => d.domain === newDomain.toLowerCase())) {
+      toast.error("Domain already added");
+      return;
+    }
+
+    try {
+      const token = await getAuthToken();
+      if (!token) return;
+      
+      const response = await fetch(`/api/org-service/orgs/${organizationId}/domains`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ domain: newDomain.toLowerCase() }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to add domain");
+      }
+
+      const data = await response.json();
+      setDomains([...domains, data]);
+      setNewDomain("");
+      toast.success("Domain added successfully");
+    } catch (error) {
+      console.error("Error adding domain:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to add domain");
+    }
+  };
+
+  // ==================== REMOVE DOMAIN ====================
+  const handleRemoveDomain = async (domainId: number, domain: string) => {
+    try {
+      const token = await getAuthToken();
+      if (!token) return;
+      
+      const response = await fetch(`/api/org-service/domains/${domainId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to remove domain");
+      }
+
+      setDomains(domains.filter(d => d.id !== domainId));
+      toast.success(`Domain ${domain} removed`);
+    } catch (error) {
+      console.error("Error removing domain:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to remove domain");
+    }
+  };
+
+  // ==================== DELETE ORGANIZATION ====================
+  const handleDeleteOrganization = async () => {
+    if (deleteConfirmText !== organization?.name) {
+      toast.error("Please type the organization name to confirm");
+      return;
+    }
+
+    try {
+      const token = await getAuthToken();
+      if (!token) return;
+      
+      // First, remove all members
+      const response = await fetch(`/api/org-service/orgs/${organizationId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to delete organization");
+      }
+
+      toast.success("Organization deleted successfully");
+      router.push("/organizations");
+    } catch (error) {
+      console.error("Error deleting organization:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to delete organization");
+    }
+
+    setShowDeleteDialog(false);
+    setDeleteConfirmText("");
+  };
+
+  // ==================== FETCH ANALYTICS ====================
+  const fetchAnalytics = async () => {
+    try {
+      const token = await getAuthToken();
+      if (!token) return;
+
+      const response = await fetch(`/api/org-service/organizations/${organizationId}/analytics`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setAnalytics(data);
+      }
+    } catch (error) {
+      console.error("Error fetching analytics:", error);
+    }
+  };
+
+  // ==================== INITIAL LOAD ====================
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+
+      const token = await getAuthToken();
+      if (!token) {
+        router.push("/login");
+        return;
+      }
+
+      try {
+        // Get organization details
+        const orgResponse = await fetch(`/api/org-service/orgs/${organizationId}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (!orgResponse.ok) {
+          throw new Error("Failed to fetch organization");
+        }
+
+        const orgData = await orgResponse.json();
+        setOrganization(orgData);
+        setSettingsForm({
+          name: orgData.name,
+          description: orgData.description || "",
+          slug: orgData.slug || "",
+        });
+
+        // Check if user is admin via can-promote endpoint
+        const canPromoteResponse = await fetch(`/api/org-service/orgs/${organizationId}/can-promote`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (canPromoteResponse.ok) {
+          const canPromoteData = await canPromoteResponse.json();
+          if (!canPromoteData.can_promote) {
+            toast.error("You don't have permission to access this page");
+            router.push(`/organizations/${organizationId}`);
+            return;
+          }
+        }
+
+        // Update roleData
+        if (roleData.role !== "admin" || roleData.organizationId !== organizationId) {
+          setRole({
+            role: "admin",
+            organizationId: organizationId,
+            organizationName: orgData.name || null,
+            pendingRole: null,
+            pendingOrganizationId: null,
+            pendingOrganizationName: null,
+          });
+        }
+
+        // Fetch all data in parallel
+        await Promise.all([
+          fetchMembers(),
+          fetchOrganizationCourses(),
+          fetchDomains(),
+          fetchAnalytics(),
+        ]);
+
+      } catch (error) {
+        console.error("Error loading data:", error);
+        toast.error("Failed to load organization data");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadData();
+  }, [organizationId, router]);
+
+  // Check setup status - uses existing API
+  useEffect(() => {
+    const checkSetupStatus = async () => {
+      const token = await getAuthToken();
+      if (!token) return;
+      
+      try {
+        const response = await fetch(`/api/org-service/orgs/${organizationId}/setup-status`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (!data.is_setup_complete) {
+            router.push(`/organizations/${organizationId}/setup`);
+            return;
+          }
+        }
+      } catch (error) {
+        console.error('[AdminPage] Error checking setup status:', error);
+      }
+    };
+    
+    if (organizationId) {
+      checkSetupStatus();
+    }
+  }, [organizationId]);
+
+  // ==================== COPY INVITE LINK ====================
+  const copyInviteLink = () => {
+    const inviteLink = `${window.location.origin}/organizations/join?org=${organizationId}`;
+    navigator.clipboard.writeText(inviteLink);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+    toast.success("Invite link copied to clipboard");
+  };
+
+  // ==================== ORGANIZATION DELETION COOLDOWN ====================
   const startOrganizationDeletion = () => {
     if (!organizationId || !organization?.name) {
       toast.error("No organization found");
@@ -338,13 +816,13 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
     }
     
     try {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { session } } = await supabase.auth.getSession();
+      const token = await getAuthToken();
+      if (!token) return;
       
       const response = await fetch('/api/auth-service/contact-support', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${session?.access_token}`,
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -367,6 +845,7 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
     }
   };
 
+  // ==================== CHECK PENDING DELETIONS ====================
   useEffect(() => {
     if (!organizationId) return;
     
@@ -396,428 +875,7 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
     }
   }, [organizationId]);
 
-  useEffect(() => {
-    const loadData = async () => {
-      setLoading(true);
-
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        router.push("/login");
-        return;
-      }
-
-      // Check if user is admin of this organization
-      const { data: memberCheck } = await supabase
-        .from("organization_members")
-        .select("member_role")
-        .eq("organization_id", organizationId)
-        .eq("user_id", user.id)
-        .single();
-
-      if (!memberCheck || (memberCheck.member_role !== "admin" && memberCheck.member_role !== "sub_admin")) {
-        toast.error("You don't have permission to access this page");
-        router.push(`/organizations/${organizationId}`);
-        return;
-      }
-
-      // Update roleData
-      if (roleData.role !== memberCheck.member_role || roleData.organizationId !== organizationId) {
-        setRole({
-          role: memberCheck.member_role as any,
-          organizationId: organizationId,
-          organizationName: organization?.name || null,
-          pendingRole: null,
-          pendingOrganizationId: null,
-          pendingOrganizationName: null,
-        });
-      }
-
-      // Get organization details
-      const { data: orgData } = await supabase
-        .from("organizations")
-        .select("*")
-        .eq("id", organizationId)
-        .single();
-
-      if (orgData) {
-        setOrganization(orgData);
-        setSettingsForm({
-          name: orgData.name,
-          description: orgData.description || "",
-          slug: orgData.slug || "",
-        });
-      }
-
-      // Load members and other data
-      await fetchMembers(); // Use the fetchMembers function
-
-      // Get all courses in this organization
-      const { data: orgCourses } = await supabase
-        .from("courses")
-        .select("id, created_by, title, description, thumbnail, status, created_at")
-        .eq("organization_id", organizationId);
-
-      if (orgCourses) {
-        const formattedCourses: Course[] = await Promise.all(orgCourses.map(async (c: any) => {
-          let instructorName = "Unknown Instructor";
-          if (c.created_by) {
-            const { data: instructor } = await supabase
-              .from("profiles")
-              .select("first_name, last_name, username")
-              .eq("id", c.created_by)
-              .single();
-              
-            if (instructor) {
-              instructorName = instructor.first_name 
-                ? `${instructor.first_name} ${instructor.last_name || ""}`.trim()
-                : instructor.username || "Instructor";
-            }
-          }
-
-          const { data: courseClassesData } = await supabase
-            .from("course_classes")
-            .select("id")
-            .eq("course_id", c.id);
-          
-          const classIds = courseClassesData?.map(cc => cc.id) || [];
-          let studentCount = 0;
-          if (classIds.length > 0) {
-            const { data: classMembersData } = await supabase
-              .from("class_members")
-              .select("user_id")
-              .in("course_class_id", classIds)
-              .eq("role", "student");
-            
-            const uniqueStudents = new Set(classMembersData?.map(cm => cm.user_id));
-            studentCount = uniqueStudents.size;
-          }
-
-          const { data: reviews } = await supabase
-            .from("course_reviews")
-            .select("rating")
-            .eq("course_id", c.id);
-          
-          const avgRating = reviews?.length 
-            ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length 
-            : 0;
-
-          return {
-            id: c.id,
-            title: c.title,
-            description: c.description || "",
-            thumbnail: c.thumbnail || "https://images.unsplash.com/photo-1633356122544-f134324a6cee?w=400",
-            instructor: instructorName,
-            students: studentCount,
-            rating: avgRating,
-            status: c.status as "published" | "draft",
-            createdAt: c.created_at.split("T")[0],
-          };
-        }));
-        setCourses(formattedCourses);
-      }
-
-      // Calculate analytics
-      if (members.length > 0 && orgCourses) {
-        const totalStudents = members.filter(m => m.role === "student").length;
-        const totalTeachers = members.filter(m => m.role === "teacher" || m.role === "admin" || m.role === "sub_admin").length;
-        const totalCoursesCount = orgCourses?.length || 0;
-        
-        let totalRatingSum = 0;
-        let totalRatingCount = 0;
-        for (const course of orgCourses || []) {
-          const { data: reviews } = await supabase
-            .from("course_reviews")
-            .select("rating")
-            .eq("course_id", course.id);
-          
-          if (reviews && reviews.length > 0) {
-            totalRatingSum += reviews.reduce((sum, r) => sum + r.rating, 0);
-            totalRatingCount += reviews.length;
-          }
-        }
-        const averageRating = totalRatingCount > 0 ? totalRatingSum / totalRatingCount : 0;
-        
-        // Calculate completion rate
-        let totalProgress = 0;
-        let totalProgressCount = 0;
-        const courseIds = orgCourses?.map(c => c.id) || [];
-        if (courseIds.length > 0) {
-          const { data: courseClassesData } = await supabase
-            .from("course_classes")
-            .select("id")
-            .in("course_id", courseIds);
-          
-          const classIds = courseClassesData?.map(cc => cc.id) || [];
-          
-          if (classIds.length > 0) {
-            const { data: classMembersData } = await supabase
-              .from("class_members")
-              .select("id")
-              .in("course_class_id", classIds);
-            
-            const cmIds = classMembersData?.map(cm => cm.id) || [];
-            
-            if (cmIds.length > 0) {
-              const { data: lessonProgress } = await supabase
-                .from("lesson_progress")
-                .select("status")
-                .in("class_member_id", cmIds);
-              
-              const completed = lessonProgress?.filter(lp => lp.status === "completed").length || 0;
-              totalProgress += completed;
-              totalProgressCount += lessonProgress?.length || 0;
-            }
-          }
-        }
-        const completionRate = totalProgressCount > 0 ? (totalProgress / totalProgressCount) * 100 : 0;
-        
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-        
-        const recentMembers = members.filter(m => {
-          const joinedDate = new Date(m.joinedAt);
-          return joinedDate > thirtyDaysAgo;
-        }).length;
-        
-        const monthlyGrowth = totalStudents > 0 ? Math.round((recentMembers / totalStudents) * 100) : 0;
-        
-        setAnalytics({
-          totalStudents,
-          totalTeachers,
-          totalCourses: totalCoursesCount,
-          averageRating: Math.round(averageRating * 10) / 10,
-          completionRate: Math.round(completionRate),
-          monthlyGrowth: Math.max(0, monthlyGrowth),
-        });
-      }
-
-      const { data: domainData } = await supabase
-        .from("organization_domains")
-        .select("*")
-        .eq("organization_id", organizationId);
-      setDomains(domainData || []);
-
-      setLoading(false);
-    };
-
-    loadData();
-  }, [organizationId, router]);
-
-  useEffect(() => {
-    const checkSetupStatus = async () => {
-      console.log('[AdminPage] Checking setup status for org:', organizationId);
-      const supabase = getSupabaseBrowserClient();
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session) {
-        console.log('[AdminPage] No session found');
-        return;
-      }
-      
-      try {
-        console.log('[AdminPage] Fetching setup status...');
-        const response = await fetch(`/api/org-service/orgs/${organizationId}/setup-status`, {
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-          },
-        });
-        
-        console.log('[AdminPage] Setup status response:', response.status);
-        
-        if (response.ok) {
-          const data = await response.json();
-          console.log('[AdminPage] Setup status data:', data);
-          if (!data.is_setup_complete) {
-            console.log('[AdminPage] Setup incomplete, redirecting to setup page');
-            router.push(`/organizations/${organizationId}/setup`);
-            return;
-          }
-        } else {
-          console.log('[AdminPage] Setup status check failed:', response.status);
-        }
-      } catch (error) {
-        console.error('[AdminPage] Error checking setup status:', error);
-      }
-    };
-    
-    checkSetupStatus();
-  }, [organizationId]);
-
-  const handleRemoveMember = async (memberId: string, memberName: string, memberRole: string) => {
-    if (memberRole === "admin") {
-      toast.error("Cannot remove admin members");
-      return;
-    }
-    
-    const { error } = await supabase
-      .from("organization_members")
-      .delete()
-      .eq("organization_id", organizationId)
-      .eq("user_id", memberId);
-
-    if (error) {
-      console.error("Error removing member:", error);
-      toast.error("Failed to remove member");
-      return;
-    }
-
-    setMembers(prev => prev.filter(m => m.id !== memberId));
-    toast.success(`${memberName} has been removed from the organization`);
-  };
-
-  const handleUpdateMember = async () => {
-    if (!editingMember) return;
-    
-    const { error } = await supabase
-      .from("organization_members")
-      .update({ member_role: editingMember.role })
-      .eq("organization_id", organizationId)
-      .eq("user_id", editingMember.user_id);
-
-    if (error) {
-      console.error("Error updating member:", error);
-      toast.error("Failed to update member");
-      return;
-    }
-    
-    setMembers(prev =>
-      prev.map(member =>
-        member.id === editingMember.id ? { ...member, role: editingMember.role } : member
-      )
-    );
-    toast.success(`${editingMember.name}'s role updated to ${editingMember.role}`);
-    setEditingMember(null);
-  };
-
-  const handlePublishCourse = async (courseId: number) => {
-    const { error } = await supabase
-      .from("courses")
-      .update({ status: "published" })
-      .eq("id", courseId);
-
-    if (error) {
-      console.error("Error publishing course:", error);
-      toast.error("Failed to publish course");
-      return;
-    }
-
-    setCourses(prev =>
-      prev.map(course =>
-        course.id === courseId ? { ...course, status: "published" } : course
-      )
-    );
-    toast.success("Course published successfully!");
-  };
-
-  const handleSaveSettings = async () => {
-    setSavingSettings(true);
-    
-    const { error } = await supabase
-      .from("organizations")
-      .update({
-        name: settingsForm.name,
-        description: settingsForm.description || null,
-        slug: settingsForm.slug || null,
-      })
-      .eq("id", organizationId);
-
-    if (error) {
-      console.error("Error updating organization:", error);
-      toast.error("Failed to update organization settings");
-    } else {
-      setOrganization({ ...organization!, ...settingsForm });
-      toast.success("Organization settings updated successfully");
-    }
-    setSavingSettings(false);
-  };
-
-  const handleAddDomain = async () => {
-    if (!newDomain.trim()) {
-      toast.error("Please enter a domain");
-      return;
-    }
-
-    const domainRegex = /^[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$/;
-    if (!domainRegex.test(newDomain)) {
-      toast.error("Please enter a valid domain (e.g., example.com)");
-      return;
-    }
-
-    if (domains.some(d => d.domain === newDomain.toLowerCase())) {
-      toast.error("Domain already added");
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from("organization_domains")
-      .insert({
-        organization_id: organizationId,
-        domain: newDomain.toLowerCase(),
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error("Error adding domain:", error);
-      toast.error("Failed to add domain");
-    } else {
-      setDomains([...domains, data]);
-      setNewDomain("");
-      toast.success("Domain added successfully");
-    }
-  };
-
-  const handleRemoveDomain = async (domainId: number, domain: string) => {
-    const { error } = await supabase
-      .from("organization_domains")
-      .delete()
-      .eq("id", domainId);
-
-    if (error) {
-      console.error("Error removing domain:", error);
-      toast.error("Failed to remove domain");
-    } else {
-      setDomains(domains.filter(d => d.id !== domainId));
-      toast.success(`Domain ${domain} removed`);
-    }
-  };
-
-  const handleDeleteOrganization = async () => {
-    if (deleteConfirmText !== organization?.name) {
-      toast.error("Please type the organization name to confirm");
-      return;
-    }
-
-    await supabase
-      .from("organization_members")
-      .delete()
-      .eq("organization_id", organizationId);
-
-    const { error } = await supabase
-      .from("organizations")
-      .delete()
-      .eq("id", organizationId);
-
-    if (error) {
-      console.error("Error deleting organization:", error);
-      toast.error("Failed to delete organization");
-    } else {
-      toast.success("Organization deleted successfully");
-      router.push("/organizations");
-    }
-
-    setShowDeleteDialog(false);
-    setDeleteConfirmText("");
-  };
-
-  const copyInviteLink = () => {
-    const inviteLink = `${window.location.origin}/organizations/join?org=${organizationId}`;
-    navigator.clipboard.writeText(inviteLink);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-    toast.success("Invite link copied to clipboard");
-  };
-
+  // ==================== FILTERED MEMBERS ====================
   const filteredMembers = members.filter(member => {
     const matchesSearch = member.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                           (member.email && member.email.toLowerCase().includes(searchQuery.toLowerCase()));
@@ -826,6 +884,7 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
     return matchesSearch && matchesRole && matchesStatus;
   });
 
+  // ==================== RENDER ====================
   if (loading) {
     return (
       <div className="flex items-center justify-center h-[calc(100vh-200px)]">
@@ -998,22 +1057,21 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
                         <td className="py-3 px-4 text-white">{member.courses}</td>
                         <td className="py-3 px-4">
                           <div className="flex gap-2">
-                            {/* Only show edit button if member is NOT an admin */}
                             {member.role !== "admin" && (
-                              <button 
-                                onClick={() => setEditingMember(member)}
-                                className="p-1 hover:bg-gray-700 rounded-lg transition-colors"
-                              >
-                                <Edit2 className="w-4 h-4 text-gray-400" />
-                              </button>
-                            )}
-                            {member.role !== "admin" && (
-                              <button 
-                                onClick={() => handleRemoveMember(member.user_id, member.name, member.role)}
-                                className="p-1 hover:bg-gray-700 rounded-lg transition-colors"
-                              >
-                                <Trash2 className="w-4 h-4 text-red-400" />
-                              </button>
+                              <>
+                                <button 
+                                  onClick={() => setEditingMember(member)}
+                                  className="p-1 hover:bg-gray-700 rounded-lg transition-colors"
+                                >
+                                  <Edit2 className="w-4 h-4 text-gray-400" />
+                                </button>
+                                <button 
+                                  onClick={() => handleRemoveMember(member.user_id, member.name, member.role)}
+                                  className="p-1 hover:bg-gray-700 rounded-lg transition-colors"
+                                >
+                                  <Trash2 className="w-4 h-4 text-red-400" />
+                                </button>
+                              </>
                             )}
                           </div>
                         </td>

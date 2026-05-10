@@ -9,6 +9,7 @@ from email.utils import parseaddr
 from flask import current_app, jsonify, request
 from flask_restx import Namespace, Resource, fields
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy import func
 
 from backend.common.models import (
     Organization,
@@ -16,6 +17,12 @@ from backend.common.models import (
     OrganizationMemberInvitation,
     OrganizationVerificationRequest,
     Profile,
+    OrganizationDomain,  # Add this
+    Course,  # Add this
+    CourseClass,  # Add this
+    ClassMember,  # Add this
+    LessonProgress,  # Add this
+    CourseReview,  # Add this
 )
 from backend.services.org_service.org_service.utils.email import (
     build_org_verification_url,
@@ -855,6 +862,627 @@ class OrganizationMemberInvitationAcceptResource(Resource):
         except IntegrityError as exc:
             session.rollback()
             return jsonify({"error": "Could not finalize membership", "detail": str(getattr(exc, "orig", exc))}), 409
+        except SQLAlchemyError as exc:
+            session.rollback()
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+# Add to backend/services/org_service/org_service/routes/organizations.py
+
+# ========== ORGANIZATION MEMBERS ENDPOINTS ==========
+
+@organizations_ns.route("/orgs/<int:org_id>/members")
+class OrganizationMembersListResource(Resource):
+    @organizations_ns.response(200, "Members retrieved")
+    @organizations_ns.response(401, "Unauthorized")
+    @organizations_ns.response(403, "Permission denied")
+    @organizations_ns.response(404, "Organization not found")
+    def get(self, org_id: int):
+        """Get all members of an organization with their profiles."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        session = db_session()
+        try:
+            # Check if organization exists
+            org = session.query(Organization).filter(Organization.id == org_id).first()
+            if not org:
+                return jsonify({"error": "Organization not found"}), 404
+
+            # Check if user has permission to view members (must be a member)
+            viewer_membership = session.query(OrganizationMember).filter(
+                OrganizationMember.organization_id == org_id,
+                OrganizationMember.user_id == user_id
+            ).first()
+            
+            if not viewer_membership:
+                return jsonify({"error": "You are not a member of this organization"}), 403
+
+            # Get all members with user profiles
+            members = (
+                session.query(OrganizationMember)
+                .filter(OrganizationMember.organization_id == org_id)
+                .all()
+            )
+
+            user_ids = [m.user_id for m in members]
+            profiles = {}
+            if user_ids:
+                for profile in session.query(Profile).filter(Profile.id.in_(user_ids)).all():
+                    profiles[profile.id] = profile
+
+            members_list = []
+            for member in members:
+                profile = profiles.get(member.user_id)
+                members_list.append({
+                    "id": member.id,
+                    "user_id": str(member.user_id),
+                    "member_role": member.member_role,
+                    "created_at": member.created_at.isoformat() if member.created_at else None,
+                    "user": {
+                        "id": str(profile.id) if profile else None,
+                        "first_name": profile.first_name if profile else None,
+                        "last_name": profile.last_name if profile else None,
+                        "username": profile.username if profile else None,
+                        "avatar_url": profile.avatar_url if profile else None,
+                    } if profile else {
+                        "id": str(member.user_id),
+                        "first_name": None,
+                        "last_name": None,
+                        "username": None,
+                        "avatar_url": None,
+                    }
+                })
+
+            return jsonify({"members": members_list}), 200
+
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+
+@organizations_ns.route("/orgs/<int:org_id>/members/<string:member_id>")
+class OrganizationMemberDetailResource(Resource):
+    @organizations_ns.response(200, "Member role updated")
+    @organizations_ns.response(400, "Invalid role")
+    @organizations_ns.response(401, "Unauthorized")
+    @organizations_ns.response(403, "Permission denied")
+    @organizations_ns.response(404, "Member not found")
+    def put(self, org_id: int, member_id: str):
+        """Update a member's role in the organization."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        admin_user_id, _email = get_authenticated_user()
+        if admin_user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        payload = request.get_json(silent=True) or {}
+        new_role = payload.get("member_role")
+
+        if not new_role:
+            return jsonify({"error": "Field 'member_role' is required"}), 400
+
+        allowed_roles = {"student", "teacher", "sub_admin", "admin"}
+        if new_role not in allowed_roles:
+            return jsonify({"error": f"Invalid role. Must be one of: {', '.join(allowed_roles)}"}), 400
+
+        try:
+            target_user_id = uuid.UUID(member_id)
+        except (ValueError, TypeError):
+            return jsonify({"error": "Invalid user ID format"}), 400
+
+        session = db_session()
+        try:
+            # Check if organization exists
+            org = session.query(Organization).filter(Organization.id == org_id).first()
+            if not org:
+                return jsonify({"error": "Organization not found"}), 404
+
+            # Check if current user is admin
+            admin_membership = session.query(OrganizationMember).filter(
+                OrganizationMember.organization_id == org_id,
+                OrganizationMember.user_id == admin_user_id,
+                OrganizationMember.member_role.in_(['admin', 'sub_admin'])
+            ).first()
+
+            if not admin_membership:
+                return jsonify({"error": "You do not have permission to update member roles"}), 403
+
+            # Get the target member
+            target_member = session.query(OrganizationMember).filter(
+                OrganizationMember.organization_id == org_id,
+                OrganizationMember.user_id == target_user_id
+            ).first()
+
+            if not target_member:
+                return jsonify({"error": "Member not found"}), 404
+
+            # Cannot modify the primary admin's role (if they are the only admin)
+            if target_member.member_role == "admin" and new_role != "admin":
+                # Check if this is the only admin
+                admin_count = session.query(OrganizationMember).filter(
+                    OrganizationMember.organization_id == org_id,
+                    OrganizationMember.member_role == "admin"
+                ).count()
+                
+                if admin_count <= 1:
+                    return jsonify({"error": "Cannot demote the only organization admin"}), 400
+
+            # Update role
+            target_member.member_role = new_role
+            session.commit()
+
+            # Get profile for response
+            profile = session.query(Profile).filter(Profile.id == target_user_id).first()
+
+            return jsonify({
+                "user_id": str(target_member.user_id),
+                "member_role": target_member.member_role,
+                "message": f"Member role updated to {new_role}"
+            }), 200
+
+        except SQLAlchemyError as exc:
+            session.rollback()
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+    @organizations_ns.response(200, "Member removed")
+    @organizations_ns.response(401, "Unauthorized")
+    @organizations_ns.response(403, "Permission denied")
+    @organizations_ns.response(404, "Member not found")
+    def delete(self, org_id: int, member_id: str):
+        """Remove a member from the organization."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        admin_user_id, _email = get_authenticated_user()
+        if admin_user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        try:
+            target_user_id = uuid.UUID(member_id)
+        except (ValueError, TypeError):
+            return jsonify({"error": "Invalid user ID format"}), 400
+
+        session = db_session()
+        try:
+            # Check if organization exists
+            org = session.query(Organization).filter(Organization.id == org_id).first()
+            if not org:
+                return jsonify({"error": "Organization not found"}), 404
+
+            # Check if current user is admin
+            admin_membership = session.query(OrganizationMember).filter(
+                OrganizationMember.organization_id == org_id,
+                OrganizationMember.user_id == admin_user_id,
+                OrganizationMember.member_role.in_(['admin', 'sub_admin'])
+            ).first()
+
+            if not admin_membership:
+                return jsonify({"error": "You do not have permission to remove members"}), 403
+
+            # Get the target member
+            target_member = session.query(OrganizationMember).filter(
+                OrganizationMember.organization_id == org_id,
+                OrganizationMember.user_id == target_user_id
+            ).first()
+
+            if not target_member:
+                return jsonify({"error": "Member not found"}), 404
+
+            # Cannot remove the last admin
+            if target_member.member_role == "admin":
+                admin_count = session.query(OrganizationMember).filter(
+                    OrganizationMember.organization_id == org_id,
+                    OrganizationMember.member_role == "admin"
+                ).count()
+                
+                if admin_count <= 1:
+                    return jsonify({"error": "Cannot remove the only organization admin"}), 400
+
+            # Remove the member
+            session.delete(target_member)
+            session.commit()
+
+            return jsonify({"message": "Member removed successfully"}), 200
+
+        except SQLAlchemyError as exc:
+            session.rollback()
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+
+# ========== ORGANIZATION DOMAINS ENDPOINTS ==========
+
+@organizations_ns.route("/orgs/<int:org_id>/domains")
+class OrganizationDomainsResource(Resource):
+    @organizations_ns.response(200, "Domains retrieved")
+    @organizations_ns.response(401, "Unauthorized")
+    @organizations_ns.response(404, "Organization not found")
+    def get(self, org_id: int):
+        """Get all domains for an organization."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        session = db_session()
+        try:
+            # Check if organization exists
+            org = session.query(Organization).filter(Organization.id == org_id).first()
+            if not org:
+                return jsonify({"error": "Organization not found"}), 404
+
+            # Check if user is a member (for domain visibility)
+            membership = session.query(OrganizationMember).filter(
+                OrganizationMember.organization_id == org_id,
+                OrganizationMember.user_id == user_id
+            ).first()
+
+            if not membership:
+                return jsonify({"error": "You are not a member of this organization"}), 403
+
+            # Get domains
+            domains = session.query(OrganizationDomain).filter(
+                OrganizationDomain.organization_id == org_id
+            ).all()
+
+            domains_list = [{
+                "id": d.id,
+                "organization_id": d.organization_id,
+                "domain": d.domain,
+                "created_at": d.created_at.isoformat() if d.created_at else None,
+            } for d in domains]
+
+            return jsonify({"domains": domains_list}), 200
+
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+    @organizations_ns.expect(organizations_ns.model('DomainCreate', {
+        'domain': fields.String(required=True, description="Email domain", example="example.com")
+    }))
+    @organizations_ns.response(201, "Domain added")
+    @organizations_ns.response(400, "Invalid domain")
+    @organizations_ns.response(401, "Unauthorized")
+    @organizations_ns.response(403, "Permission denied")
+    @organizations_ns.response(409, "Domain already exists")
+    def post(self, org_id: int):
+        """Add a domain to an organization."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        payload = request.get_json(silent=True) or {}
+        domain = (payload.get("domain") or "").strip().lower()
+
+        if not domain:
+            return jsonify({"error": "Field 'domain' is required"}), 400
+
+        # Validate domain format
+        domain_regex = r'^[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$'
+        import re
+        if not re.match(domain_regex, domain):
+            return jsonify({"error": "Invalid domain format (e.g., example.com)"}), 400
+
+        session = db_session()
+        try:
+            # Check if organization exists
+            org = session.query(Organization).filter(Organization.id == org_id).first()
+            if not org:
+                return jsonify({"error": "Organization not found"}), 404
+
+            # Check if user is admin
+            membership = session.query(OrganizationMember).filter(
+                OrganizationMember.organization_id == org_id,
+                OrganizationMember.user_id == user_id,
+                OrganizationMember.member_role.in_(['admin', 'sub_admin'])
+            ).first()
+
+            if not membership:
+                return jsonify({"error": "Only admins can add domains"}), 403
+
+            # Check if domain already exists for this organization
+            existing = session.query(OrganizationDomain).filter(
+                OrganizationDomain.organization_id == org_id,
+                OrganizationDomain.domain == domain
+            ).first()
+
+            if existing:
+                return jsonify({"error": "Domain already exists for this organization"}), 409
+
+            # Check if domain is already used by another organization
+            domain_taken = session.query(OrganizationDomain).filter(
+                OrganizationDomain.domain == domain
+            ).first()
+
+            if domain_taken:
+                return jsonify({"error": f"Domain '{domain}' is already registered to another organization"}), 409
+
+            # Create new domain
+            new_domain = OrganizationDomain(
+                organization_id=org_id,
+                domain=domain
+            )
+            session.add(new_domain)
+            session.commit()
+            session.refresh(new_domain)
+
+            return jsonify({
+                "id": new_domain.id,
+                "organization_id": new_domain.organization_id,
+                "domain": new_domain.domain,
+                "created_at": new_domain.created_at.isoformat() if new_domain.created_at else None,
+                "message": "Domain added successfully"
+            }), 201
+
+        except IntegrityError:
+            session.rollback()
+            return jsonify({"error": "Domain already exists"}), 409
+        except SQLAlchemyError as exc:
+            session.rollback()
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+
+@organizations_ns.route("/domains/<int:domain_id>")
+class OrganizationDomainResource(Resource):
+    @organizations_ns.response(200, "Domain removed")
+    @organizations_ns.response(401, "Unauthorized")
+    @organizations_ns.response(403, "Permission denied")
+    @organizations_ns.response(404, "Domain not found")
+    def delete(self, domain_id: int):
+        """Remove a domain from an organization."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        session = db_session()
+        try:
+            # Get the domain
+            domain = session.query(OrganizationDomain).filter(
+                OrganizationDomain.id == domain_id
+            ).first()
+
+            if not domain:
+                return jsonify({"error": "Domain not found"}), 404
+
+            # Check if user is admin of the organization
+            membership = session.query(OrganizationMember).filter(
+                OrganizationMember.organization_id == domain.organization_id,
+                OrganizationMember.user_id == user_id,
+                OrganizationMember.member_role.in_(['admin', 'sub_admin'])
+            ).first()
+
+            if not membership:
+                return jsonify({"error": "Only admins can remove domains"}), 403
+
+            # Remove the domain
+            session.delete(domain)
+            session.commit()
+
+            return jsonify({"message": "Domain removed successfully"}), 200
+
+        except SQLAlchemyError as exc:
+            session.rollback()
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+
+# ========== ORGANIZATION ANALYTICS ENDPOINT ==========
+
+@organizations_ns.route("/organizations/<int:org_id>/analytics")
+class OrganizationAnalyticsResource(Resource):
+    @organizations_ns.response(200, "Analytics data retrieved")
+    @organizations_ns.response(401, "Unauthorized")
+    @organizations_ns.response(403, "Permission denied")
+    @organizations_ns.response(404, "Organization not found")
+    def get(self, org_id: int):
+        """Get analytics data for an organization (admin only)."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        session = db_session()
+        try:
+            # Check if organization exists
+            org = session.query(Organization).filter(Organization.id == org_id).first()
+            if not org:
+                return jsonify({"error": "Organization not found"}), 404
+
+            # Check if user is admin
+            membership = session.query(OrganizationMember).filter(
+                OrganizationMember.organization_id == org_id,
+                OrganizationMember.user_id == user_id,
+                OrganizationMember.member_role.in_(['admin', 'sub_admin'])
+            ).first()
+
+            if not membership:
+                return jsonify({"error": "Only admins can view analytics"}), 403
+
+            # Get member counts by role
+            members_by_role = {}
+            role_counts = session.query(
+                OrganizationMember.member_role,
+                func.count(OrganizationMember.id)
+            ).filter(
+                OrganizationMember.organization_id == org_id
+            ).group_by(OrganizationMember.member_role).all()
+
+            for role, count in role_counts:
+                members_by_role[role] = count
+
+            total_students = members_by_role.get("student", 0)
+            total_teachers = members_by_role.get("teacher", 0) + members_by_role.get("admin", 0) + members_by_role.get("sub_admin", 0)
+            total_members = sum(members_by_role.values())
+
+            # Get course counts
+            total_courses = session.query(Course).filter(
+                Course.organization_id == org_id
+            ).count()
+
+            published_courses = session.query(Course).filter(
+                Course.organization_id == org_id,
+                Course.status == "published"
+            ).count()
+
+            # Calculate average rating across courses
+            course_ids = [c.id for c in session.query(Course.id).filter(Course.organization_id == org_id).all()]
+            
+            avg_rating = 0
+            if course_ids:
+                rating_result = session.query(
+                    func.avg(CourseReview.rating)
+                ).filter(
+                    CourseReview.course_id.in_(course_ids)
+                ).scalar()
+                avg_rating = float(rating_result) if rating_result else 0
+
+            # Calculate completion rate (based on lesson progress)
+            completion_rate = 0
+            offering_ids = [o.id for o in session.query(CourseClass.id).filter(CourseClass.course_id.in_(course_ids)).all()]
+            
+            if offering_ids:
+                class_member_ids = [cm.id for cm in session.query(ClassMember.id).filter(
+                    ClassMember.course_class_id.in_(offering_ids),
+                    ClassMember.role == "student"
+                ).all()]
+                
+                if class_member_ids:
+                    total_progress = session.query(LessonProgress).filter(
+                        LessonProgress.class_member_id.in_(class_member_ids)
+                    ).count()
+                    completed_progress = session.query(LessonProgress).filter(
+                        LessonProgress.class_member_id.in_(class_member_ids),
+                        LessonProgress.status == "completed"
+                    ).count()
+                    completion_rate = (completed_progress / total_progress * 100) if total_progress > 0 else 0
+
+            # Calculate monthly growth (new members in last 30 days)
+            thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
+            new_members_last_30d = session.query(OrganizationMember).filter(
+                OrganizationMember.organization_id == org_id,
+                OrganizationMember.created_at >= thirty_days_ago
+            ).count()
+            
+            monthly_growth = (new_members_last_30d / total_members * 100) if total_members > 0 else 0
+
+            return jsonify({
+                "totalStudents": total_students,
+                "totalTeachers": total_teachers,
+                "totalCourses": total_courses,
+                "publishedCourses": published_courses,
+                "averageRating": round(avg_rating, 1),
+                "completionRate": round(completion_rate, 1),
+                "monthlyGrowth": round(monthly_growth, 1),
+                "pendingApprovals": 0,  # Can be implemented if needed
+            }), 200
+
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+
+# ========== DELETE ORGANIZATION ENDPOINT ==========
+
+@organizations_ns.route("/orgs/<int:org_id>")
+class OrganizationDeleteResource(Resource):
+    @organizations_ns.response(200, "Organization deleted")
+    @organizations_ns.response(401, "Unauthorized")
+    @organizations_ns.response(403, "Permission denied")
+    @organizations_ns.response(404, "Organization not found")
+    def delete(self, org_id: int):
+        """Delete an organization (admin only)."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        session = db_session()
+        try:
+            # Check if organization exists
+            org = session.query(Organization).filter(Organization.id == org_id).first()
+            if not org:
+                return jsonify({"error": "Organization not found"}), 404
+
+            # Check if user is admin
+            membership = session.query(OrganizationMember).filter(
+                OrganizationMember.organization_id == org_id,
+                OrganizationMember.user_id == user_id,
+                OrganizationMember.member_role == "admin"
+            ).first()
+
+            if not membership:
+                return jsonify({"error": "Only admin can delete the organization"}), 403
+
+            # Check if this is the only admin
+            admin_count = session.query(OrganizationMember).filter(
+                OrganizationMember.organization_id == org_id,
+                OrganizationMember.member_role == "admin"
+            ).count()
+            
+            if admin_count > 1:
+                # Transfer ownership or require other admins to be removed first
+                return jsonify({"error": "Remove other admins before deleting the organization"}), 400
+
+            # Delete all related data (cascade should handle most, but explicit for safety)
+            # Delete organization members
+            session.query(OrganizationMember).filter(OrganizationMember.organization_id == org_id).delete()
+            
+            # Delete organization domains
+            session.query(OrganizationDomain).filter(OrganizationDomain.organization_id == org_id).delete()
+            
+            # Delete organization verification requests
+            session.query(OrganizationVerificationRequest).filter(
+                OrganizationVerificationRequest.organization_id == org_id
+            ).delete()
+            
+            # Delete organization member invitations
+            session.query(OrganizationMemberInvitation).filter(
+                OrganizationMemberInvitation.organization_id == org_id
+            ).delete()
+            
+            # Finally delete the organization
+            session.delete(org)
+            session.commit()
+
+            return jsonify({"message": "Organization deleted successfully"}), 200
+
         except SQLAlchemyError as exc:
             session.rollback()
             return jsonify({"error": str(exc)}), 500
