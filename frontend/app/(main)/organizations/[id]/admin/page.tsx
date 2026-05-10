@@ -59,7 +59,6 @@ import { useRole } from "@/components/providers/RoleProvider";
 import { InviteMemberModal } from "@/components/organization/InviteMemberModal";
 import { toast } from "sonner";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
-import { getPendingTeacherRequests, approveTeacherRequest, rejectTeacherRequest, type TeacherRequest } from "@/lib/teacher-requests";
 
 interface OrganizationData {
   id: number;
@@ -137,8 +136,6 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
   const [editingMember, setEditingMember] = useState<Member | null>(null);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [activeTab, setActiveTab] = useState("members");
-
-  const [teacherRequests, setTeacherRequests] = useState<TeacherRequest[]>([]);
   
   const [settingsForm, setSettingsForm] = useState({
     name: "",
@@ -460,9 +457,6 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
         .select("id, created_by, title, description, thumbnail, status, created_at")
         .eq("organization_id", organizationId);
 
-      // Load teacher requests
-      await loadTeacherRequests();
-
       if (orgCourses) {
         const formattedCourses: Course[] = await Promise.all(orgCourses.map(async (c: any) => {
           let instructorName = "Unknown Instructor";
@@ -648,71 +642,6 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
     
     checkSetupStatus();
   }, [organizationId]);
-
-  // Load teacher requests - Using the library instead of API endpoint
-  const loadTeacherRequests = async () => {
-    try {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) return;
-      
-      // Use the library function to get pending requests
-      const pendingRequests = await getPendingTeacherRequests(organizationId);
-      setTeacherRequests(pendingRequests);
-      
-    } catch (error) {
-      console.error("Error loading teacher requests:", error);
-      setTeacherRequests([]);
-    }
-  };
-
-  // Approve teacher request - Using the library
-  const handleApproveTeacherRequest = async (requestId: string) => {
-    try {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) {
-        toast.error("You must be logged in");
-        return;
-      }
-      
-      await approveTeacherRequest(requestId, user.id);
-      toast.success("Teacher request approved. User is now a teacher.");
-      
-      // Refresh the lists
-      await loadTeacherRequests();
-      await fetchMembers();
-      
-    } catch (error: any) {
-      console.error("Error approving teacher request:", error);
-      toast.error(error.message || "Failed to approve teacher request");
-    }
-  };
-
-  // Reject teacher request - Using the library
-  const handleRejectTeacherRequest = async (requestId: string) => {
-    try {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) {
-        toast.error("You must be logged in");
-        return;
-      }
-      
-      await rejectTeacherRequest(requestId, user.id);
-      toast.success("Teacher request rejected");
-      
-      // Refresh the list
-      await loadTeacherRequests();
-      
-    } catch (error: any) {
-      console.error("Error rejecting teacher request:", error);
-      toast.error(error.message || "Failed to reject teacher request");
-    }
-  };
 
   const handleRemoveMember = async (memberId: string, memberName: string, memberRole: string) => {
     if (memberRole === "admin") {
@@ -961,10 +890,6 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
             <BookOpen className="w-4 h-4 mr-2" />
             Courses ({courses.length})
           </TabsTrigger>
-          <TabsTrigger value="teacher-requests" className="rounded-xl px-6 py-2.5">
-            <UserPlus className="w-4 h-4 mr-2" />
-            Teacher Requests ({teacherRequests.filter(r => r.status === "pending").length})
-          </TabsTrigger>
           <TabsTrigger value="analytics" className="rounded-xl px-6 py-2.5">
             <BarChart3 className="w-4 h-4 mr-2" />
             Analytics
@@ -1156,42 +1081,6 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
                   </div>
                 ))}
               </div>
-            </div>
-          </GlowCard>
-        </TabsContent>
-
-        <TabsContent value="teacher-requests">
-          <GlowCard>
-            <div className="p-6">
-              <h2 className="text-xl font-semibold text-white mb-4">Teacher Role Requests</h2>
-              {teacherRequests.filter(r => r.status === "pending").length === 0 ? (
-                <p className="text-gray-400 text-center py-8">No pending teacher requests</p>
-              ) : (
-                <div className="space-y-4">
-                  {teacherRequests.filter(r => r.status === "pending").map((request) => (
-                    <div key={request.id} className="flex items-center justify-between p-4 bg-gray-800/30 rounded-lg">
-                      <div>
-                        <p className="font-semibold text-white">{request.user?.first_name} {request.user?.last_name}</p>
-                        <p className="text-sm text-gray-400">{request.user?.email}</p>
-                        {request.message && (
-                          <p className="text-sm text-gray-500 mt-1">"{request.message}"</p>
-                        )}
-                        <p className="text-xs text-gray-500 mt-1">
-                          Requested: {new Date(request.requested_at).toLocaleDateString()}
-                        </p>
-                      </div>
-                      <div className="flex gap-2">
-                        <GlowButton size="sm" variant="primary" onClick={() => handleApproveTeacherRequest(request.id)}>
-                          Approve
-                        </GlowButton>
-                        <GlowButton size="sm" variant="outline" onClick={() => handleRejectTeacherRequest(request.id)}>
-                          Reject
-                        </GlowButton>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           </GlowCard>
         </TabsContent>

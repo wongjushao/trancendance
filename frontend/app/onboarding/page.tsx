@@ -521,16 +521,6 @@ export default function OnboardingPage() {
       organizationName: detectedOrg?.name || null,
     });
 
-    // If user selected teacher role AND has organization matched via domain, create teacher role directly
-    if (formData.desiredRole === 'teacher' && formData.selectedOrganizationId && detectedOrg) {
-      // Directly add as teacher in organization_members
-      await createTeacherDirect(user.id, formData.selectedOrganizationId);
-    } 
-    // If teacher role requested but no domain match, create teacher request
-    else if (formData.desiredRole === 'teacher' && formData.selectedOrganizationId && !detectedOrg) {
-      await createTeacherRequest(user.id, formData.selectedOrganizationId);
-    }
-
     // Upload avatar if one was selected
     if (formData.avatar) {
       console.log('[onboarding] Uploading avatar...');

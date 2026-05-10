@@ -53,7 +53,6 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
-import { useRole } from "@/components/providers/RoleProvider";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 
 // ============ TYPES ============
@@ -125,11 +124,12 @@ interface Lesson {
 export default function AssignmentsPage() {
   const router = useRouter();
   const supabase = getSupabaseBrowserClient();
-  const { roleData } = useRole();
+
+  const [userRole, setUserRole] = useState<string | null>(null);
+  const [loadingAuth, setLoadingAuth] = useState(true);
   
   // Check if user has teacher or admin capabilities
-  const canTeach = roleData.role === "teacher" || roleData.role === "admin";
-  
+  const canTeach = userRole === "teacher" || userRole === "admin";
   // State
   const [activeTab, setActiveTab] = useState<"learning" | "grading">("learning");
   const [loading, setLoading] = useState(true);
@@ -189,6 +189,69 @@ export default function AssignmentsPage() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [assignmentToDelete, setAssignmentToDelete] = useState<TeacherAssignment | null>(null);
   
+
+    // Fetch user role from organization_members
+    useEffect(() => {
+      const fetchUserRoleFromOrganization = async () => {
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
+          
+          if (!user) {
+            setLoadingAuth(false);
+            return;
+          }
+          
+          // First, get the user's organization memberships
+          const { data: orgMembers, error: orgError } = await supabase
+            .from("organization_members")
+            .select(`
+              member_role,
+              organization_id,
+              organizations!inner (
+                id,
+                name
+              )
+            `)
+            .eq("user_id", user.id);
+          
+          if (orgError) {
+            console.error("Error fetching organization memberships:", orgError);
+            setUserRole(null);
+          } else if (orgMembers && orgMembers.length > 0) {
+            // Get the first organization's role (or you might want to get the active organization)
+            console.log("User's organization roles:", orgMembers);
+            setUserRole(orgMembers[0].member_role);
+          } else {
+            // Check if user is a system admin (if you have system-wide roles)
+            const { data: userRoles, error: rolesError } = await supabase
+              .from("user_roles")
+              .select(`
+                role_id,
+                roles!inner (
+                  name
+                )
+              `)
+              .eq("user_id", user.id);
+            
+            if (!rolesError && userRoles && userRoles.length > 0) {
+              const systemRole = userRoles[0].roles?.name;
+              setUserRole(systemRole || null);
+            } else {
+              // Default to student if no role found
+              setUserRole("student");
+            }
+          }
+        } catch (error) {
+          console.error("Error fetching user role:", error);
+          setUserRole("student");
+        } finally {
+          setLoadingAuth(false);
+        }
+      };
+      
+      fetchUserRoleFromOrganization();
+    }, [supabase]);
+
   // Load lessons when course changes (teacher form)
   useEffect(() => {
     if (assignmentForm.course_id && assignmentModalOpen) {
@@ -198,15 +261,18 @@ export default function AssignmentsPage() {
     }
   }, [assignmentForm.course_id, assignmentModalOpen]);
   
-  // Load data based on active tab
+
+  // Load data based on active tab - MOVED BEFORE CONDITIONAL RETURNS
   useEffect(() => {
-    if (activeTab === "learning") {
-      fetchStudentAssignments();
-    } else if (activeTab === "grading" && canTeach) {
-      fetchTeacherAssignments();
+    if (!loadingAuth) {
+      if (activeTab === "learning") {
+        fetchStudentAssignments();
+      } else if (activeTab === "grading" && canTeach) {
+        fetchTeacherAssignments();
+      }
     }
-  }, [activeTab]);
-  
+  }, [activeTab, loadingAuth, canTeach]);
+
   // ============ STUDENT FUNCTIONS ============
   
   const fetchStudentAssignments = async () => {
@@ -286,7 +352,6 @@ export default function AssignmentsPage() {
       let submissionsMap = new Map<number, Submission>();
 
       if (assignmentIds.length > 0) {
-        // Get user's submissions for all assignments in one query
         const { data: submissionsData, error: subError } = await supabase
           .from("submissions")
           .select(`
@@ -310,12 +375,34 @@ export default function AssignmentsPage() {
         }
       }
       
-      // Format assignments with status
+      // Format assignments with status - FIXED TIMEZONE HANDLING
+      const now = new Date();
+      // Set to start of day for fair comparison, or use UTC
+      const nowUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+      
       const formattedAssignments: StudentAssignment[] = (assignmentsData || []).map(assignment => {
         const submission = submissionsMap.get(assignment.id);
-        const dueDate = new Date(assignment.due_at);
-        const now = new Date();
+        
+        // Parse due date - ensure it's compared correctly
+        let dueDate = new Date(assignment.due_at);
+        let isOverdue = false;
+        
+        if (assignment.due_at) {
+          // Compare dates without time for fairness, or use UTC
+          const dueDateUTC = new Date(Date.UTC(dueDate.getUTCFullYear(), dueDate.getUTCMonth(), dueDate.getUTCDate()));
+          isOverdue = dueDateUTC < nowUTC;
+        }
+        
         let status: StudentAssignment["status"] = "pending";
+        
+        console.log(`Assignment ${assignment.id}:`, {
+          title: assignment.title,
+          hasSubmission: !!submission,
+          submissionGrade: submission?.grade,
+          dueDate: assignment.due_at,
+          isOverdue,
+          now: nowUTC.toISOString()
+        });
         
         if (submission) {
           if (submission.grade !== null) {
@@ -323,8 +410,10 @@ export default function AssignmentsPage() {
           } else {
             status = "submitted";
           }
-        } else if (dueDate < now) {
+        } else if (isOverdue) {
           status = "overdue";
+        } else {
+          status = "pending";
         }
         
         return {
@@ -345,6 +434,12 @@ export default function AssignmentsPage() {
           content_url: submission?.content_url,
           text_content: submission?.text_content,
         };
+      });
+      
+      // DEBUG: Log all assignments and their status
+      console.log("=== ALL ASSIGNMENTS WITH STATUS ===");
+      formattedAssignments.forEach(a => {
+        console.log(`- ${a.title}: status=${a.status}, due=${a.due_at}, hasSubmission=${!!a.submission_id}`);
       });
       
       setStudentAssignments(formattedAssignments);
@@ -672,28 +767,52 @@ export default function AssignmentsPage() {
   // ============ STUDENT SUBMISSION FUNCTIONS ============
   
   const handleViewAssignment = (assignment: StudentAssignment) => {
+    console.log("=== handleViewAssignment called ===");
+    console.log("Assignment:", { 
+      id: assignment.id, 
+      title: assignment.title, 
+      status: assignment.status,
+      statusCheck: assignment.status === "pending" || assignment.status === "overdue"
+    });
+    
     // Only open modal for pending or overdue assignments (not submitted/graded)
     if (assignment.status === "pending" || assignment.status === "overdue") {
+      console.log("Opening modal for assignment:", assignment.id);
+      
       setSelectedAssignment(assignment);
-      setExistingSubmission(assignment.submission_id ? {
-        id: assignment.submission_id!,
-        assignment_id: assignment.id,
-        content_url: assignment.content_url || null,
-        text_content: assignment.text_content || null,
-        grade: assignment.grade || null,
-        feedback: assignment.feedback || null,
-        submitted_at: assignment.submitted_at || "",
-        user_id: "",
-        user_name: "",
-        user_email: "",
-        status: assignment.grade !== null ? "graded" : "submitted",
-      } : null);
-      setTextContent(assignment.text_content || "");
+      
+      if (assignment.submission_id) {
+        setExistingSubmission({
+          id: assignment.submission_id!,
+          assignment_id: assignment.id,
+          content_url: assignment.content_url || null,
+          text_content: assignment.text_content || null,
+          grade: assignment.grade || null,
+          feedback: assignment.feedback || null,
+          submitted_at: assignment.submitted_at || "",
+          user_id: "",
+          user_name: "",
+          user_email: "",
+          status: assignment.grade !== null ? "graded" : "submitted",
+        });
+        setTextContent(assignment.text_content || "");
+      } else {
+        setExistingSubmission(null);
+        setTextContent("");
+      }
+      
       setUploadedFile(null);
       setShowResubmit(false);
       setSubmissionModalOpen(true);
+    } else {
+      console.log("NOT opening modal. Status is:", assignment.status);
+      // Optional toast for user feedback
+      if (assignment.status === "submitted") {
+        toast.info("You've already submitted this assignment");
+      } else if (assignment.status === "graded") {
+        toast.info(`This assignment has been graded: ${assignment.grade}/${assignment.points}`);
+      }
     }
-    // For submitted/graded assignments, do nothing (they show feedback in card)
   };
   
   const handleFileUpload = async (file: File) => {
@@ -938,6 +1057,14 @@ export default function AssignmentsPage() {
   const filteredStudentAssignments = getFilteredStudentAssignments();
   const filteredTeacherAssignments = getFilteredTeacherAssignments();
   
+  if (loadingAuth) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <Loader2 className="w-8 h-8 animate-spin text-purple-500" />
+      </div>
+    );
+  }
+
   if (loading && activeTab === "learning" && studentAssignments.length === 0) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -946,6 +1073,7 @@ export default function AssignmentsPage() {
     );
   }
   
+
   return (
     <div className="container mx-auto px-4 py-8">
       {/* Header */}
@@ -1087,91 +1215,88 @@ export default function AssignmentsPage() {
                 const isOverdue = assignment.status === "overdue";
                 const dueDate = new Date(assignment.due_at);
                 const isDueSoon = dueDate.getTime() - new Date().getTime() < 3 * 24 * 60 * 60 * 1000 && dueDate > new Date();
+                const isClickable = assignment.status === "pending" || assignment.status === "overdue";
                 
                 return (
-                  <GlowCard
+                  <div
                     key={assignment.id}
-                    className={`transition-all duration-200 ${
-                      assignment.status === "pending" || assignment.status === "overdue"
-                        ? "cursor-pointer hover:shadow-lg" 
-                        : "cursor-default"
-                    }`}
+                    className={`transition-all duration-200 ${isClickable ? "cursor-pointer hover:shadow-lg" : "cursor-default"}`}
                     onClick={() => {
-                      if (assignment.status === "pending" || assignment.status === "overdue") {
+                      if (isClickable) {
                         handleViewAssignment(assignment);
                       }
                     }}
                   >
-                    <div className="p-6">
-                      <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-2 flex-wrap">
-                            <h3 className="text-lg font-semibold text-white hover:text-purple-400 transition-colors">
-                              {assignment.title}
-                            </h3>
-                            <Badge className={`${statusConfig.bg} ${statusConfig.color} border-0`}>
-                              <StatusIcon className="w-3 h-3 mr-1" />
-                              {statusConfig.label}
-                            </Badge>
-                            {isDueSoon && !isOverdue && assignment.status === "pending" && (
-                              <Badge className="bg-orange-400/10 text-orange-400 border-0">
-                                Due Soon
+                    <GlowCard>
+                      <div className="p-6">
+                        <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-2 flex-wrap">
+                              <h3 className="text-lg font-semibold text-white hover:text-purple-400 transition-colors">
+                                {assignment.title}
+                              </h3>
+                              <Badge className={`${statusConfig.bg} ${statusConfig.color} border-0`}>
+                                <StatusIcon className="w-3 h-3 mr-1" />
+                                {statusConfig.label}
                               </Badge>
+                              {isDueSoon && !isOverdue && assignment.status === "pending" && (
+                                <Badge className="bg-orange-400/10 text-orange-400 border-0">
+                                  Due Soon
+                                </Badge>
+                              )}
+                            </div>
+                            
+                            {/* Rest of your card content stays the same */}
+                            {assignment.description && (
+                              <div 
+                                className="text-gray-400 text-sm mb-3 prose prose-invert prose-sm max-w-none line-clamp-2"
+                                dangerouslySetInnerHTML={{ __html: assignment.description }}
+                              />
+                            )}
+                            
+                            <div className="flex flex-wrap gap-4 text-sm">
+                              <div className="flex items-center gap-1 text-gray-400">
+                                <BookOpen className="w-4 h-4" />
+                                <span>{assignment.course_title}</span>
+                              </div>
+                              <div className="flex items-center gap-1 text-gray-400">
+                                <FileText className="w-4 h-4" />
+                                <span>{assignment.lesson_title}</span>
+                              </div>
+                              <div className={`flex items-center gap-1 ${isOverdue ? 'text-red-400' : isDueSoon ? 'text-orange-400' : 'text-gray-400'}`}>
+                                <Calendar className="w-4 h-4" />
+                                <span>Due: {dueDate.toLocaleDateString()}</span>
+                              </div>
+                              <div className="flex items-center gap-1 text-gray-400">
+                                <Clock className="w-4 h-4" />
+                                <span>{assignment.points} points</span>
+                              </div>
+                            </div>
+                            
+                            {assignment.status === "graded" && assignment.grade !== undefined && (
+                              <>
+                                <div className="mt-3 flex items-center gap-2">
+                                  <Badge className="bg-green-500/20 text-green-400">
+                                    Grade: {assignment.grade}/{assignment.points} ({Math.round((assignment.grade / assignment.points) * 100)}%)
+                                  </Badge>
+                                </div>
+                                {assignment.feedback && (
+                                  <div className="mt-2 text-sm text-gray-300">
+                                    <span className="text-gray-400">Feedback: </span>
+                                    {assignment.feedback}
+                                  </div>
+                                )}
+                              </>
                             )}
                           </div>
                           
-                          {/* FIXED: Render HTML description properly */}
-                          {assignment.description && (
-                            <div 
-                              className="text-gray-400 text-sm mb-3 prose prose-invert prose-sm max-w-none line-clamp-2"
-                              dangerouslySetInnerHTML={{ __html: assignment.description }}
-                            />
-                          )}
-                          
-                          <div className="flex flex-wrap gap-4 text-sm">
-                            <div className="flex items-center gap-1 text-gray-400">
-                              <BookOpen className="w-4 h-4" />
-                              <span>{assignment.course_title}</span>
-                            </div>
-                            <div className="flex items-center gap-1 text-gray-400">
-                              <FileText className="w-4 h-4" />
-                              <span>{assignment.lesson_title}</span>
-                            </div>
-                            <div className={`flex items-center gap-1 ${isOverdue ? 'text-red-400' : isDueSoon ? 'text-orange-400' : 'text-gray-400'}`}>
-                              <Calendar className="w-4 h-4" />
-                              <span>Due: {dueDate.toLocaleDateString()}</span>
-                            </div>
-                            <div className="flex items-center gap-1 text-gray-400">
-                              <Clock className="w-4 h-4" />
-                              <span>{assignment.points} points</span>
-                            </div>
+                          <div className="flex items-center gap-2">
+                            <ChevronRight className="w-5 h-5 text-gray-400" />
                           </div>
-                          
-                          {assignment.status === "graded" && assignment.grade !== undefined && (
-                            <>
-                              <div className="mt-3 flex items-center gap-2">
-                                <Badge className="bg-green-500/20 text-green-400">
-                                  Grade: {assignment.grade}/{assignment.points} ({Math.round((assignment.grade / assignment.points) * 100)}%)
-                                </Badge>
-                              </div>
-                              {/* ADD THIS - Show feedback if it exists */}
-                              {assignment.feedback && (
-                                <div className="mt-2 text-sm text-gray-300">
-                                  <span className="text-gray-400">Feedback: </span>
-                                  {assignment.feedback}
-                                </div>
-                              )}
-                            </>
-                          )}
-                          
-                        </div>
-                        
-                        <div className="flex items-center gap-2">
-                          <ChevronRight className="w-5 h-5 text-gray-400" />
                         </div>
                       </div>
-                    </div>
-                  </GlowCard>
+                    </GlowCard>
+                  </div>
                 );
               })
             )}

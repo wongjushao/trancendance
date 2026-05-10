@@ -13,7 +13,6 @@ import { useRole } from "@/components/providers/RoleProvider";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 import { toast } from "sonner";
 import { Label } from "@/components/ui/label"; // ADD THIS
-import { createTeacherRequest, getUserTeacherRequestStatus, type TeacherRequest } from "@/lib/teacher-requests"; // ADD TYPE
 
 // Remove the Star function at the end - we're importing it now
 
@@ -62,53 +61,12 @@ export default function OrganizationPublicPage({ params }: PageProps) {
   const [courses, setCourses] = useState<Course[]>([]);
   const [userRole, setUserRole] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [teacherRequest, setTeacherRequest] = useState<TeacherRequest | null>(null);
-  const [showRequestTeacherModal, setShowRequestTeacherModal] = useState(false);
-  const [teacherRequestMessage, setTeacherRequestMessage] = useState("");
-  const [submittingTeacherRequest, setSubmittingTeacherRequest] = useState(false);
   const [stats, setStats] = useState({
     totalMembers: 0,
     totalCourses: 0,
     totalStudents: 0,
     avgRating: 0,
   });
-
-  // Load teacher request status
-  useEffect(() => {
-    if (currentUserId && userRole === "student") {
-      loadTeacherRequestStatus();
-    }
-  }, [currentUserId, userRole, organizationId]);
-
-  const loadTeacherRequestStatus = async () => {
-    if (!currentUserId) return;
-    try {
-      const status = await getUserTeacherRequestStatus(currentUserId, organizationId);
-      setTeacherRequest(status);
-    } catch (error) {
-      console.error("Error loading teacher request status:", error);
-    }
-  };
-
-  const handleRequestTeacher = async () => {
-    if (!currentUserId) {
-      toast.error("Please login to request teacher role");
-      return;
-    }
-    
-    setSubmittingTeacherRequest(true);
-    try {
-      await createTeacherRequest(currentUserId, organizationId, teacherRequestMessage || undefined);
-      toast.success("Teacher request submitted! The organization admin will review your request.");
-      setShowRequestTeacherModal(false);
-      setTeacherRequestMessage("");
-      await loadTeacherRequestStatus();
-    } catch (error: any) {
-      toast.error(error.message || "Failed to submit teacher request");
-    } finally {
-      setSubmittingTeacherRequest(false);
-    }
-  };
 
   useEffect(() => {
     loadOrganizationData();
@@ -317,7 +275,7 @@ export default function OrganizationPublicPage({ params }: PageProps) {
     }
   };
 
-  const isAdminOrTeacher = userRole === "admin" || userRole === "sub_admin" || userRole === "teacher";
+  const isAdmin = userRole === "admin" || userRole === "sub_admin";
 
   if (loading) {
     return (
@@ -364,37 +322,13 @@ export default function OrganizationPublicPage({ params }: PageProps) {
                 )}
               </div>
               
-              {isAdminOrTeacher && (
+              {isAdmin && (
                 <Link href={`/organizations/${organization.id}/admin`}>
                   <GlowButton variant="secondary" className="px-4 h-11">
                     <Crown className="w-4 h-4 mr-2" />
                     Admin Settings
                   </GlowButton>
                 </Link>
-              )}
-
-              {/* Add this block for student teacher requests */}
-              {userRole === "student" && (
-                <>
-                  {!teacherRequest ? (
-                    <GlowButton 
-                      variant="outline" 
-                      className="px-4 h-11"
-                      onClick={() => setShowRequestTeacherModal(true)}
-                    >
-                      <UserPlus className="w-4 h-4 mr-2" />
-                      Request to become Teacher
-                    </GlowButton>
-                  ) : teacherRequest.status === "pending" ? (
-                    <div className="px-4 py-2 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-yellow-400 text-sm">
-                      Teacher request pending approval
-                    </div>
-                  ) : teacherRequest.status === "rejected" ? (
-                    <div className="px-4 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
-                      Teacher request was rejected
-                    </div>
-                  ) : null}
-                </>
               )}
 
             </div>
@@ -522,66 +456,7 @@ export default function OrganizationPublicPage({ params }: PageProps) {
         </TabsContent>
       </Tabs>
 
-      {/* ========== REQUEST TEACHER MODAL - ADD THIS HERE ========== */}
-      {showRequestTeacherModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <div className="bg-gray-900 rounded-xl max-w-md w-full border border-purple-500/30 shadow-2xl">
-            <div className="flex justify-between items-center p-4 border-b border-gray-800">
-              <h3 className="text-xl font-semibold text-white">Request Teacher Role</h3>
-              <button
-                onClick={() => {
-                  setShowRequestTeacherModal(false);
-                  setTeacherRequestMessage("");
-                }}
-                className="p-1 rounded-lg hover:bg-gray-800 transition-colors"
-              >
-                <X className="w-5 h-5 text-gray-400" />
-              </button>
-            </div>
-            
-            <div className="p-6 space-y-4">
-              <p className="text-gray-400 text-sm">
-                As a teacher, you'll be able to create courses, manage assignments, and invite students 
-                in <span className="text-purple-400 font-medium">{organization?.name}</span>.
-              </p>
-              
-              <div>
-                <Label className="text-gray-300 mb-2 block">Message (Optional)</Label>
-                <textarea
-                  value={teacherRequestMessage}
-                  onChange={(e) => setTeacherRequestMessage(e.target.value)}
-                  placeholder="Why do you want to become a teacher?"
-                  rows={3}
-                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 resize-none"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  This message will be sent to the organization admin for review.
-                </p>
-              </div>
-            </div>
-            
-            <div className="flex gap-3 p-4 border-t border-gray-800">
-              <GlowButton 
-                variant="outline" 
-                onClick={() => {
-                  setShowRequestTeacherModal(false);
-                  setTeacherRequestMessage("");
-                }} 
-                fullWidth
-              >
-                Cancel
-              </GlowButton>
-              <GlowButton 
-                onClick={handleRequestTeacher} 
-                isLoading={submittingTeacherRequest} 
-                fullWidth
-              >
-                Submit Request
-              </GlowButton>
-            </div>
-          </div>
-        </div>
-      )}
+ 
     </div>
   );
 }
