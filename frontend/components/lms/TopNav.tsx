@@ -2,9 +2,8 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { Bell, Search, User, ChevronDown, Settings, CreditCard, LogOut, Award, BookOpen, UserCircle, AlertTriangle, X, Building2 } from "lucide-react";
+import { Bell, Search, User, ChevronDown, Settings, LogOut, UserCircle, AlertTriangle, X, Building2 } from "lucide-react";
 import { Input } from "../ui/input";
-import SignOutButton from "../SignOutButton";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 import { useAvatar } from "@/lib/useAvatar";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
@@ -58,8 +57,7 @@ const ConfirmSignOutModal = ({ isOpen, onClose, onConfirm }: { isOpen: boolean; 
 
 export function TopNav({ user }: TopNavProps) {
   const router = useRouter();
-  const { roleData, setRole } = useRole();
-  const [activeOrgId, setActiveOrgId] = useState<number | null>(roleData.organizationId);
+  const { roleData } = useRole();
   const { avatarUrl, refreshAvatar } = useAvatar();
   const [notifOpen, setNotifOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -83,40 +81,46 @@ export function TopNav({ user }: TopNavProps) {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLDivElement>(null);
 
-  // Fetch profile data for name display
+  // Helper to get auth token
+  const getAuthToken = async () => {
+    const supabase = getSupabaseBrowserClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token;
+  };
+
+  // Fetch profile data from backend API
   const fetchProfileData = async () => {
     try {
-      const supabase = getSupabaseBrowserClient();
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("first_name, last_name, username")
-        .eq("id", user.id)
-        .single();
+      const token = await getAuthToken();
+      if (!token) return;
 
-      if (!error && data) {
-        setProfileData(data);
-        
-        // Set display name with priority: first_name + last_name > first_name > username > email
-        if (data.first_name && data.last_name) {
-          setProfileName(`${data.first_name} ${data.last_name}`);
-        } else if (data.first_name) {
-          setProfileName(data.first_name);
-        } else if (data.username) {
-          setProfileName(data.username);
-        } else {
-          setProfileName(user.email?.split('@')[0] || "User");
+      const response = await fetch('/api/auth-service/profile', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
         }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch profile');
+      }
+
+      const data = await response.json();
+      setProfileData({
+        first_name: data.first_name || null,
+        last_name: data.last_name || null,
+        username: data.username || null,
+      });
+      
+      // Set display name with priority: first_name + last_name > first_name > username > email
+      if (data.first_name && data.last_name) {
+        setProfileName(`${data.first_name} ${data.last_name}`);
+      } else if (data.first_name) {
+        setProfileName(data.first_name);
+      } else if (data.username) {
+        setProfileName(data.username);
       } else {
-        // Fallback to user metadata
-        const metaFirst = user.user_metadata?.first_name;
-        const metaLast = user.user_metadata?.last_name;
-        if (metaFirst && metaLast) {
-          setProfileName(`${metaFirst} ${metaLast}`);
-        } else if (metaFirst) {
-          setProfileName(metaFirst);
-        } else {
-          setProfileName(user.email?.split('@')[0] || "User");
-        }
+        setProfileName(user.email?.split('@')[0] || "User");
       }
     } catch (error) {
       console.error("Error fetching profile:", error);
@@ -124,7 +128,7 @@ export function TopNav({ user }: TopNavProps) {
     }
   };
 
-  // Handle sign out with confirmation
+  // Handle sign out - use backend API for account deletion if needed, otherwise Supabase auth is fine
   const handleSignOut = async () => {
     setIsSigningOut(true);
     try {
@@ -134,7 +138,7 @@ export function TopNav({ user }: TopNavProps) {
       localStorage.removeItem("sidebar_collapsed");
       localStorage.removeItem("user_role_data");
       
-      // Sign out from Supabase
+      // Sign out from Supabase (this is the only direct auth call - acceptable as it's the auth provider)
       const { error } = await supabase.auth.signOut();
       
       if (error) throw error;
@@ -188,6 +192,7 @@ export function TopNav({ user }: TopNavProps) {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  // User search - already using backend API
   useEffect(() => {
     const query = searchQuery.trim();
     if (query.length < 2) {
@@ -200,16 +205,15 @@ export function TopNav({ user }: TopNavProps) {
     const timeoutId = window.setTimeout(async () => {
       setSearchLoading(true);
       try {
-        const supabase = getSupabaseBrowserClient();
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session?.access_token) {
+        const token = await getAuthToken();
+        if (!token) {
           setUserResults([]);
           return;
         }
 
         const response = await fetch(`/api/auth-service/profile/search?q=${encodeURIComponent(query)}`, {
           headers: {
-            Authorization: `Bearer ${session.access_token}`,
+            Authorization: `Bearer ${token}`,
           },
           signal: controller.signal,
         });
@@ -443,7 +447,7 @@ export function TopNav({ user }: TopNavProps) {
                     </div>
                   </div>
 
-                  {/* Menu Items - Removed "My Learning" option */}
+                  {/* Menu Items */}
                   <div className="py-2">
                     <Link
                       href="/profile"

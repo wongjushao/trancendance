@@ -36,6 +36,12 @@ export function Sidebar({ user }: SidebarProps) {
     last_name: null,
   });
 
+  const getAuthToken = async () => {
+    const supabase = getSupabaseBrowserClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token;
+  };
+
   // Helper function to determine if a link is active
   const getIsActive = (href: string) => {
     // For the main Organizations page - only highlight on exact match
@@ -72,49 +78,36 @@ export function Sidebar({ user }: SidebarProps) {
     }
   };
 
-  // Fetch profile data for name display
-  useEffect(() => {
-    const fetchProfileData = async () => {
-      try {
-        const supabase = getSupabaseBrowserClient();
-        const { data, error } = await supabase
-          .from("profiles")
-          .select("first_name, last_name")
-          .eq("id", user.id)
-          .single();
+  const fetchProfileData = async () => {
+    try {
+      const token = await getAuthToken();
+      if (!token) return;
 
-        if (!error && data) {
-          setProfileData(data);
-        }
-      } catch (error) {
-        console.error("Error fetching profile:", error);
+      const response = await fetch('/api/auth-service/profile', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setProfileData({
+          first_name: data.first_name || null,
+          last_name: data.last_name || null,
+        });
       }
-    };
+    } catch (error) {
+      console.error("Error fetching profile:", error);
+    }
+  };
 
+  // Initial load
+  useEffect(() => {
     fetchProfileData();
   }, [user.id]);
 
-  // Listen for profile updates to refresh avatar and user data
+  // Listen for updates
   useEffect(() => {
-    const handleProfileUpdate = async () => {
-      try {
-        const supabase = getSupabaseBrowserClient();
-        const { data, error } = await supabase
-          .from("profiles")
-          .select("first_name, last_name")
-          .eq("id", user.id)
-          .single();
-
-        if (!error && data) {
-          setProfileData(data);
-        }
-      } catch (error) {
-        console.error("Error refreshing profile:", error);
-      }
-    };
-
-    window.addEventListener("profile-updated", handleProfileUpdate);
-    return () => window.removeEventListener("profile-updated", handleProfileUpdate);
+    window.addEventListener("profile-updated", fetchProfileData);
+    return () => window.removeEventListener("profile-updated", fetchProfileData);
   }, [user.id]);
 
   const getInitials = () => {

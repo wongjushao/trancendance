@@ -3,9 +3,6 @@
 ## Files with Supabase calls:
 
 
-frontend/components/assignment/AssignmentSubmission.tsx
-frontend/components/lms/TopNav.tsx
-frontend/components/lms/Sidebar.tsx
 frontend/components/course/QuizComponent.tsx
 frontend/components/course/CoursePreview.tsx
 frontend/components/course/CourseProgress.tsx
@@ -74,35 +71,3 @@ frontend/lib/mfa-api.ts
 frontend/lib/useAvatar.ts
 frontend/lib/refresh-role.ts
 frontend/lib/onboarding.ts
-
-## Sample of actual calls:
-import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
-import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
-  const supabase = getSupabaseBrowserClient();
-import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
-  const supabase = getSupabaseBrowserClient();
-import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
-  const supabase = getSupabaseBrowserClient();
-      const { data: { user: currentUser } } = await supabase.auth.getUser();
-import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
-      const supabase = getSupabaseBrowserClient();
-      const { data: { session } } = await supabase.auth.getSession();
-import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
-import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
-      const supabase = getSupabaseBrowserClient();
-      const supabase = getSupabaseBrowserClient();
-      const { error } = await supabase.auth.signOut();
-        const supabase = getSupabaseBrowserClient();
-        const { data: { session } } = await supabase.auth.getSession();
-import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
-        const supabase = getSupabaseBrowserClient();
-        const supabase = getSupabaseBrowserClient();
-import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
-  const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
