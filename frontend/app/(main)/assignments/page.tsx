@@ -42,6 +42,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription
 } from "@/components/ui/dialog";
 import {
   Select,
@@ -130,7 +131,7 @@ export default function AssignmentsPage() {
   const canTeach = roleData.role === "teacher" || roleData.role === "admin";
   
   // State
-  const [activeTab, setActiveTab] = useState<"learning" | "teaching">("learning");
+  const [activeTab, setActiveTab] = useState<"learning" | "grading">("learning");
   const [loading, setLoading] = useState(true);
   
   // Student view state
@@ -201,7 +202,7 @@ export default function AssignmentsPage() {
   useEffect(() => {
     if (activeTab === "learning") {
       fetchStudentAssignments();
-    } else if (activeTab === "teaching" && canTeach) {
+    } else if (activeTab === "grading" && canTeach) {
       fetchTeacherAssignments();
     }
   }, [activeTab]);
@@ -671,10 +672,8 @@ export default function AssignmentsPage() {
   // ============ STUDENT SUBMISSION FUNCTIONS ============
   
   const handleViewAssignment = (assignment: StudentAssignment) => {
-    if (assignment.status === "graded") {
-      setResultAssignment(assignment);
-      setResultModalOpen(true);
-    } else {
+    // Only open modal for pending or overdue assignments (not submitted/graded)
+    if (assignment.status === "pending" || assignment.status === "overdue") {
       setSelectedAssignment(assignment);
       setExistingSubmission(assignment.submission_id ? {
         id: assignment.submission_id!,
@@ -694,6 +693,7 @@ export default function AssignmentsPage() {
       setShowResubmit(false);
       setSubmissionModalOpen(true);
     }
+    // For submitted/graded assignments, do nothing (they show feedback in card)
   };
   
   const handleFileUpload = async (file: File) => {
@@ -800,15 +800,12 @@ export default function AssignmentsPage() {
     setLoadingSubmissions(true);
     
     try {
+      // Get submissions with user profile data in a single query
       const { data: submissionsData, error } = await supabase
         .from("submissions")
         .select(`
           *,
-          user:user_id (
-            id,
-            first_name,
-            last_name,
-            email,
+          profiles!user_id (
             username
           )
         `)
@@ -821,10 +818,8 @@ export default function AssignmentsPage() {
         id: sub.id,
         assignment_id: sub.assignment_id,
         user_id: sub.user_id,
-        user_name: sub.user?.first_name
-          ? `${sub.user.first_name} ${sub.user.last_name || ""}`.trim()
-          : sub.user?.username || sub.user?.email || "Unknown",
-        user_email: sub.user?.email || "",
+        user_name: sub.profiles?.username || "Unknown User",
+        user_email: "", // Not needed, but keeping for type compatibility
         content_url: sub.content_url,
         text_content: sub.text_content,
         grade: sub.grade,
@@ -960,16 +955,16 @@ export default function AssignmentsPage() {
       </div>
       
       {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "learning" | "teaching")} className="space-y-6">
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "learning" | "grading")} className="space-y-6">
         <TabsList className="bg-gray-800/50 border border-gray-700">
           <TabsTrigger value="learning" className="gap-2">
             <GraduationCap className="w-4 h-4" />
             My Learning
           </TabsTrigger>
           {canTeach && (
-            <TabsTrigger value="teaching" className="gap-2">
+            <TabsTrigger value="grading" className="gap-2">
               <Briefcase className="w-4 h-4" />
-              Teaching
+              Grading
             </TabsTrigger>
           )}
         </TabsList>
@@ -1096,8 +1091,16 @@ export default function AssignmentsPage() {
                 return (
                   <GlowCard
                     key={assignment.id}
-                    className="cursor-pointer hover:shadow-lg transition-all duration-200"
-                    onClick={() => handleViewAssignment(assignment)}
+                    className={`transition-all duration-200 ${
+                      assignment.status === "pending" || assignment.status === "overdue"
+                        ? "cursor-pointer hover:shadow-lg" 
+                        : "cursor-default"
+                    }`}
+                    onClick={() => {
+                      if (assignment.status === "pending" || assignment.status === "overdue") {
+                        handleViewAssignment(assignment);
+                      }
+                    }}
                   >
                     <div className="p-6">
                       <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
@@ -1117,9 +1120,13 @@ export default function AssignmentsPage() {
                             )}
                           </div>
                           
-                          <p className="text-gray-400 text-sm mb-3 line-clamp-2">
-                            {assignment.description}
-                          </p>
+                          {/* FIXED: Render HTML description properly */}
+                          {assignment.description && (
+                            <div 
+                              className="text-gray-400 text-sm mb-3 prose prose-invert prose-sm max-w-none line-clamp-2"
+                              dangerouslySetInnerHTML={{ __html: assignment.description }}
+                            />
+                          )}
                           
                           <div className="flex flex-wrap gap-4 text-sm">
                             <div className="flex items-center gap-1 text-gray-400">
@@ -1141,12 +1148,22 @@ export default function AssignmentsPage() {
                           </div>
                           
                           {assignment.status === "graded" && assignment.grade !== undefined && (
-                            <div className="mt-3 flex items-center gap-2">
-                              <Badge className="bg-green-500/20 text-green-400">
-                                Grade: {assignment.grade}/{assignment.points} ({Math.round((assignment.grade / assignment.points) * 100)}%)
-                              </Badge>
-                            </div>
+                            <>
+                              <div className="mt-3 flex items-center gap-2">
+                                <Badge className="bg-green-500/20 text-green-400">
+                                  Grade: {assignment.grade}/{assignment.points} ({Math.round((assignment.grade / assignment.points) * 100)}%)
+                                </Badge>
+                              </div>
+                              {/* ADD THIS - Show feedback if it exists */}
+                              {assignment.feedback && (
+                                <div className="mt-2 text-sm text-gray-300">
+                                  <span className="text-gray-400">Feedback: </span>
+                                  {assignment.feedback}
+                                </div>
+                              )}
+                            </>
                           )}
+                          
                         </div>
                         
                         <div className="flex items-center gap-2">
@@ -1163,15 +1180,8 @@ export default function AssignmentsPage() {
         
         {/* ========== TEACHER TAB ========== */}
         {canTeach && (
-          <TabsContent value="teaching" className="space-y-6">
-            {/* Teacher Header with Create Button */}
-            <div className="flex justify-end">
-              <GlowButton onClick={handleCreateAssignment}>
-                <Plus className="w-4 h-4 mr-2" />
-                Create Assignment
-              </GlowButton>
-            </div>
-            
+          <TabsContent value="grading" className="space-y-6">
+
             {/* Teacher Stats Cards */}
             <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
               <GlowCard>
@@ -1309,9 +1319,13 @@ export default function AssignmentsPage() {
                               )}
                             </div>
                             
-                            <p className="text-gray-400 text-sm mb-3 line-clamp-2">
-                              {assignment.description}
-                            </p>
+                            {/* FIXED: Render HTML description properly for teacher view */}
+                            {assignment.description && (
+                              <div 
+                                className="text-gray-400 text-sm mb-3 prose prose-invert prose-sm max-w-none line-clamp-2"
+                                dangerouslySetInnerHTML={{ __html: assignment.description }}
+                              />
+                            )}
                             
                             <div className="flex flex-wrap gap-4 text-sm mb-4">
                               <div className="flex items-center gap-1 text-gray-400">
@@ -1416,6 +1430,9 @@ export default function AssignmentsPage() {
             <DialogTitle className="text-white text-xl">
               {editingAssignment ? "Edit Assignment" : "Create Assignment"}
             </DialogTitle>
+            <DialogDescription className="text-gray-400">
+              {editingAssignment ? "Edit Assignment" : "Create Assignment"}
+            </DialogDescription>
           </DialogHeader>
           
           <div className="space-y-4 py-4">
@@ -1474,7 +1491,8 @@ export default function AssignmentsPage() {
                     <SelectValue placeholder="Select a lesson" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">None</SelectItem>
+                    {/* FIXED: Use a placeholder value instead of empty string */}
+                    <SelectItem value="__none__">None</SelectItem>
                     {teacherLessons.map(lesson => (
                       <SelectItem key={lesson.id} value={lesson.id.toString()}>
                         {lesson.title} {lesson.class_title && `(${lesson.class_title})`}
@@ -1527,6 +1545,9 @@ export default function AssignmentsPage() {
             <DialogTitle className="text-white text-xl">
               {selectedAssignment?.title}
             </DialogTitle>
+            <DialogDescription>
+              Submit your assignment response below
+            </DialogDescription>
           </DialogHeader>
           
           <div className="space-y-6 py-4">
@@ -1548,7 +1569,7 @@ export default function AssignmentsPage() {
               </div>
             </div>
             
-            {/* Assignment Description */}
+            {/* Assignment Description - FIXED: Render HTML properly */}
             {selectedAssignment?.description && (
               <div>
                 <h4 className="text-white font-medium mb-2">Instructions</h4>
@@ -1674,83 +1695,6 @@ export default function AssignmentsPage() {
                 {existingSubmission ? "Resubmit Assignment" : "Submit Assignment"}
               </GlowButton>
             )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      
-      {/* Student Results Modal (Graded Assignment) */}
-      <Dialog open={resultModalOpen} onOpenChange={setResultModalOpen}>
-        <DialogContent className="bg-gray-900 border-gray-800 max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="text-white text-xl">
-              {resultAssignment?.title} - Results
-            </DialogTitle>
-          </DialogHeader>
-          
-          <div className="space-y-6 py-4">
-            {/* Grade */}
-            <div className="text-center">
-              <div className="inline-flex items-center justify-center w-24 h-24 rounded-full bg-green-500/20 border-4 border-green-500">
-                <span className="text-3xl font-bold text-green-400">
-                  {Math.round(((resultAssignment?.grade || 0) / (resultAssignment?.points || 1)) * 100)}%
-                </span>
-              </div>
-              <p className="text-white text-xl mt-3">
-                {resultAssignment?.grade} / {resultAssignment?.points} points
-              </p>
-            </div>
-            
-            {/* Progress Bar */}
-            <div>
-              <Progress 
-                value={((resultAssignment?.grade || 0) / (resultAssignment?.points || 1)) * 100} 
-                className="h-3" 
-              />
-            </div>
-            
-            {/* Feedback */}
-            {resultAssignment?.feedback && (
-              <div className="bg-gray-800/30 rounded-lg p-4">
-                <h4 className="text-white font-medium mb-2">Feedback</h4>
-                <p className="text-gray-300 whitespace-pre-wrap">{resultAssignment.feedback}</p>
-              </div>
-            )}
-            
-            {/* Submitted Info */}
-            {resultAssignment?.submitted_at && (
-              <div className="text-center text-sm text-gray-400">
-                Submitted: {new Date(resultAssignment.submitted_at).toLocaleString()}
-              </div>
-            )}
-            
-            {/* Submitted Content */}
-            {resultAssignment?.content_url && (
-              <div>
-                <h4 className="text-white font-medium mb-2">Your Submission</h4>
-                <a
-                  href={resultAssignment.content_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 text-purple-400 hover:text-purple-300"
-                >
-                  <Eye className="w-4 h-4" />
-                  View Submitted File
-                </a>
-              </div>
-            )}
-            
-            {resultAssignment?.text_content && (
-              <div className="bg-gray-800/30 rounded-lg p-4">
-                <h4 className="text-white font-medium mb-2">Your Response</h4>
-                <p className="text-gray-300 whitespace-pre-wrap">{resultAssignment.text_content}</p>
-              </div>
-            )}
-          </div>
-          
-          <DialogFooter>
-            <GlowButton onClick={() => setResultModalOpen(false)}>
-              Close
-            </GlowButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1957,6 +1901,9 @@ export default function AssignmentsPage() {
         <DialogContent className="bg-gray-900 border-gray-800 max-w-md">
           <DialogHeader>
             <DialogTitle className="text-white text-xl">Delete Assignment?</DialogTitle>
+            <DialogDescription>
+              This action cannot be undone.
+            </DialogDescription>
           </DialogHeader>
           <div className="py-4">
             <p className="text-gray-300">

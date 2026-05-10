@@ -59,7 +59,7 @@ import { useRole } from "@/components/providers/RoleProvider";
 import { InviteMemberModal } from "@/components/organization/InviteMemberModal";
 import { toast } from "sonner";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
-import { type TeacherRequest } from "@/lib/teacher-requests"; // ADD THIS IMPORT
+import { getPendingTeacherRequests, approveTeacherRequest, rejectTeacherRequest, type TeacherRequest } from "@/lib/teacher-requests";
 
 interface OrganizationData {
   id: number;
@@ -128,6 +128,8 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
   const [domains, setDomains] = useState<OrganizationDomain[]>([]);
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const [memberEmails, setMemberEmails] = useState<Record<string, string>>({});
   
   const [searchQuery, setSearchQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<string>("all");
@@ -204,6 +206,12 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
           instructorCourseCount.set(course.created_by, (instructorCourseCount.get(course.created_by) || 0) + 1);
         });
 
+        // Collect user IDs for email fetch
+        const userIds = memberData.map((m: any) => m.user_id);
+        
+        // Fetch emails from backend API
+        await fetchMemberEmails(userIds);
+
         const formattedMembers: Member[] = memberData.map((m: any) => {
           let courseCount = 0;
           
@@ -230,7 +238,7 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
             id: m.user_id,
             user_id: m.user_id,
             name: name,
-            email: "",
+            email: "", // Will be populated from memberEmails state
             role: m.member_role as Member["role"],
             avatar: m.user?.avatar_url || avatar,
             joinedAt: new Date(m.created_at).toISOString().split("T")[0],
@@ -246,30 +254,33 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
     }
   };
 
-  // Load teacher requests
-  const loadTeacherRequests = async () => {
+  const fetchMemberEmails = async (userIds: string[]) => {
+    if (!userIds.length) return;
+    
     try {
-      const supabase = getSupabaseBrowserClient();
       const { data: { session } } = await supabase.auth.getSession();
       
-      const response = await fetch(`/api/org-service/organizations/${organizationId}/teacher-requests`, {
+      const response = await fetch('/api/org-service/users/batch-emails', {
+        method: 'POST',
         headers: {
           'Authorization': `Bearer ${session?.access_token}`,
+          'Content-Type': 'application/json',
         },
+        body: JSON.stringify({ user_ids: userIds }),
       });
       
       if (response.ok) {
         const data = await response.json();
-        setTeacherRequests(data);
+        setMemberEmails(data.users || {});
       } else {
-        console.error("Failed to load teacher requests:", response.status);
-        setTeacherRequests([]);
+        console.error("Failed to fetch emails:", response.status);
       }
     } catch (error) {
-      console.error("Error loading teacher requests:", error);
-      setTeacherRequests([]);
+      console.error("Error fetching emails:", error);
     }
   };
+
+
 
   const startOrganizationDeletion = () => {
     if (!organizationId || !organization?.name) {
@@ -638,53 +649,65 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
     checkSetupStatus();
   }, [organizationId]);
 
-  const approveTeacherRequest = async (requestId: string) => {
+  // Load teacher requests - Using the library instead of API endpoint
+  const loadTeacherRequests = async () => {
     try {
       const supabase = getSupabaseBrowserClient();
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { user } } = await supabase.auth.getUser();
       
-      const response = await fetch(`/api/org-service/organizations/${organizationId}/teacher-requests/${requestId}/approve`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session?.access_token}`,
-          'Content-Type': 'application/json',
-        },
-      });
+      if (!user) return;
       
-      if (response.ok) {
-        toast.success("Teacher request approved. User is now a teacher.");
-        await loadTeacherRequests();
-        await fetchMembers(); // Refresh members list
-      } else {
-        const error = await response.json();
-        throw new Error(error.message || "Failed to approve");
+      // Use the library function to get pending requests
+      const pendingRequests = await getPendingTeacherRequests(organizationId);
+      setTeacherRequests(pendingRequests);
+      
+    } catch (error) {
+      console.error("Error loading teacher requests:", error);
+      setTeacherRequests([]);
+    }
+  };
+
+  // Approve teacher request - Using the library
+  const handleApproveTeacherRequest = async (requestId: string) => {
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        toast.error("You must be logged in");
+        return;
       }
+      
+      await approveTeacherRequest(requestId, user.id);
+      toast.success("Teacher request approved. User is now a teacher.");
+      
+      // Refresh the lists
+      await loadTeacherRequests();
+      await fetchMembers();
+      
     } catch (error: any) {
       console.error("Error approving teacher request:", error);
       toast.error(error.message || "Failed to approve teacher request");
     }
   };
 
-  const rejectTeacherRequest = async (requestId: string) => {
+  // Reject teacher request - Using the library
+  const handleRejectTeacherRequest = async (requestId: string) => {
     try {
       const supabase = getSupabaseBrowserClient();
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { user } } = await supabase.auth.getUser();
       
-      const response = await fetch(`/api/org-service/organizations/${organizationId}/teacher-requests/${requestId}/reject`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session?.access_token}`,
-          'Content-Type': 'application/json',
-        },
-      });
-      
-      if (response.ok) {
-        toast.success("Teacher request rejected");
-        await loadTeacherRequests();
-      } else {
-        const error = await response.json();
-        throw new Error(error.message || "Failed to reject");
+      if (!user) {
+        toast.error("You must be logged in");
+        return;
       }
+      
+      await rejectTeacherRequest(requestId, user.id);
+      toast.success("Teacher request rejected");
+      
+      // Refresh the list
+      await loadTeacherRequests();
+      
     } catch (error: any) {
       console.error("Error rejecting teacher request:", error);
       toast.error(error.message || "Failed to reject teacher request");
@@ -1020,7 +1043,7 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
                             </div>
                             <div>
                               <p className="text-white font-medium">{member.name}</p>
-                              <p className="text-sm text-gray-400">{member.email || "No email"}</p>
+                              <p className="text-sm text-gray-400">{memberEmails[member.user_id] || "No email"}</p>
                             </div>
                           </div>
                         </td>
@@ -1050,12 +1073,15 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
                         <td className="py-3 px-4 text-white">{member.courses}</td>
                         <td className="py-3 px-4">
                           <div className="flex gap-2">
-                            <button 
-                              onClick={() => setEditingMember(member)}
-                              className="p-1 hover:bg-gray-700 rounded-lg transition-colors"
-                            >
-                              <Edit2 className="w-4 h-4 text-gray-400" />
-                            </button>
+                            {/* Only show edit button if member is NOT an admin */}
+                            {member.role !== "admin" && (
+                              <button 
+                                onClick={() => setEditingMember(member)}
+                                className="p-1 hover:bg-gray-700 rounded-lg transition-colors"
+                              >
+                                <Edit2 className="w-4 h-4 text-gray-400" />
+                              </button>
+                            )}
                             {member.role !== "admin" && (
                               <button 
                                 onClick={() => handleRemoveMember(member.user_id, member.name, member.role)}
@@ -1155,10 +1181,10 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
                         </p>
                       </div>
                       <div className="flex gap-2">
-                        <GlowButton size="sm" variant="primary" onClick={() => approveTeacherRequest(request.id)}>
+                        <GlowButton size="sm" variant="primary" onClick={() => handleApproveTeacherRequest(request.id)}>
                           Approve
                         </GlowButton>
-                        <GlowButton size="sm" variant="outline" onClick={() => rejectTeacherRequest(request.id)}>
+                        <GlowButton size="sm" variant="outline" onClick={() => handleRejectTeacherRequest(request.id)}>
                           Reject
                         </GlowButton>
                       </div>

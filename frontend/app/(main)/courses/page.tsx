@@ -630,12 +630,6 @@ export default function CoursesPage() {
                       >
                         View Course
                       </GlowButton>
-                      <Link href={`/courses/${course.id}/preview`} className="flex-1">
-                        <GlowButton variant="outline" fullWidth>
-                          <Eye className="w-4 h-4 mr-2" />
-                          Preview
-                        </GlowButton>
-                      </Link>
                     </div>
                   </GlowCard>
                 ))}
@@ -656,14 +650,6 @@ export default function CoursesPage() {
           {/* Created Courses Tab */}
           {isTeacher && (
             <TabsContent value="created" className="mt-6">
-              {roleData.organizationId && (
-                <div className="mb-4 p-3 bg-purple-500/10 border border-purple-500/30 rounded-lg flex items-center gap-2">
-                  <Building2 className="w-4 h-4 text-purple-400" />
-                  <span className="text-sm text-gray-300">
-                    Teaching organization: <span className="text-purple-400 font-medium">{roleData.organizationName || `Organization ${roleData.organizationId}`}</span>
-                  </span>
-                </div>
-              )}
 
               {filteredCreatedCourses.length > 0 ? (
                 <div className="space-y-4">

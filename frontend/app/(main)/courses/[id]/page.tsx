@@ -560,12 +560,6 @@ export default function CourseDetailPage() {
                   >
                     Enroll Now
                   </GlowButton>
-                  <Link href={`/courses/${courseId}/preview`}>
-                    <GlowButton variant="outline">
-                      <Eye className="w-4 h-4 mr-2" />
-                      Preview Course
-                    </GlowButton>
-                  </Link>
                 </>
               ) : (
                 <>

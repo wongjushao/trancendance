@@ -36,16 +36,31 @@ export function FileUpload({
   maxSizeMB = 50,
   multiple = true,
 }: FileUploadProps) {
-  const [files, setFiles] = useState<UploadedFile[]>([]);
+  const [files, setFiles] = useState<UploadedFile[]>(existingFiles);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Track if we've already synced to avoid loops
+  const [isSynced, setIsSynced] = useState(false);
 
-  // Sync with existingFiles prop when it changes
+  // Sync with existingFiles prop when it changes - FIXED
   useEffect(() => {
-    setFiles(existingFiles);
-  }, [existingFiles]);
+    // Deep comparison to avoid unnecessary updates
+    const hasChanged = existingFiles.length !== files.length || 
+      existingFiles.some((file, index) => 
+        file.url !== files[index]?.url || 
+        file.name !== files[index]?.name
+      );
+    
+    if (hasChanged && !isSynced) {
+      setFiles(existingFiles);
+      setIsSynced(true);
+    } else if (!hasChanged && isSynced) {
+      setIsSynced(false);
+    }
+  }, [existingFiles, files, isSynced]);
 
   const uploadFile = async (file: File): Promise<UploadedFile | null> => {
     const supabase = getSupabaseBrowserClient();
@@ -141,7 +156,7 @@ export function FileUpload({
     }
   };
 
-  // Drag & Drop Handlers
+  // Drag & Drop Handlers - FIXED: removed files from dependencies
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -168,7 +183,7 @@ export function FileUpload({
     if (droppedFiles && droppedFiles.length > 0) {
       await processFiles(droppedFiles);
     }
-  }, [files]);
+  }, []); // ✅ Removed 'files' dependency - processFiles will use current state
 
   const removeFile = (index: number) => {
     const newFiles = files.filter((_, i) => i !== index);

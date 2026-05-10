@@ -67,6 +67,7 @@ export async function createTeacherRequest(
 }
 
 // Get pending teacher requests for organization admin
+// Update getPendingTeacherRequests function
 export async function getPendingTeacherRequests(organizationId: number): Promise<(TeacherRequest & { user: any })[]> {
   const supabase = getSupabaseBrowserClient();
   
@@ -79,7 +80,6 @@ export async function getPendingTeacherRequests(organizationId: number): Promise
         first_name,
         last_name,
         username,
-        email,
         avatar_url
       )
     `)
@@ -88,6 +88,36 @@ export async function getPendingTeacherRequests(organizationId: number): Promise
     .order("requested_at", { ascending: true });
   
   if (error) throw error;
+  
+  // Fetch emails for all user IDs
+  if (data && data.length > 0) {
+    const userIds = data.map(r => r.user_id);
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    try {
+      const emailResponse = await fetch('/api/org-service/users/batch-emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session?.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ user_ids: userIds }),
+      });
+      
+      if (emailResponse.ok) {
+        const emailData = await emailResponse.json();
+        // Add email to each user object
+        data.forEach(request => {
+          if (request.user) {
+            request.user.email = emailData.users[request.user_id] || '';
+          }
+        });
+      }
+    } catch (emailError) {
+      console.error('Error fetching emails for teacher requests:', emailError);
+    }
+  }
+  
   return data || [];
 }
 

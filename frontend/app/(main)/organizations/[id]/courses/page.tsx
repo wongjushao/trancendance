@@ -350,14 +350,6 @@ export default function OrganizationCoursesPage() {
                     <div className="flex gap-2">
                       <GlowButton
                         size="sm"
-                        variant="secondary"
-                        onClick={() => router.push(`/courses/${course.id}/preview`)}
-                      >
-                        <Eye className="w-4 h-4 mr-1" />
-                        Preview
-                      </GlowButton>
-                      <GlowButton
-                        size="sm"
                         variant="primary"
                         onClick={() => router.push(`/courses/${course.id}/edit`)}
                       >

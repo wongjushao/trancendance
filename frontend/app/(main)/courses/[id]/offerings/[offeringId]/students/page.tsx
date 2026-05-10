@@ -49,6 +49,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -1020,6 +1021,9 @@ export default function CourseStudentsPage() {
         <DialogContent className="bg-gray-900 border-gray-800 max-w-md">
           <DialogHeader>
             <DialogTitle className="text-white">Enroll Student</DialogTitle>
+            <DialogDescription>
+              Enroll Student.
+            </DialogDescription>
           </DialogHeader>
           
           <div className="space-y-4 py-4">
@@ -1102,6 +1106,9 @@ export default function CourseStudentsPage() {
         <DialogContent className="bg-gray-900 border-gray-800 max-w-md">
           <DialogHeader>
             <DialogTitle className="text-white">Remove Student</DialogTitle>
+            <DialogDescription>
+              Remove Student.
+            </DialogDescription>
           </DialogHeader>
           
           <div className="py-4">

@@ -521,6 +521,9 @@ export default function AssignmentSubmissionsPage() {
             <DialogTitle className="text-white">
               Grade Submission
             </DialogTitle>
+            <DialogDescription>
+              Provide a grade and feedback for this submission
+            </DialogDescription>
           </DialogHeader>
           
           {selectedSubmission && (

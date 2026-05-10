@@ -37,6 +37,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import {
   Select,
@@ -490,6 +491,9 @@ export default function OrganizationMembersPage() {
         <DialogContent className="bg-slate-800 border-slate-700">
           <DialogHeader>
             <DialogTitle className="text-white">Change Member Role</DialogTitle>
+            <DialogDescription>
+              Update role
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div>
@@ -519,6 +523,9 @@ export default function OrganizationMembersPage() {
         <DialogContent className="bg-slate-800 border-slate-700">
           <DialogHeader>
             <DialogTitle className="text-white">Invite Member</DialogTitle>
+            <DialogDescription>
+              Enter the email address of the person you want to invite and select their role.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div>

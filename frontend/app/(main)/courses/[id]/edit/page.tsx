@@ -1698,10 +1698,6 @@ const getDayName = (day: number): string => {
                 Archive
               </GlowButton>
             )}
-            <GlowButton variant="outline" onClick={() => window.open(`/courses/${courseId}/preview`, "_blank")}>
-              <Eye className="w-4 h-4 mr-2" />
-              Preview
-            </GlowButton>
           </div>
         </div>
         
