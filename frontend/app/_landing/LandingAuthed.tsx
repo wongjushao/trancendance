@@ -1,5 +1,3 @@
-// frontend/app/_landing/LandingAuthed.tsx
-
 "use client";
 
 import { useState, useEffect } from "react";
@@ -27,6 +25,12 @@ interface LandingAuthedProps {
 const PROFILE_UPDATED_EVENT = 'profile-updated';
 const AVATAR_UPDATED_EVENT = 'avatar-updated';
 
+const getAuthToken = async () => {
+  const supabase = getSupabaseBrowserClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token;
+};
+
 export default function LandingAuthed({ user: initialUser }: LandingAuthedProps) {
   const { avatarUrl, refreshAvatar } = useAvatar();
   const [user, setUser] = useState(initialUser);
@@ -37,11 +41,29 @@ export default function LandingAuthed({ user: initialUser }: LandingAuthedProps)
       // Refresh avatar
       await refreshAvatar();
       
-      // Refresh user data from Supabase
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user: updatedUser } } = await supabase.auth.getUser();
-      if (updatedUser) {
-        setUser(updatedUser);
+      // Refresh user data from backend API
+      const token = await getAuthToken();
+      if (token) {
+        try {
+          const response = await fetch('/api/auth-service/profile', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (response.ok) {
+            const profileData = await response.json();
+            // Merge profile data with existing user info
+            setUser(prev => ({
+              ...prev,
+              user_metadata: {
+                ...prev.user_metadata,
+                full_name: `${profileData.first_name || ''} ${profileData.last_name || ''}`.trim(),
+                first_name: profileData.first_name,
+                last_name: profileData.last_name,
+              }
+            }));
+          }
+        } catch (error) {
+          console.error("Error refreshing user data:", error);
+        }
       }
     };
 

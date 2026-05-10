@@ -25,8 +25,9 @@ function ResetPasswordContent() {
   const [isLoading, setIsLoading] = useState(false);
   const [isValidating, setIsValidating] = useState(true);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [resetToken, setResetToken] = useState<string | null>(null);
   
-  // Get token from URL
+  // Get token from URL (from Supabase email link)
   const token = searchParams.get("token");
   const type = searchParams.get("type");
 
@@ -86,6 +87,7 @@ function ResetPasswordContent() {
     const validateToken = async () => {
       setIsValidating(true);
       
+      // First check if there's an active session (user might already be logged in)
       const supabase = getSupabaseBrowserClient();
       const { data: { session } } = await supabase.auth.getSession();
       
@@ -95,21 +97,36 @@ function ResetPasswordContent() {
       }
       
       if (token && type === "recovery") {
+        setResetToken(token);
+        
         try {
-          const { data, error: verifyError } = await supabase.auth.verifyOtp({
-            token_hash: token,
-            type: "recovery",
+          // Verify token via backend API
+          const response = await fetch('/api/auth-service/verify-reset-token', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ token }),
           });
           
-          if (verifyError) {
-            console.error("Token validation error:", verifyError);
-            setErrors({ password: "This password reset link is invalid or has expired. Please request a new one." });
+          const data = await response.json();
+          
+          if (!response.ok) {
+            throw new Error(data.error || "Invalid token");
           }
-        } catch (err) {
+          
+          if (!data.valid) {
+            throw new Error(data.error || "Invalid or expired reset link");
+          }
+          
+          console.log("Token verified for user:", data.email);
+          
+        } catch (err: any) {
           console.error("Token validation error:", err);
-          setErrors({ password: "This password reset link is invalid or has expired. Please request a new one." });
+          setErrors({ password: err.message || "This password reset link is invalid or has expired. Please request a new one." });
         }
       } else if (!token) {
+        // Check if user is already authenticated with a valid session
         const { data: { session: currentSession } } = await supabase.auth.getSession();
         if (!currentSession?.user?.email_confirmed_at) {
           setErrors({ password: "No valid password reset token found. Please request a new password reset link." });
@@ -144,23 +161,17 @@ function ResetPasswordContent() {
     
     setIsLoading(true);
     
-    const supabase = getSupabaseBrowserClient();
-    const { data: { session } } = await supabase.auth.getSession();
-    
-    if (!session?.access_token) {
-      setErrors({ password: "Session expired. Please request a new password reset link." });
-      setIsLoading(false);
-      return;
-    }
-    
     try {
-      const response = await fetch('/api/auth-service/update-password', {
-        method: 'PUT',
+      // Use the reset-password endpoint which handles token verification
+      const response = await fetch('/api/auth-service/reset-password', {
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({
+          token: resetToken,
+          password,
+        }),
       });
       
       const data = await response.json();
@@ -172,13 +183,19 @@ function ResetPasswordContent() {
       setIsSuccess(true);
       toast.success("Password updated successfully! Redirecting to login...");
       
-      await supabase.auth.signOut();
+      // Only sign out if there was a session (but with reset flow, there shouldn't be)
+      const supabase = getSupabaseBrowserClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        await supabase.auth.signOut();
+      }
       
       setTimeout(() => {
         router.push("/login");
       }, 3000);
       
     } catch (err: any) {
+      console.error("Password reset error:", err);
       setErrors({ password: err.message });
     } finally {
       setIsLoading(false);
@@ -205,7 +222,7 @@ function ResetPasswordContent() {
     );
   }
   
-  if (errors.password && errors.password.includes("invalid or expired")) {
+  if (errors.password && errors.password.includes("invalid") || errors.password?.includes("expired")) {
     return (
       <div className="w-full max-w-md">
         <div className="bg-[#16161F] border border-white/10 rounded-3xl p-8 shadow-2xl shadow-purple-500/10 text-center">

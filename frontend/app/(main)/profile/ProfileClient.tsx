@@ -67,65 +67,82 @@ interface UserSkill {
   years: number;
 }
 
-// Mock friends data
-const friendsData = [
-  { id: "1", name: "Alice Johnson", avatar: "AJ", mutualCourses: 3, status: "online" as const, courseProgress: 75 },
-  { id: "2", name: "Bob Smith", avatar: "BS", mutualCourses: 2, status: "offline" as const, courseProgress: 60 },
-  { id: "3", name: "Carol Davis", avatar: "CD", mutualCourses: 4, status: "online" as const, courseProgress: 90 },
-  { id: "4", name: "David Wilson", avatar: "DW", mutualCourses: 1, status: "away" as const, courseProgress: 45 },
-];
+interface Connection {
+  id: string;
+  name: string;
+  avatar: string;
+  mutualCourses: number;
+  status: "online" | "offline" | "away";
+  courseProgress: number;
+}
 
-// Mock interests data
-const availableInterests = [
-  { id: "coding", label: "Coding", icon: Code, color: "blue" },
-  { id: "design", label: "Design", icon: Palette, color: "pink" },
-  { id: "data", label: "Data Science", icon: Database, color: "green" },
-  { id: "cloud", label: "Cloud Computing", icon: Cloud, color: "cyan" },
-  { id: "ai", label: "AI/ML", icon: Brain, color: "purple" },
-  { id: "security", label: "Security", icon: Shield, color: "red" },
-];
+interface Achievement {
+  id: string;
+  title: string;
+  description: string;
+  icon: string;
+  earned: boolean;
+  dateEarned?: string;
+  progress?: number;
+  points: number;
+}
 
-// Achievements data
-const achievementsData = [
-  { id: "1", title: "Quick Learner", description: "Completed 5 lessons in a week", icon: Zap, earned: true, dateEarned: "2024-01-15", points: 100 },
-  { id: "2", title: "Perfect Attendance", description: "Logged in for 7 days", icon: Calendar, earned: true, dateEarned: "2024-01-20", points: 150 },
-  { id: "3", title: "Assignment Master", description: "Submitted 10 assignments", icon: CheckCircle, earned: false, progress: 70, points: 200 },
-  { id: "4", title: "Course Warrior", description: "Complete 3 full courses", icon: Target, earned: false, progress: 33, points: 500 },
-];
+interface Badge {
+  id: string;
+  title: string;
+  description: string;
+  icon: string;
+  earned: boolean;
+  dateEarned?: string;
+  progress?: number;
+}
 
-// Activity timeline
-const activityTimeline = [
-  { id: "1", type: "course", action: "Completed", title: "Advanced React Development", date: new Date(2024, 0, 15), points: 100 },
-  { id: "2", type: "achievement", action: "Unlocked", title: "Quick Learner", date: new Date(2024, 0, 5), points: 25 },
-  { id: "3", type: "assignment", action: "Submitted", title: "API Integration Project", date: new Date(2024, 0, 3), points: 75 },
-];
+interface Activity {
+  id: string;
+  type: string;
+  action: string;
+  title: string;
+  date: string;
+  points: number;
+}
 
-const badgesData = [
-  { id: "1", title: "Early Bird", description: "Joined the platform", icon: Zap, earned: true, dateEarned: "2024-01-01" },
-  { id: "2", title: "First Course", description: "Completed first course", icon: BookOpen, earned: true, dateEarned: "2024-01-15" },
-  { id: "3", title: "Perfect Week", description: "7-day learning streak", icon: Calendar, earned: false, progress: 3 },
-  { id: "4", title: "Community Helper", description: "Answered 10 questions", icon: MessageCircle, earned: false, progress: 2 },
-];
+interface ProfileStats {
+  enrolled_courses: number;
+  completed_courses: number;
+  connections: number;
+  skills_count: number;
+}
+
+// Helper to get auth token
+const getAuthToken = async () => {
+  const supabase = getSupabaseBrowserClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token;
+};
 
 export default function ProfileClient({ user }: ProfileClientProps) {
   const router = useRouter();
   const { avatarUrl, refreshAvatar } = useAvatar();
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [userInterests] = useState<string[]>(["coding", "design", "ai"]);
   const [showAllAchievements, setShowAllAchievements] = useState(false);
   const [profileCompletion, setProfileCompletion] = useState(0);
-  const [educations, setEducations] = useState<any[]>([]);
-  const [userSkills, setUserSkills] = useState<any[]>([]);
+  const [educations, setEducations] = useState<Education[]>([]);
+  const [userSkills, setUserSkills] = useState<UserSkill[]>([]);
+  
+  // New state from backend
+  const [profileStats, setProfileStats] = useState<ProfileStats>({
+    enrolled_courses: 0,
+    completed_courses: 0,
+    connections: 0,
+    skills_count: 0,
+  });
+  const [connections, setConnections] = useState<Connection[]>([]);
+  const [achievements, setAchievements] = useState<Achievement[]>([]);
+  const [badges, setBadges] = useState<Badge[]>([]);
+  const [activities, setActivities] = useState<Activity[]>([]);
 
-  // Helper to get auth token
-  const getAuthToken = async () => {
-    const supabase = getSupabaseBrowserClient();
-    const { data: { session } } = await supabase.auth.getSession();
-    return session?.access_token;
-  };
-
-  // SINGLE fetch function that gets everything (profile + skills + educations)
+  // Fetch all profile-related data
   const fetchProfileData = async () => {
     try {
       const token = await getAuthToken();
@@ -134,91 +151,81 @@ export default function ProfileClient({ user }: ProfileClientProps) {
         return null;
       }
 
-      const response = await fetch('/api/auth-service/profile', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
+      // Fetch profile data
+      const profileResponse = await fetch('/api/auth-service/profile', {
+        headers: { 'Authorization': `Bearer ${token}` }
       });
 
-      if (!response.ok) {
+      if (!profileResponse.ok) {
         throw new Error('Failed to fetch profile');
       }
 
-      const data = await response.json();
+      const profileData = await profileResponse.json();
+      setProfile(profileData);
+      setEducations(profileData.educations || []);
+      setUserSkills(profileData.skills || []);
       
-      // Set all data from single response
-      setProfile(data);
-      setEducations(data.educations || []);
-      setUserSkills(data.skills || []);
+      // Fetch profile stats
+      const statsResponse = await fetch('/api/org-service/profile/stats', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       
-      return data;
+      if (statsResponse.ok) {
+        const statsData = await statsResponse.json();
+        setProfileStats(statsData);
+      }
+      
+      // Fetch connections
+      const connectionsResponse = await fetch('/api/org-service/profile/connections', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (connectionsResponse.ok) {
+        const connectionsData = await connectionsResponse.json();
+        setConnections(connectionsData.connections || []);
+      }
+      
+      // Fetch achievements and badges
+      const achievementsResponse = await fetch('/api/org-service/profile/achievements', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (achievementsResponse.ok) {
+        const achievementsData = await achievementsResponse.json();
+        setAchievements(achievementsData.achievements || []);
+        setBadges(achievementsData.badges || []);
+      }
+      
+      // Fetch recent activity
+      const activityResponse = await fetch('/api/org-service/profile/activity', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (activityResponse.ok) {
+        const activityData = await activityResponse.json();
+        setActivities(activityData.activities || []);
+      }
+      
+      return profileData;
+      
     } catch (error) {
-      console.error('Error fetching profile:', error);
+      console.error('Error fetching profile data:', error);
       toast.error('Failed to load profile data');
       return null;
     }
   };
 
-  // UPDATE your useEffect - only one call needed
+  // Initial load
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
-      await fetchProfileData();  // One call gets everything
+      await fetchProfileData();
       setLoading(false);
     };
     loadData();
   }, []);
 
-  // Update subscription - listens to all relevant tables
-  useEffect(() => {
-    const supabase = getSupabaseBrowserClient();
-    
-    const profilesSubscription = supabase
-      .channel('profile-changes')
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'profiles',
-        filter: `id=eq.${user.id}`
-      }, () => {
-        fetchProfileData();
-      })
-      .subscribe();
-    
-    // Add this - listen to education changes
-    const educationSubscription = supabase
-      .channel('education-changes')
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'profile_educations',
-        filter: `profile_id=eq.${user.id}`
-      }, () => {
-        fetchProfileData();  // Refresh everything
-      })
-      .subscribe();
-    
-    // Add this - listen to skills changes
-    const skillsSubscription = supabase
-      .channel('skills-changes')
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'user_skills',
-        filter: `user_id=eq.${user.id}`
-      }, () => {
-        fetchProfileData();  // Refresh everything
-      })
-      .subscribe();
-    
-    return () => {
-      profilesSubscription.unsubscribe();
-      educationSubscription.unsubscribe();
-      skillsSubscription.unsubscribe();
-    };
-  }, [user.id]);
-
+  // Calculate profile completion
   useEffect(() => {
     if (profile) {
       const requiredFields = [
@@ -239,13 +246,11 @@ export default function ProfileClient({ user }: ProfileClientProps) {
     const file = event.target.files?.[0];
     if (!file) return;
     
-    // Validate file type
     if (!file.type.startsWith('image/')) {
       toast.error('Please upload an image file');
       return;
     }
     
-    // Validate file size (max 5MB)
     if (file.size > 5 * 1024 * 1024) {
       toast.error('File size must be less than 5MB');
       return;
@@ -263,9 +268,7 @@ export default function ProfileClient({ user }: ProfileClientProps) {
       
       const response = await fetch('/api/auth-service/upload-avatar', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
+        headers: { 'Authorization': `Bearer ${token}` },
         body: formData
       });
       
@@ -276,8 +279,6 @@ export default function ProfileClient({ user }: ProfileClientProps) {
       const data = await response.json();
       toast.success("Avatar updated successfully");
       refreshAvatar();
-      
-      // Refresh profile to get new avatar URL
       await fetchProfileData();
       
     } catch (error) {
@@ -306,12 +307,38 @@ export default function ProfileClient({ user }: ProfileClientProps) {
     const socialLinks = profile?.social_links;
     if (!socialLinks) return true;
     if (typeof socialLinks !== 'object') return true;
-    
-    // Check if all values are empty strings
     return Object.values(socialLinks).every(value => 
       value === '' || value === null || value === undefined
     );
   };
+
+  // Helper to render achievement icons
+  const getAchievementIcon = (iconName: string) => {
+    const icons: Record<string, any> = {
+      Zap: Zap,
+      CheckCircle: CheckCircle,
+      Target: Target,
+      Calendar: Calendar,
+      Award: Award,
+    };
+    const IconComponent = icons[iconName] || Award;
+    return <IconComponent className="w-5 h-5" />;
+  };
+
+  // Helper to render badge icons
+  const getBadgeIcon = (iconName: string) => {
+    const icons: Record<string, any> = {
+      Zap: Zap,
+      BookOpen: BookOpen,
+      Calendar: Calendar,
+      MessageCircle: MessageCircle,
+      Crown: Crown,
+    };
+    const IconComponent = icons[iconName] || Award;
+    return <IconComponent className="w-4 h-4" />;
+  };
+
+  const displayedAchievements = showAllAchievements ? achievements : achievements.slice(0, 2);
 
   if (loading) {
     return (
@@ -321,18 +348,14 @@ export default function ProfileClient({ user }: ProfileClientProps) {
     );
   }
 
-  const displayedAchievements = showAllAchievements ? achievementsData : achievementsData.slice(0, 2);
-
   return (
     <div className="space-y-6">
-      {/* Hero Banner - Full width */}
+      {/* Hero Banner */}
       <div className="relative">
         <div className="relative h-48 md:h-56 rounded-xl overflow-hidden bg-gradient-to-r from-purple-600 via-pink-600 to-blue-600">
           <div className="absolute inset-0 bg-black/30"></div>
           <div className="absolute bottom-0 left-0 right-0 p-6 md:p-8">
             <div className="flex flex-col md:flex-row items-start md:items-end gap-4">
-              
-              {/* Avatar - Simple circle, no cropping */}
               <div className="relative">
                 <div className="w-24 h-24 md:w-28 md:h-28 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 p-0.5 shadow-2xl">
                   <div className="w-full h-full rounded-full bg-gray-900 flex items-center justify-center overflow-hidden">
@@ -369,25 +392,25 @@ export default function ProfileClient({ user }: ProfileClientProps) {
         </div>
       </div>
       
-      {/* About Me Section - Full width */}
+      {/* About Me Section */}
       {profile?.bio && (
-      <GlowCard>
-        <div className="p-6">
-          <h2 className="text-xl font-semibold text-white mb-3">About Me</h2>
-          <p className="text-gray-300 leading-relaxed break-words whitespace-normal break-all max-w-full">
-            {profile.bio}
-          </p>
-        </div>
-      </GlowCard>
+        <GlowCard>
+          <div className="p-6">
+            <h2 className="text-xl font-semibold text-white mb-3">About Me</h2>
+            <p className="text-gray-300 leading-relaxed break-words whitespace-normal break-all max-w-full">
+              {profile.bio}
+            </p>
+          </div>
+        </GlowCard>
       )}
 
-      {/* Two Column Layout - Left (smaller) and Right (larger) */}
+      {/* Two Column Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
         
-        {/* LEFT COLUMN - 4 columns wide */}
+        {/* LEFT COLUMN */}
         <div className="lg:col-span-4 space-y-6 flex flex-col">
           
-          {/* Profile Completion Card - Only show if not 100% */}
+          {/* Profile Completion Card */}
           {profileCompletion < 100 && (
             <GlowCard>
               <div className="p-5">
@@ -410,24 +433,27 @@ export default function ProfileClient({ user }: ProfileClientProps) {
           <GlowCard>
             <div className="p-5">
               <div className="flex justify-between items-center mb-3">
-                <h3 className="font-semibold text-white">Connections</h3>
+                <h3 className="font-semibold text-white">Connections ({profileStats.connections})</h3>
                 <GlowButton size="sm" variant="ghost" className="h-8 px-2 text-xs">
                   View All
                 </GlowButton>
               </div>
               <div className="space-y-3">
-                {friendsData.slice(0, 3).map((friend) => (
-                  <div key={friend.id} className="flex items-center gap-2">
+                {connections.slice(0, 3).map((connection) => (
+                  <div key={connection.id} className="flex items-center gap-2">
                     <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white text-xs font-semibold">
-                      {friend.avatar}
+                      {connection.name.charAt(0)}
                     </div>
                     <div className="flex-1">
-                      <p className="text-sm font-medium text-white">{friend.name}</p>
-                      <p className="text-xs text-gray-500">{friend.mutualCourses} mutual courses</p>
+                      <p className="text-sm font-medium text-white">{connection.name}</p>
+                      <p className="text-xs text-gray-500">{connection.mutualCourses} mutual courses</p>
                     </div>
-                    <div className={`w-2 h-2 rounded-full ${friend.status === "online" ? "bg-green-400" : "bg-gray-500"}`} />
+                    <div className={`w-2 h-2 rounded-full ${connection.status === "online" ? "bg-green-400" : "bg-gray-500"}`} />
                   </div>
                 ))}
+                {connections.length === 0 && (
+                  <p className="text-sm text-gray-400 text-center py-2">No connections yet</p>
+                )}
               </div>
             </div>
           </GlowCard>
@@ -440,7 +466,6 @@ export default function ProfileClient({ user }: ProfileClientProps) {
                   <h3 className="font-semibold text-white">Professional Info</h3>
                   <p className="text-xs text-gray-400 mt-0.5">Work experience and professional background</p>
                 </div>
-                {/* Only show button if NO professional data exists */}
                 {(!profile?.job_title && !profile?.department && !profile?.professional_summary) && (
                   <button
                     onClick={() => router.push('/settings?tab=professional')}
@@ -451,7 +476,6 @@ export default function ProfileClient({ user }: ProfileClientProps) {
                 )}
               </div>
               
-              {/* Has professional data - display it */}
               {(profile?.job_title || profile?.department || profile?.professional_summary || profile?.years_of_experience) ? (
                 <div className="space-y-3">
                   {(profile?.job_title || profile?.department) && (
@@ -490,7 +514,6 @@ export default function ProfileClient({ user }: ProfileClientProps) {
                   )}
                 </div>
               ) : (
-                /* Empty State - No professional data */
                 <div className="text-center py-8">
                   <div className="w-16 h-16 rounded-full bg-purple-500/10 flex items-center justify-center mx-auto mb-3">
                     <Briefcase className="w-8 h-8 text-purple-400" />
@@ -510,7 +533,6 @@ export default function ProfileClient({ user }: ProfileClientProps) {
                   <h3 className="font-semibold text-white">Education</h3>
                   <p className="text-xs text-gray-400 mt-0.5">Academic background and qualifications</p>
                 </div>
-                {/* Only show button if NO education entries exist */}
                 {(!educations || educations.length === 0) && (
                   <button
                     onClick={() => router.push('/settings?tab=education')}
@@ -521,7 +543,6 @@ export default function ProfileClient({ user }: ProfileClientProps) {
                 )}
               </div>
               
-              {/* Has education data - display it */}
               {educations && educations.length > 0 ? (
                 <div className="space-y-4">
                   {educations.map((edu, index) => (
@@ -543,7 +564,6 @@ export default function ProfileClient({ user }: ProfileClientProps) {
                   ))}
                 </div>
               ) : (
-                /* Empty State - No education data */
                 <div className="text-center py-8">
                   <div className="w-16 h-16 rounded-full bg-purple-500/10 flex items-center justify-center mx-auto mb-3">
                     <GraduationCap className="w-8 h-8 text-purple-400" />
@@ -560,10 +580,9 @@ export default function ProfileClient({ user }: ProfileClientProps) {
             <div className="p-5">
               <div className="flex justify-between items-center mb-4">
                 <div>
-                  <h3 className="font-semibold text-white">Top Skills</h3>
+                  <h3 className="font-semibold text-white">Skills ({profileStats.skills_count})</h3>
                   <p className="text-xs text-gray-400 mt-0.5">Your professional skills and expertise</p>
                 </div>
-                {/* Only show button if NO skills exist */}
                 {(!userSkills || userSkills.length === 0) && (
                   <button
                     onClick={() => router.push('/settings?tab=skills')}
@@ -574,19 +593,16 @@ export default function ProfileClient({ user }: ProfileClientProps) {
                 )}
               </div>
               
-              {/* Has skills - display them */}
               {userSkills && userSkills.length > 0 ? (
                 <div className="flex flex-wrap gap-2">
                   {userSkills.map((skill, index) => (
                     <span
-                      key={skill.id || index}
+                      key={skill.skill_id || index}
                       className="px-3 py-1.5 rounded-lg bg-purple-500/20 text-purple-400 border border-purple-500/30 text-sm flex items-center gap-2"
                     >
                       {skill.name}
                       {skill.level && (
-                        <span className="text-xs text-purple-300">
-                          Lv.{skill.level}
-                        </span>
+                        <span className="text-xs text-purple-300">Lv.{skill.level}</span>
                       )}
                       {skill.years !== undefined && skill.years !== null && skill.years > 0 && (
                         <span className="text-xs text-purple-300/70">
@@ -597,7 +613,6 @@ export default function ProfileClient({ user }: ProfileClientProps) {
                   ))}
                 </div>
               ) : (
-                /* Empty State */
                 <div className="text-center py-8">
                   <div className="w-16 h-16 rounded-full bg-purple-500/10 flex items-center justify-center mx-auto mb-3">
                     <Code className="w-8 h-8 text-purple-400" />
@@ -609,7 +624,7 @@ export default function ProfileClient({ user }: ProfileClientProps) {
             </div>
           </GlowCard>
 
-          {/* Interests - Only show if user has interests */}
+          {/* Interests */}
           {profile?.interests && profile.interests.length > 0 && (
             <GlowCard>
               <div className="p-5">
@@ -638,8 +653,6 @@ export default function ProfileClient({ user }: ProfileClientProps) {
                   <h3 className="font-semibold text-white">Social Links</h3>
                   <p className="text-xs text-gray-400 mt-0.5">Connect with me</p>
                 </div>
-                {/* Only show button if NO social links exist */}
-
                 {hasNoSocialLinks() && (
                   <button
                     onClick={() => router.push('/settings?tab=social-links')}
@@ -650,7 +663,6 @@ export default function ProfileClient({ user }: ProfileClientProps) {
                 )}
               </div>
               
-              {/* Has social links - display them */}
               {profile?.social_links && 
               typeof profile.social_links === 'object' && 
               Object.keys(profile.social_links).length > 0 ? (
@@ -712,7 +724,6 @@ export default function ProfileClient({ user }: ProfileClientProps) {
                   )}
                 </div>
               ) : (
-                /* Empty State - No social links */
                 <div className="text-center py-8">
                   <div className="w-16 h-16 rounded-full bg-purple-500/10 flex items-center justify-center mx-auto mb-3">
                     <LinkIcon className="w-8 h-8 text-purple-400" />
@@ -724,7 +735,8 @@ export default function ProfileClient({ user }: ProfileClientProps) {
             </div>
           </GlowCard>
         </div>
-        {/* RIGHT COLUMN - 8 columns wide */}
+        
+        {/* RIGHT COLUMN */}
         <div className="lg:col-span-8 space-y-6">
 
           {/* Stats Cards Row */}
@@ -732,18 +744,98 @@ export default function ProfileClient({ user }: ProfileClientProps) {
             <GlowCard className="p-4">
               <div className="text-center">
                 <BookOpen className="w-6 h-6 text-purple-400 mx-auto mb-2" />
-                <p className="text-2xl font-bold text-white">18</p>
+                <p className="text-2xl font-bold text-white">{profileStats.enrolled_courses}</p>
                 <p className="text-xs text-gray-400">Courses</p>
               </div>
             </GlowCard>
             <GlowCard className="p-4">
               <div className="text-center">
-                <Users className="w-6 h-6 text-pink-400 mx-auto mb-2" />
-                <p className="text-2xl font-bold text-white">24</p>
+                <Award className="w-6 h-6 text-pink-400 mx-auto mb-2" />
+                <p className="text-2xl font-bold text-white">{profileStats.completed_courses}</p>
+                <p className="text-xs text-gray-400">Completed</p>
+              </div>
+            </GlowCard>
+            <GlowCard className="p-4">
+              <div className="text-center">
+                <Users className="w-6 h-6 text-blue-400 mx-auto mb-2" />
+                <p className="text-2xl font-bold text-white">{profileStats.connections}</p>
                 <p className="text-xs text-gray-400">Connections</p>
               </div>
             </GlowCard>
+            <GlowCard className="p-4">
+              <div className="text-center">
+                <Code className="w-6 h-6 text-green-400 mx-auto mb-2" />
+                <p className="text-2xl font-bold text-white">{profileStats.skills_count}</p>
+                <p className="text-xs text-gray-400">Skills</p>
+              </div>
+            </GlowCard>
           </div>
+
+          {/* Achievements Section */}
+          <GlowCard>
+            <div className="p-5">
+              <div className="flex justify-between items-center mb-4">
+                <div>
+                  <h3 className="font-semibold text-white">Achievements</h3>
+                  <p className="text-xs text-gray-400 mt-0.5">Your learning milestones</p>
+                </div>
+                {achievements.length > 2 && (
+                  <button
+                    onClick={() => setShowAllAchievements(!showAllAchievements)}
+                    className="text-sm text-purple-400 hover:text-purple-300"
+                  >
+                    {showAllAchievements ? "Show Less" : "View All"}
+                  </button>
+                )}
+              </div>
+              <div className="space-y-3">
+                {displayedAchievements.map((achievement) => (
+                  <div
+                    key={achievement.id}
+                    className={`flex items-center gap-3 p-3 rounded-lg transition-colors ${
+                      achievement.earned
+                        ? "bg-green-500/10 border border-green-500/30"
+                        : "bg-gray-800/30 border border-gray-700"
+                    }`}
+                  >
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                      achievement.earned
+                        ? "bg-gradient-to-br from-green-500 to-emerald-600"
+                        : "bg-gray-700"
+                    }`}>
+                      {getAchievementIcon(achievement.icon)}
+                    </div>
+                    <div className="flex-1">
+                      <p className="font-medium text-white">{achievement.title}</p>
+                      <p className="text-xs text-gray-400">{achievement.description}</p>
+                      {achievement.progress !== undefined && achievement.progress < 100 && (
+                        <div className="mt-2">
+                          <div className="flex justify-between text-xs text-gray-400 mb-1">
+                            <span>Progress</span>
+                            <span>{achievement.progress}%</span>
+                          </div>
+                          <div className="w-full bg-gray-700 rounded-full h-1.5">
+                            <div
+                              className="bg-purple-500 h-1.5 rounded-full transition-all"
+                              style={{ width: `${achievement.progress}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      <span className="text-sm font-semibold text-purple-400">+{achievement.points}</span>
+                      {achievement.earned && achievement.dateEarned && (
+                        <p className="text-xs text-gray-500 mt-1">
+                          {new Date(achievement.dateEarned).toLocaleDateString()}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </GlowCard>
 
           {/* Activity Timeline */}
           <GlowCard>
@@ -756,29 +848,41 @@ export default function ProfileClient({ user }: ProfileClientProps) {
                 <Activity className="w-5 h-5 text-purple-400" />
               </div>
               <div className="space-y-3">
-                {activityTimeline.slice(0, 4).map((activity, index) => (
-                  <motion.div
-                    key={activity.id}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: index * 0.1 }}
-                    className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-800/30 transition-colors"
-                  >
-                    <div className="w-8 h-8 rounded-full bg-purple-500/20 flex items-center justify-center">
-                      {activity.type === "course" && <BookOpen className="w-4 h-4 text-purple-400" />}
-                      {activity.type === "achievement" && <Trophy className="w-4 h-4 text-yellow-400" />}
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm text-white">
-                        <span className="font-semibold">{activity.action}</span> {activity.title}
-                      </p>
-                      <p className="text-xs text-gray-500">{activity.date.toLocaleDateString()}</p>
-                    </div>
-                    <div className="text-right">
-                      <span className="text-xs text-purple-400 font-semibold">+{activity.points}</span>
-                    </div>
-                  </motion.div>
-                ))}
+                {activities.length === 0 ? (
+                  <div className="text-center py-8">
+                    <Clock className="w-12 h-12 text-gray-600 mx-auto mb-3" />
+                    <p className="text-gray-400">No recent activity</p>
+                    <p className="text-sm text-gray-500 mt-1">Start learning to see your progress!</p>
+                  </div>
+                ) : (
+                  activities.slice(0, 4).map((activity, index) => (
+                    <motion.div
+                      key={activity.id}
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: index * 0.1 }}
+                      className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-800/30 transition-colors"
+                    >
+                      <div className="w-8 h-8 rounded-full bg-purple-500/20 flex items-center justify-center">
+                        {activity.type === "course" && <BookOpen className="w-4 h-4 text-purple-400" />}
+                        {activity.type === "achievement" && <Trophy className="w-4 h-4 text-yellow-400" />}
+                        {activity.type === "assignment" && <FileText className="w-4 h-4 text-blue-400" />}
+                        {activity.type === "lesson" && <PlayCircle className="w-4 h-4 text-green-400" />}
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm text-white">
+                          <span className="font-semibold">{activity.action}</span> {activity.title}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          {activity.date ? new Date(activity.date).toLocaleDateString() : "Recently"}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-xs text-purple-400 font-semibold">+{activity.points}</span>
+                      </div>
+                    </motion.div>
+                  ))
+                )}
               </div>
             </div>
           </GlowCard>

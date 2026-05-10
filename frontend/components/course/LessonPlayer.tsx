@@ -1,4 +1,3 @@
-// components/course/LessonPlayer.tsx
 "use client";
 
 import { useState, useEffect, useRef } from "react";
@@ -26,6 +25,12 @@ interface LessonPlayerProps {
   hasPrevious?: boolean;
 }
 
+const getAuthToken = async () => {
+  const supabase = getSupabaseBrowserClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token;
+};
+
 export function LessonPlayer({
   lesson,
   courseClassId,
@@ -48,36 +53,34 @@ export function LessonPlayer({
   // Get class member ID
   useEffect(() => {
     const getClassMemberId = async () => {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) return;
-      
-      const { data: classMember } = await supabase
-        .from('class_members')
-        .select('id')
-        .eq('course_class_id', courseClassId)
-        .eq('user_id', user.id)
-        .single();
-      
-      if (classMember) {
+      const token = await getAuthToken();
+      if (!token) return;
+
+      // Get user profile to get user ID
+      const profileResponse = await fetch('/api/auth-service/profile', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!profileResponse.ok) return;
+      const user = await profileResponse.json();
+
+      // Get class member ID via backend
+      const classMemberResponse = await fetch(`/api/org-service/class-members/${courseClassId}/user/${user.id}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (classMemberResponse.ok) {
+        const classMember = await classMemberResponse.json();
         setClassMemberId(classMember.id);
-        
+
         // Load existing progress
-        const { data: progress } = await supabase
-          .from('lesson_progress')
-          .select('status, progress_percent')
-          .eq('class_member_id', classMember.id)
-          .eq('lesson_id', lesson.id)
-          .single();
-        
-        if (progress) {
+        const progressResponse = await fetch(`/api/org-service/lesson-progress?lesson_id=${lesson.id}&class_member_id=${classMember.id}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (progressResponse.ok) {
+          const progress = await progressResponse.json();
           setIsCompleted(progress.status === 'completed');
           setProgressPercent(progress.progress_percent || 0);
-          
-          if (lesson.content_type === 'video' && progress.progress_percent) {
-            setCurrentTime((progress.progress_percent / 100) * duration);
-          }
         }
       }
     };
@@ -96,20 +99,25 @@ export function LessonPlayer({
       if (newProgressPercent !== progressPercent) {
         setProgressPercent(newProgressPercent);
         
-        const supabase = getSupabaseBrowserClient();
-        await supabase
-          .from('lesson_progress')
-          .upsert({
+        const token = await getAuthToken();
+        if (!token) return;
+
+        const status = newProgressPercent >= 90 ? 'completed' : 'in_progress';
+        
+        await fetch('/api/org-service/lesson-progress', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
             class_member_id: classMemberId,
             lesson_id: lesson.id,
-            user_id: (await supabase.auth.getUser()).data.user?.id,
-            status: newProgressPercent >= 90 ? 'completed' : 'in_progress',
+            status: status,
             progress_percent: newProgressPercent,
-            last_accessed_at: new Date().toISOString(),
             completed_at: newProgressPercent >= 90 ? new Date().toISOString() : null,
-          }, {
-            onConflict: 'class_member_id,lesson_id'
-          });
+          })
+        });
         
         if (newProgressPercent >= 90 && !isCompleted) {
           setIsCompleted(true);
@@ -170,23 +178,26 @@ export function LessonPlayer({
     
     setIsLoading(true);
     try {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      await supabase
-        .from('lesson_progress')
-        .upsert({
+      const token = await getAuthToken();
+      if (!token) throw new Error("Authentication required");
+
+      const response = await fetch('/api/org-service/lesson-progress', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
           class_member_id: classMemberId,
           lesson_id: lesson.id,
-          user_id: user?.id,
           status: 'completed',
           progress_percent: 100,
-          last_accessed_at: new Date().toISOString(),
           completed_at: new Date().toISOString(),
-        }, {
-          onConflict: 'class_member_id,lesson_id'
-        });
-      
+        })
+      });
+
+      if (!response.ok) throw new Error("Failed to mark complete");
+
       setIsCompleted(true);
       setProgressPercent(100);
       toast.success("Lesson marked as complete!");

@@ -1,4 +1,4 @@
-// app/(main)/dashboard/page.tsx
+// frontend/app/(main)/dashboard/page.tsx
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
@@ -58,11 +58,13 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 import { LearningCalendar } from "@/components/dashboard/LearningCalendar";
 import { UpcomingItems } from "@/components/dashboard/UpcomingItems";
 import { RecentItems } from "@/components/dashboard/RecentItems";
+import { fetchUserRoleFromBackend } from "@/lib/role-api";
 
+// Types
 interface Organization {
   id: number;
   name: string;
-  role: "student" | "teacher" | "admin" | "sub_admin";
+  role: "student" | "teacher" | "admin";
 }
 
 interface EnrolledCourse {
@@ -115,15 +117,22 @@ interface TopCourse {
   completion: number;
 }
 
+// Helper to get auth token
+const getAuthToken = async () => {
+  const supabase = getSupabaseBrowserClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token;
+};
+
 export default function UnifiedDashboardPage() {
   const router = useRouter();
-  const supabase = getSupabaseBrowserClient();
   
   // User & Organization State
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [selectedOrgId, setSelectedOrgId] = useState<number | null>(null);
   const [showOrgSwitcher, setShowOrgSwitcher] = useState(false);
   const [userRoles, setUserRoles] = useState<Set<string>>(new Set());
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   
   // UI State
   const [greeting, setGreeting] = useState("");
@@ -177,8 +186,8 @@ export default function UnifiedDashboardPage() {
   }, []);
 
   useEffect(() => {
-    if (selectedOrgId && initialLoadComplete) {
-      loadDashboardData();
+    if (selectedOrgId && initialLoadComplete && activeTab === "admin") {
+      loadAdminDashboard();
     }
   }, [selectedOrgId, activeTab, initialLoadComplete]);
 
@@ -187,6 +196,7 @@ export default function UnifiedDashboardPage() {
       setLoading(true);
       setDataLoadError(null);
       
+      const supabase = getSupabaseBrowserClient();
       const { data: { user }, error: userError } = await supabase.auth.getUser();
       if (userError) throw userError;
       
@@ -194,19 +204,21 @@ export default function UnifiedDashboardPage() {
         router.push("/login");
         return;
       }
+      
+      setCurrentUserId(user.id);
 
-      // Get user profile
-      const { data: profile, error: profileError } = await supabase
-        .from("profiles")
-        .select("first_name, last_name, username")
-        .eq("id", user.id)
-        .single();
-
-      if (profileError) {
-        console.error("Profile fetch error:", profileError);
+      // Get user profile via backend
+      const token = await getAuthToken();
+      if (!token) {
+        throw new Error("No auth token");
       }
 
-      if (profile) {
+      const profileResponse = await fetch('/api/auth-service/profile', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (profileResponse.ok) {
+        const profile = await profileResponse.json();
         if (profile.first_name && profile.last_name) {
           setDisplayName(`${profile.first_name} ${profile.last_name}`);
         } else if (profile.first_name) {
@@ -220,87 +232,40 @@ export default function UnifiedDashboardPage() {
         setDisplayName(user.email?.split('@')[0] || "Learner");
       }
 
-      // Get user's organizations and roles
-      const { data: memberships, error: membershipsError } = await supabase
-        .from("organization_members")
-        .select(`
-          organization_id,
-          member_role,
-          organizations!inner(id, name)
-        `)
-        .eq("user_id", user.id)
-        .not("member_role", "eq", "pending");
-
-      if (membershipsError) {
-        console.error("Memberships fetch error:", membershipsError);
-      }
-
-      const orgs: Organization[] = [];
-      const roles = new Set<string>();
-
-      memberships?.forEach(m => {
-        const role = m.member_role;
-        orgs.push({
-          id: m.organization_id,
-          name: m.organizations?.name || `Organization ${m.organization_id}`,
-          role: role as Organization["role"],
-        });
-        if (role === "admin") roles.add("admin");
-        if (role === "sub_admin") roles.add("admin");
-        if (role === "teacher") roles.add("teacher");
-        roles.add("student");
+      // Get user's organizations and roles via new backend endpoint
+      const membershipsResponse = await fetch('/api/org-service/organizations/memberships', {
+        headers: { 'Authorization': `Bearer ${token}` }
       });
 
-      // Also check class_members for student-only orgs
-      if (orgs.length === 0) {
-        const { data: classMembers, error: classMembersError } = await supabase
-          .from("class_members")
-          .select(`
-            course_class_id,
-            course_classes!inner(
-              course_id,
-              courses!inner(
-                organization_id,
-                organizations!inner(id, name)
-              )
-            )
-          `)
-          .eq("user_id", user.id)
-          .limit(1);
-
-        if (classMembersError) {
-          console.error("Class members fetch error:", classMembersError);
+      if (membershipsResponse.ok) {
+        const data = await membershipsResponse.json();
+        setOrganizations(data.organizations || []);
+        setUserRoles(new Set(data.roles || ["student"]));
+        
+        // Set default organization
+        if (data.organizations && data.organizations.length > 0) {
+          setSelectedOrgId(data.organizations[0].id);
         }
 
-        if (classMembers && classMembers.length > 0) {
-          const org = classMembers[0]?.course_classes?.courses?.organizations;
-          if (org) {
-            orgs.push({ id: org.id, name: org.name, role: "student" });
-            roles.add("student");
-          }
+        // Set default active tab based on highest role
+        const roles = new Set(data.roles || []);
+        if (roles.has("admin")) {
+          setActiveTab("admin");
+        } else if (roles.has("teacher")) {
+          setActiveTab("teaching");
         } else {
-          roles.add("student");
+          setActiveTab("learning");
         }
-      }
-
-      setOrganizations(orgs);
-      setUserRoles(roles);
-      
-      // Set default organization
-      if (orgs.length > 0) {
-        setSelectedOrgId(orgs[0].id);
-      }
-
-      // Set default active tab based on highest role
-      if (roles.has("admin")) {
-        setActiveTab("admin");
-      } else if (roles.has("teacher")) {
-        setActiveTab("teaching");
       } else {
+        // Fallback: user has no organization memberships
+        setUserRoles(new Set(["student"]));
         setActiveTab("learning");
       }
       
       setInitialLoadComplete(true);
+      
+      // Load initial dashboard data
+      await loadDashboardData();
 
     } catch (error) {
       console.error("Error loading user data:", error);
@@ -312,22 +277,15 @@ export default function UnifiedDashboardPage() {
   };
 
   const loadDashboardData = async () => {
-    if (!selectedOrgId) return;
-    
-    try {
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
-      if (userError) throw userError;
-      if (!user) return;
+    const token = await getAuthToken();
+    if (!token) return;
 
-      // Load based on active tab for better performance
+    try {
+      // Load based on active tab
       if (activeTab === "learning") {
-        await loadLearningData(user.id);
-      }
-      if (activeTab === "teaching" && (userRoles.has("teacher") || userRoles.has("admin"))) {
-        await loadTeachingData(user.id);
-      }
-      if (activeTab === "admin" && userRoles.has("admin")) {
-        await loadAdminData(user.id);
+        await loadStudentDashboard(token);
+      } else if (activeTab === "teaching") {
+        await loadTeacherDashboard(token);
       }
     } catch (error) {
       console.error("Error loading dashboard data:", error);
@@ -335,695 +293,103 @@ export default function UnifiedDashboardPage() {
     }
   };
 
-  const loadLearningData = async (userId: string) => {
+  const loadStudentDashboard = async (token: string) => {
     try {
-      // Get enrolled courses via class_members
-      const { data: classMembers, error: classMembersError } = await supabase
-        .from("class_members")
-        .select(`
-          id,
-          enrolled_at,
-          course_class_id,
-          course_classes!inner(
-            id,
-            course_id,
-            courses!inner(
-              id,
-              title,
-              description,
-              thumbnail,
-              created_by,
-              profiles!courses_created_by_fkey(first_name, last_name, username)
-            )
-          )
-        `)
-        .eq("user_id", userId)
-        .eq("role", "student");
+      const response = await fetch('/api/org-service/dashboard/student', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
 
-      if (classMembersError) {
-        console.error("Error fetching class members:", classMembersError);
-        return;
+      if (!response.ok) {
+        throw new Error("Failed to load student dashboard");
       }
 
-      if (!classMembers || classMembers.length === 0) {
-        setEnrolledCourses([]);
-        setStudentStats({
-          total_courses: 0,
-          completed_courses: 0,
-          average_progress: 0,
-          streak_days: 0,
-          pending_tasks: 0,
-        });
-        return; // ← Important: exit early
-      }
-
-      // --- Batch all course IDs ---
-      const courseIds = [...new Set(
-        classMembers
-          .filter(cm => cm.course_classes?.courses)
-          .map(cm => cm.course_classes.courses.id)
-      )];
-
-      if (courseIds.length === 0) {
-        setEnrolledCourses([]);
-        return;
-      }
-
-      // --- QUERY 1: All modules and lessons for these courses ---
-      const { data: allModules, error: modulesError } = await supabase
-        .from("modules")
-        .select(`
-          id,
-          course_id,
-          classes!inner (
-            id,
-            lessons!inner (
-              id,
-              title
-            )
-          )
-        `)
-        .in("course_id", courseIds);
-
-      if (modulesError) {
-        console.error("Error fetching modules:", modulesError);
-      }
-
-      // --- Build lesson count per course ---
-      const lessonCountMap = new Map<number, number>();
-      // --- NEW: Build lesson_id -> course_id mapping for recent activity ---
-      const lessonToCourseMap = new Map<number, number>();
+      const data = await response.json();
       
-      allModules?.forEach((module: any) => {
-        let lessonCount = 0;
-        module.classes?.forEach((classItem: any) => {
-          classItem.lessons?.forEach((lesson: any) => {
-            lessonCount++;
-            // Store mapping: lesson_id -> course_id
-            lessonToCourseMap.set(lesson.id, module.course_id);
-          });
-        });
-        lessonCountMap.set(module.course_id, (lessonCountMap.get(module.course_id) || 0) + lessonCount);
-      });
-
-      // --- QUERY 2: All lesson progress for these class members ---
-      const classMemberIds = classMembers.map(cm => cm.id);
-      const { data: allProgress, error: progressError } = await supabase
-        .from("lesson_progress")
-        .select("class_member_id, lesson_id, status")
-        .in("class_member_id", classMemberIds);
-
-      if (progressError) {
-        console.error("Error fetching lesson progress:", progressError);
-      }
-
-      // Group progress by class_member_id
-      const progressByMember = new Map<string, { completed: Set<number> }>();
-      allProgress?.forEach((p: any) => {
-        if (!progressByMember.has(p.class_member_id)) {
-          progressByMember.set(p.class_member_id, { completed: new Set() });
-        }
-        if (p.status === "completed") {
-          progressByMember.get(p.class_member_id)!.completed.add(p.lesson_id);
-        }
-      });
-
-      // --- QUERY 3: All upcoming assignments ---
-      const { data: allAssignments, error: assignmentsError } = await supabase
-        .from("assignments")
-        .select("id, title, due_at, course_id, courses!inner(title)")
-        .in("course_id", courseIds)
-        .gte("due_at", new Date().toISOString())
-        .order("due_at", { ascending: true })
-        .limit(5);
-
-      if (assignmentsError) {
-        console.error("Error fetching assignments:", assignmentsError);
-      }
-
-      // --- QUERY 4: All recent completed lessons ---
-      const { data: allRecentProgress, error: recentError } = await supabase
-        .from("lesson_progress")
-        .select(`
-          id,
-          completed_at,
-          lesson_id,
-          class_member_id
-        `)
-        .in("class_member_id", classMemberIds)
-        .eq("status", "completed")
-        .not("completed_at", "is", null)
-        .order("completed_at", { ascending: false })
-        .limit(10);
-
-      if (recentError) {
-        console.error("Error fetching recent progress:", recentError);
-      }
-
-      // --- Build courses using batched data ---
-      const coursesMap = new Map<number, EnrolledCourse>();
-      let totalProgressSum = 0;
-      let completedCount = 0;
-
-      for (const cm of classMembers) {
-        const course = cm.course_classes?.courses;
-        if (!course) continue;
-
-        // Skip if user is the instructor
-        if (course.created_by === userId) {
-          continue;
-        }
-
-        const totalLessons = lessonCountMap.get(course.id) || 0;
-        const memberProgress = progressByMember.get(cm.id);
-        const completedLessons = memberProgress?.completed.size || 0;
-        const progress = totalLessons > 0 ? (completedLessons / totalLessons) * 100 : 0;
-        const existingCourse = coursesMap.get(course.id);
-
-        if (existingCourse) {
-          if (progress > existingCourse.progress) {
-            existingCourse.progress = Math.round(progress);
-            existingCourse.completed_lessons = completedLessons;
-            existingCourse.last_accessed_at = cm.enrolled_at;
-          }
-        } else {
-          coursesMap.set(course.id, {
-            id: course.id,
-            title: course.title,
-            description: course.description || "",
-            thumbnail: course.thumbnail || "",
-            instructor_name: course.profiles?.first_name 
-              ? `${course.profiles.first_name} ${course.profiles.last_name || ""}`.trim()
-              : course.profiles?.username || "Instructor",
-            progress: Math.round(progress),
-            completed_lessons: completedLessons,
-            total_lessons: totalLessons,
-            last_accessed_at: cm.enrolled_at,
-            rating: 0,
-            certificate_earned: false,
-          });
-        }
-
-        totalProgressSum += progress;
-        if (progress === 100) completedCount++;
-      }
-
-      const coursesData = Array.from(coursesMap.values());
-      setEnrolledCourses(coursesData);
-      setStudentStats({
-        total_courses: coursesData.length,
-        completed_courses: completedCount,
-        average_progress: coursesData.length > 0 ? Math.round(totalProgressSum / coursesData.length) : 0,
+      setEnrolledCourses(data.enrolled_courses || []);
+      setStudentStats(data.stats || {
+        total_courses: 0,
+        completed_courses: 0,
+        average_progress: 0,
         streak_days: 0,
         pending_tasks: 0,
       });
-
-      // Set upcoming deadlines
-      setUpcomingDeadlines(allAssignments || []);
-
-      // --- FIXED: Build recent activity using the lesson-to-course mapping ---
-      const uniqueActivities = new Map();
-      
-      for (const progress of allRecentProgress || []) {
-        // Skip if we already have this lesson
-        if (uniqueActivities.has(progress.lesson_id)) continue;
-        
-        // Find which course this lesson belongs to using our mapping
-        const courseId = lessonToCourseMap.get(progress.lesson_id);
-        const course = coursesData.find(c => c.id === courseId);
-        
-        // Get lesson title (optional - you can fetch if needed)
-        let lessonTitle = "Lesson";
-        // If you want lesson titles, you'd need to fetch them or store in mapping
-        
-        uniqueActivities.set(progress.lesson_id, {
-          id: `${progress.id}-${Date.now()}-${progress.lesson_id}`,
-          type: "lesson",
-          title: `Lesson ${progress.lesson_id}`, // Or fetch actual title
-          courseName: course?.title || "Course",
-          completed_at: progress.completed_at,
-          status: "completed",
-        });
-      }
-      
-      setRecentActivity(Array.from(uniqueActivities.values()).slice(0, 5));
+      setUpcomingDeadlines(data.upcoming_deadlines || []);
+      setRecentActivity(data.recent_activity || []);
 
     } catch (error) {
-      console.error("Error in loadLearningData:", error);
+      console.error("Error loading student dashboard:", error);
+      toast.error("Failed to load your learning data");
     }
   };
 
-  const loadTeachingData = async (userId: string) => {
+  const loadTeacherDashboard = async (token: string) => {
     try {
-      // Get courses created by this user
-      const { data: courses, error: coursesError } = await supabase
-        .from("courses")
-        .select("*")
-        .eq("created_by", userId)
-        .order("created_at", { ascending: false });
-
-      if (coursesError) {
-        console.error("Error fetching teacher courses:", coursesError);
-        return;
-      }
-
-      if (!courses || courses.length === 0) {
-        setTeacherCourses([]);
-        setTeacherStats({
-          total_students: 0,
-          active_courses: 0,
-          average_rating: 0,
-          completion_rate: 0,
-        });
-        setPendingGrading([]);
-        return;
-      }
-
-      const courseIds = courses.map(c => c.id);
-
-      // --- OPTIMIZATION: Single query for ALL course classes ---
-      const { data: allCourseClasses, error: classesError } = await supabase
-        .from("course_classes")
-        .select("id, course_id")
-        .in("course_id", courseIds);
-
-      if (classesError) {
-        console.error("Error fetching course classes:", classesError);
-      }
-
-      // Build classIds by course
-      const classIdsByCourse = new Map<number, number[]>();
-      allCourseClasses?.forEach((cc: any) => {
-        if (!classIdsByCourse.has(cc.course_id)) {
-          classIdsByCourse.set(cc.course_id, []);
-        }
-        classIdsByCourse.get(cc.course_id)!.push(cc.id);
+      const response = await fetch('/api/org-service/dashboard/teacher', {
+        headers: { 'Authorization': `Bearer ${token}` }
       });
 
-      const allClassIds = allCourseClasses?.map(cc => cc.id) || [];
-
-      // --- OPTIMIZATION: Single query for ALL student counts ---
-      let studentCountMap = new Map<number, number>();
-      if (allClassIds.length > 0) {
-        const { data: allClassMembers, error: membersError } = await supabase
-          .from("class_members")
-          .select("course_class_id, user_id")
-          .in("course_class_id", allClassIds)
-          .eq("role", "student");
-
-        if (membersError) {
-          console.error("Error fetching class members:", membersError);
-        } else {
-          // Count unique students per course class, then aggregate by course
-          const studentsPerClass = new Map<number, Set<string>>();
-          allClassMembers?.forEach((cm: any) => {
-            if (!studentsPerClass.has(cm.course_class_id)) {
-              studentsPerClass.set(cm.course_class_id, new Set());
-            }
-            studentsPerClass.get(cm.course_class_id)!.add(cm.user_id);
-          });
-
-          // Aggregate by course
-          for (const [courseId, classIds] of classIdsByCourse) {
-            let uniqueStudents = new Set<string>();
-            for (const classId of classIds) {
-              const students = studentsPerClass.get(classId);
-              if (students) {
-                students.forEach(s => uniqueStudents.add(s));
-              }
-            }
-            studentCountMap.set(courseId, uniqueStudents.size);
-          }
-        }
+      if (!response.ok) {
+        throw new Error("Failed to load teacher dashboard");
       }
 
-      // --- OPTIMIZATION: Single query for ALL reviews ---
-      const { data: allReviews, error: reviewsError } = await supabase
-        .from("course_reviews")
-        .select("course_id, rating")
-        .in("course_id", courseIds);
-
-      if (reviewsError) {
-        console.error("Error fetching reviews:", reviewsError);
-      }
-
-      // Calculate average rating per course
-      const ratingMap = new Map<number, { sum: number; count: number }>();
-      allReviews?.forEach((review: any) => {
-        if (!ratingMap.has(review.course_id)) {
-          ratingMap.set(review.course_id, { sum: 0, count: 0 });
-        }
-        const entry = ratingMap.get(review.course_id)!;
-        entry.sum += review.rating;
-        entry.count++;
-      });
-
-      // --- OPTIMIZATION: Single query for ALL assignments and submissions ---
-      const { data: allAssignments, error: assignError } = await supabase
-        .from("assignments")
-        .select("id, title, due_at, course_id")
-        .in("course_id", courseIds)
-        .order("due_at", { ascending: true })
-        .limit(5);
-
-      if (assignError) {
-        console.error("Error fetching assignments:", assignError);
-      }
-
-      const assignmentIds = allAssignments?.map(a => a.id) || [];
-      let pendingGradingMap = new Map<number, { submissions: number; title: string; due_date: string; course_name: string }>();
-
-      if (assignmentIds.length > 0) {
-        const { data: allSubmissions, error: subError } = await supabase
-          .from("submissions")
-          .select("assignment_id, grade")
-          .in("assignment_id", assignmentIds);
-
-        if (subError) {
-          console.error("Error fetching submissions:", subError);
-        } else {
-          // Count pending per assignment
-          const pendingCount = new Map<number, number>();
-          allSubmissions?.forEach((sub: any) => {
-            if (sub.grade === null) {
-              pendingCount.set(sub.assignment_id, (pendingCount.get(sub.assignment_id) || 0) + 1);
-            }
-          });
-
-          // Build pending grading map
-          allAssignments?.forEach((assignment: any) => {
-            const count = pendingCount.get(assignment.id) || 0;
-            if (count > 0) {
-              pendingGradingMap.set(assignment.id, {
-                submissions: count,
-                title: assignment.title,
-                due_date: assignment.due_at,
-                course_name: courses.find(c => c.id === assignment.course_id)?.title || "Unknown",
-              });
-            }
-          });
-        }
-      }
-
-      // Build teacher courses data
-      const teacherCoursesData: TeacherCourse[] = [];
-      let totalStudents = 0;
-      let totalRatingSum = 0;
-      let ratingCount = 0;
-
-      for (const course of courses) {
-        const studentCount = studentCountMap.get(course.id) || 0;
-        totalStudents += studentCount;
-
-        const ratingData = ratingMap.get(course.id);
-        const avgRating = ratingData ? ratingData.sum / ratingData.count : 0;
-        if (ratingData) {
-          totalRatingSum += avgRating;
-          ratingCount++;
-        }
-
-        teacherCoursesData.push({
-          id: course.id,
-          title: course.title,
-          thumbnail: course.thumbnail || "",
-          students: studentCount,
-          progress: 0,
-          rating: avgRating,
-          status: course.status === "published" ? "published" : "draft",
-        });
-      }
-
-      setTeacherCourses(teacherCoursesData);
-      setTeacherStats({
-        total_students: totalStudents,
-        active_courses: courses.filter(c => c.status === "published").length,
-        average_rating: ratingCount > 0 ? totalRatingSum / ratingCount : 0,
+      const data = await response.json();
+      
+      setTeacherCourses(data.courses || []);
+      setTeacherStats(data.stats || {
+        total_students: 0,
+        active_courses: 0,
+        average_rating: 0,
         completion_rate: 0,
       });
-
-      // Set pending grading
-      const pendingList: PendingGrading[] = Array.from(pendingGradingMap.values())
-        .map(p => ({
-          id: 0, // We don't have the original assignment ID in this structure
-          title: p.title,
-          course_name: p.course_name,
-          submissions: p.submissions,
-          due_date: p.due_date,
-        }))
-        .slice(0, 3);
-      
-      setPendingGrading(pendingList);
+      setPendingGrading(data.pending_grading || []);
 
     } catch (error) {
-      console.error("Error in loadTeachingData:", error);
+      console.error("Error loading teacher dashboard:", error);
+      toast.error("Failed to load your teaching data");
     }
   };
 
-  const loadAdminData = async (userId: string) => {
+  const loadAdminDashboard = async () => {
     if (!selectedOrgId) return;
     
+    const token = await getAuthToken();
+    if (!token) return;
+
     try {
-      // Check if user is admin of this organization
-      const { data: memberCheck, error: memberError } = await supabase
-        .from("organization_members")
-        .select("member_role")
-        .eq("organization_id", selectedOrgId)
-        .eq("user_id", userId)
-        .single();
-
-      if (memberError) {
-        console.error("Error checking member role:", memberError);
-      }
-
-      if (!memberCheck || (memberCheck.member_role !== "admin" && memberCheck.member_role !== "sub_admin")) {
-        setAdminStats({
-          total_students: 0,
-          active_students: 0,
-          total_courses: 0,
-          published_courses: 0,
-          average_rating: 0,
-          completion_rate: 0,
-          pending_approvals: 0,
-        });
-        setTopCourses([]);
-        return;
-      }
-
-      // Get all courses in this organization
-      const { data: courses, error: coursesError } = await supabase
-        .from("courses")
-        .select("*")
-        .eq("organization_id", selectedOrgId);
-
-      if (coursesError) {
-        console.error("Error fetching courses:", coursesError);
-      }
-
-      const totalCourses = courses?.length || 0;
-      const publishedCourses = courses?.filter(c => c.status === "published").length || 0;
-
-      if (!courses || courses.length === 0) {
-        setAdminStats({
-          total_students: 0,
-          active_students: 0,
-          total_courses: 0,
-          published_courses: 0,
-          average_rating: 0,
-          completion_rate: 0,
-          pending_approvals: 0,
-        });
-        setTopCourses([]);
-        return;
-      }
-
-      const courseIds = courses.map(c => c.id);
-
-      // --- OPTIMIZATION: Single query for ALL course classes ---
-      const { data: allCourseClasses, error: classesError } = await supabase
-        .from("course_classes")
-        .select("id, course_id")
-        .in("course_id", courseIds);
-
-      if (classesError) {
-        console.error("Error fetching course classes:", classesError);
-      }
-
-      const classIdsByCourse = new Map<number, number[]>();
-      const allClassIds: number[] = [];
-
-      allCourseClasses?.forEach((cc: any) => {
-        allClassIds.push(cc.id);
-        if (!classIdsByCourse.has(cc.course_id)) {
-          classIdsByCourse.set(cc.course_id, []);
-        }
-        classIdsByCourse.get(cc.course_id)!.push(cc.id);
+      const response = await fetch(`/api/org-service/dashboard/admin?organization_id=${selectedOrgId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
       });
 
-      // --- OPTIMIZATION: Single query for ALL class members (students) ---
-      let totalStudents = 0;
-      let activeStudents = 0;
-      let studentCountByCourse = new Map<number, number>();
-      let completionByCourse = new Map<number, number>();
-
-      if (allClassIds.length > 0) {
-        const { data: allClassMembers, error: membersError } = await supabase
-          .from("class_members")
-          .select("id, user_id, enrolled_at, course_class_id")
-          .in("course_class_id", allClassIds)
-          .eq("role", "student");
-
-        if (membersError) {
-          console.error("Error fetching class members:", membersError);
-        } else {
-          // Calculate totals
-          const uniqueStudents = new Set(allClassMembers?.map(cm => cm.user_id));
-          totalStudents = uniqueStudents.size;
-
-          const thirtyDaysAgo = new Date();
-          thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-          
-          const activeSet = new Set();
-          allClassMembers?.forEach(cm => {
-            if (new Date(cm.enrolled_at) > thirtyDaysAgo) {
-              activeSet.add(cm.user_id);
-            }
-          });
-          activeStudents = activeSet.size;
-
-          // Count students per course
-          const studentsPerClassMemberId = new Map<number, Set<string>>();
-          allClassMembers?.forEach((cm: any) => {
-            if (!studentsPerClassMemberId.has(cm.course_class_id)) {
-              studentsPerClassMemberId.set(cm.course_class_id, new Set());
-            }
-            studentsPerClassMemberId.get(cm.course_class_id)!.add(cm.user_id);
-          });
-
-          // Aggregate by course
-          for (const [courseId, classIds] of classIdsByCourse) {
-            let uniqueCourseStudents = new Set<string>();
-            for (const classId of classIds) {
-              const students = studentsPerClassMemberId.get(classId);
-              if (students) {
-                students.forEach(s => uniqueCourseStudents.add(s));
-              }
-            }
-            studentCountByCourse.set(courseId, uniqueCourseStudents.size);
-          }
-
-          // --- Get completion rates per course ---
-          const classMemberIds = allClassMembers?.map(cm => cm.id) || [];
-          if (classMemberIds.length > 0) {
-            const { data: allProgress, error: progressError } = await supabase
-              .from("lesson_progress")
-              .select("class_member_id, status")
-              .in("class_member_id", classMemberIds);
-
-            if (progressError) {
-              console.error("Error fetching progress:", progressError);
-            } else {
-              const progressByClassMember = new Map<number, { total: number; completed: number }>();
-              allProgress?.forEach((p: any) => {
-                if (!progressByClassMember.has(p.class_member_id)) {
-                  progressByClassMember.set(p.class_member_id, { total: 0, completed: 0 });
-                }
-                const stats = progressByClassMember.get(p.class_member_id)!;
-                stats.total++;
-                if (p.status === "completed") stats.completed++;
-              });
-
-              // Calculate completion rate per course by mapping class members to courses
-              const classMemberToCourse = new Map<number, number>();
-              allClassMembers?.forEach((cm: any) => {
-                // Find which course this class member belongs to
-                for (const [courseId, classIds] of classIdsByCourse) {
-                  if (classIds.includes(cm.course_class_id)) {
-                    classMemberToCourse.set(cm.id, courseId);
-                    break;
-                  }
-                }
-              });
-
-              const courseCompletion = new Map<number, { total: number; completed: number }>();
-              for (const [cmId, stats] of progressByClassMember) {
-                const courseId = classMemberToCourse.get(cmId);
-                if (courseId) {
-                  if (!courseCompletion.has(courseId)) {
-                    courseCompletion.set(courseId, { total: 0, completed: 0 });
-                  }
-                  const courseStats = courseCompletion.get(courseId)!;
-                  courseStats.total += stats.total;
-                  courseStats.completed += stats.completed;
-                }
-              }
-
-              for (const [courseId, stats] of courseCompletion) {
-                completionByCourse.set(courseId, stats.total > 0 ? (stats.completed / stats.total) * 100 : 0);
-              }
-            }
-          }
-        }
+      if (!response.ok) {
+        throw new Error("Failed to load admin dashboard");
       }
 
-      // --- OPTIMIZATION: Single query for ALL reviews ---
-      const { data: allReviews, error: reviewsError } = await supabase
-        .from("course_reviews")
-        .select("course_id, rating")
-        .in("course_id", courseIds);
-
-      if (reviewsError) {
-        console.error("Error fetching reviews:", reviewsError);
-      }
-
-      const ratingByCourse = new Map<number, { sum: number; count: number }>();
-      allReviews?.forEach((review: any) => {
-        if (!ratingByCourse.has(review.course_id)) {
-          ratingByCourse.set(review.course_id, { sum: 0, count: 0 });
-        }
-        const entry = ratingByCourse.get(review.course_id)!;
-        entry.sum += review.rating;
-        entry.count++;
-      });
-
-      // Build courses with stats
-      const coursesWithStats = courses.map(course => ({
-        id: course.id,
-        title: course.title,
-        students: studentCountByCourse.get(course.id) || 0,
-        rating: (() => {
-          const r = ratingByCourse.get(course.id);
-          return r ? r.sum / r.count : 0;
-        })(),
-        completion: completionByCourse.get(course.id) || 0,
-      }));
-
-      const topCoursesSorted = [...coursesWithStats]
-        .sort((a, b) => b.students - a.students)
-        .slice(0, 3);
-
-      const avgRating = coursesWithStats.reduce((sum, c) => sum + c.rating, 0) / (coursesWithStats.length || 1);
-      const avgCompletion = coursesWithStats.reduce((sum, c) => sum + c.completion, 0) / (coursesWithStats.length || 1);
-
-      setAdminStats({
-        total_students: totalStudents,
-        active_students: activeStudents,
-        total_courses: totalCourses,
-        published_courses: publishedCourses,
-        average_rating: Math.round(avgRating * 10) / 10,
-        completion_rate: Math.round(avgCompletion),
+      const data = await response.json();
+      
+      setAdminStats(data.stats || {
+        total_students: 0,
+        active_students: 0,
+        total_courses: 0,
+        published_courses: 0,
+        average_rating: 0,
+        completion_rate: 0,
         pending_approvals: 0,
       });
-
-      setTopCourses(topCoursesSorted);
+      setTopCourses(data.top_courses || []);
 
     } catch (error) {
-      console.error("Error loading admin data:", error);
+      console.error("Error loading admin dashboard:", error);
+      toast.error("Failed to load organization analytics");
     }
   };
 
   const switchOrganization = (orgId: number) => {
     setSelectedOrgId(orgId);
     setShowOrgSwitcher(false);
+    // Reload admin dashboard when switching orgs
+    if (activeTab === "admin") {
+      loadAdminDashboard();
+    }
   };
 
   const currentOrg = organizations.find(o => o.id === selectedOrgId);
@@ -1074,7 +440,7 @@ export default function UnifiedDashboardPage() {
             </p>
           </div>
 
-          {/* Organization Switcher - MODIFY to only show for students */}
+          {/* Organization Switcher */}
           {organizations.length > 1 && (userRoles.has("admin") || userRoles.has("teacher")) ? (
             // Teachers/Admins: Show organization name as text, not a switcher
             <div className="flex items-center gap-2 px-4 py-2 bg-slate-800/50 border border-slate-700 rounded-lg">
@@ -1082,7 +448,7 @@ export default function UnifiedDashboardPage() {
               <span className="text-white">{currentOrg?.name}</span>
             </div>
           ) : organizations.length > 1 ? (
-            // Students: Show organization switcher (keep existing)
+            // Students: Show organization switcher
             <div className="relative">
               <button
                 onClick={() => setShowOrgSwitcher(!showOrgSwitcher)}
@@ -1154,14 +520,7 @@ export default function UnifiedDashboardPage() {
               
               {/* Right Column - Upcoming Items */}
               <div className="space-y-6">
-                <UpcomingItems items={upcomingDeadlines.map(d => ({
-                  id: d.id,
-                  title: d.title,
-                  type: "assignment",
-                  courseName: d.courses?.title || "Course",
-                  date: new Date(d.due_at),
-                  dueDate: new Date(d.due_at),
-                }))} />
+                <UpcomingItems items={upcomingDeadlines} />
                 <RecentItems items={recentActivity} />
               </div>
             </div>
@@ -1304,11 +663,12 @@ export default function UnifiedDashboardPage() {
 
           {/* ========== ADMIN / ORGANIZATION ADMIN TAB ========== */}
           <TabsContent value="admin" className="space-y-6">
-            {/* Admin Stats (no loading spinner inside) */}
+            {/* Admin Stats */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <StatCard icon={Users} label="Total Students" value={adminStats.total_students} />
               <StatCard icon={Activity} label="Active Students" value={adminStats.active_students} />
               <StatCard icon={BookOpen} label="Published Courses" value={adminStats.published_courses} />
+              <StatCard icon={Star} label="Avg. Rating" value={adminStats.average_rating.toFixed(1)} />
             </div>
 
             {/* Quick Actions */}

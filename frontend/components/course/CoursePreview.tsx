@@ -25,62 +25,58 @@ export function CoursePreview({ courseId, courseTitle, courseDescription, onEnro
   const [loading, setLoading] = useState(true);
   const [isEnrolled, setIsEnrolled] = useState(false);
 
+  const getAuthToken = async () => {
+    const supabase = getSupabaseBrowserClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token;
+  };
+
   useEffect(() => {
     checkEnrollment();
     fetchPreviewLessons();
   }, [courseId]);
 
   const checkEnrollment = async () => {
-    const supabase = getSupabaseBrowserClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    
-    if (user) {
-      const { data } = await supabase
-        .from("course_members")
-        .select("id")
-        .eq("course_id", courseId)
-        .eq("user_id", user.id)
-        .maybeSingle();
+    const token = await getAuthToken();
+    if (!token) return;
+
+    try {
+      // Get user profile to get user ID
+      const profileResponse = await fetch('/api/auth-service/profile', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       
-      setIsEnrolled(!!data);
+      if (!profileResponse.ok) return;
+      const userProfile = await profileResponse.json();
+      
+      // Check enrollment via backend
+      const enrollmentResponse = await fetch(`/api/org-service/courses/${courseId}/enrollment/status`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (enrollmentResponse.ok) {
+        const data = await enrollmentResponse.json();
+        setIsEnrolled(data.enrolled || false);
+      }
+    } catch (error) {
+      console.error("Error checking enrollment:", error);
     }
   };
 
   const fetchPreviewLessons = async () => {
     setLoading(true);
     try {
-      const supabase = getSupabaseBrowserClient();
-      
-      // Get first module
-      const { data: firstModule } = await supabase
-        .from("modules")
-        .select("id")
-        .eq("course_id", courseId)
-        .order("order_index", { ascending: true })
-        .limit(1)
-        .single();
+      const token = await getAuthToken();
+      if (!token) return;
 
-      if (firstModule) {
-        // Get first class
-        const { data: firstClass } = await supabase
-          .from("classes")
-          .select("id")
-          .eq("module_id", firstModule.id)
-          .order("order_index", { ascending: true })
-          .limit(1)
-          .single();
+      // Get preview lessons via backend API
+      const response = await fetch(`/api/org-service/courses/${courseId}/preview-lessons`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
 
-        if (firstClass) {
-          // Get preview lessons (first 2 lessons)
-          const { data: lessons } = await supabase
-            .from("lessons")
-            .select("id, title, content_type, order_index")
-            .eq("class_id", firstClass.id)
-            .order("order_index", { ascending: true })
-            .limit(2);
-          
-          setPreviewLessons(lessons || []);
-        }
+      if (response.ok) {
+        const data = await response.json();
+        setPreviewLessons(data.lessons || []);
       }
     } catch (error) {
       console.error("Error fetching preview lessons:", error);

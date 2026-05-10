@@ -1,4 +1,3 @@
-// frontend/components/course/ManageStudents.tsx
 "use client";
 
 import { useState, useEffect } from "react";
@@ -8,7 +7,6 @@ import { GlowButton } from "@/components/lms/GlowButton";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { getEnrolledStudents, removeStudentFromCourse } from "@/lib/supabase/enrollment";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 
 interface ManageStudentsProps {
@@ -16,16 +14,51 @@ interface ManageStudentsProps {
   courseName: string;
 }
 
+interface Student {
+  id: number;
+  user_id: string;
+  enrolled_at: string;
+  role: string;
+  user: {
+    id: string;
+    first_name: string | null;
+    last_name: string | null;
+    username: string | null;
+    email: string;
+    avatar_url: string | null;
+  };
+}
+
+const getAuthToken = async () => {
+  const supabase = getSupabaseBrowserClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token;
+};
+
 export function ManageStudents({ courseClassId, courseName }: ManageStudentsProps) {
-  const [students, setStudents] = useState<any[]>([]);
+  const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
   const [removingId, setRemovingId] = useState<string | null>(null);
 
   const loadStudents = async () => {
     try {
       setLoading(true);
-      const data = await getEnrolledStudents(courseClassId);
-      setStudents(data || []);
+      const token = await getAuthToken();
+      if (!token) {
+        toast.error("Authentication required");
+        return;
+      }
+
+      const response = await fetch(`/api/org-service/course-classes/${courseClassId}/students`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to load students");
+      }
+
+      const data = await response.json();
+      setStudents(data.students || []);
     } catch (error) {
       console.error("Error loading students:", error);
       toast.error("Failed to load students");
@@ -45,18 +78,33 @@ export function ManageStudents({ courseClassId, courseName }: ManageStudentsProp
     
     setRemovingId(userId);
     try {
-      await removeStudentFromCourse(courseClassId, userId);
+      const token = await getAuthToken();
+      if (!token) {
+        toast.error("Authentication required");
+        return;
+      }
+
+      const response = await fetch(`/api/org-service/course-classes/${courseClassId}/students/${userId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to remove student");
+      }
+
       toast.success(`${studentName} has been removed from the course`);
       await loadStudents();
     } catch (error) {
-      toast.error("Failed to remove student");
+      console.error("Error removing student:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to remove student");
     } finally {
       setRemovingId(null);
     }
   };
 
   const handleInviteStudent = () => {
-    // Open invite modal or redirect to invite page
     toast.info("Invite feature - send email invitation to join organization first");
   };
 
@@ -93,7 +141,7 @@ export function ManageStudents({ courseClassId, courseName }: ManageStudentsProp
               <div key={student.id} className="flex items-center justify-between p-3 bg-slate-800/30 rounded-lg">
                 <div className="flex items-center gap-3">
                   <Avatar>
-                    <AvatarImage src={student.user?.avatar_url} />
+                    <AvatarImage src={student.user?.avatar_url || undefined} />
                     <AvatarFallback>
                       {student.user?.first_name?.[0] || student.user?.username?.[0] || "S"}
                     </AvatarFallback>

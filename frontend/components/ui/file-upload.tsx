@@ -1,4 +1,3 @@
-// components/ui/file-upload.tsx
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
@@ -25,6 +24,12 @@ interface FileUploadProps {
   multiple?: boolean;
 }
 
+const getAuthToken = async () => {
+  const supabase = getSupabaseBrowserClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token;
+};
+
 export function FileUpload({
   onUploadComplete,
   onRemove,
@@ -42,12 +47,10 @@ export function FileUpload({
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
-  // Track if we've already synced to avoid loops
   const [isSynced, setIsSynced] = useState(false);
 
-  // Sync with existingFiles prop when it changes - FIXED
+  // Sync with existingFiles prop when it changes
   useEffect(() => {
-    // Deep comparison to avoid unnecessary updates
     const hasChanged = existingFiles.length !== files.length || 
       existingFiles.some((file, index) => 
         file.url !== files[index]?.url || 
@@ -63,36 +66,53 @@ export function FileUpload({
   }, [existingFiles, files, isSynced]);
 
   const uploadFile = async (file: File): Promise<UploadedFile | null> => {
-    const supabase = getSupabaseBrowserClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    
-    if (!user) {
+    const token = await getAuthToken();
+    if (!token) {
       toast.error("You must be logged in to upload files");
       return null;
     }
 
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`;
-    const filePath = folder ? `${folder}/${fileName}` : fileName;
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('bucket', bucket);
+    formData.append('folder', folder || '');
 
-    // Add progress for this file
+    // Add progress tracking (XMLHttpRequest needed for progress)
+    // For simplicity, we'll track in a separate API call
+    
     setUploadProgress(prev => ({ ...prev, [file.name]: 0 }));
 
-    const { error: uploadError } = await supabase.storage
-      .from(bucket)
-      .upload(filePath, file, {
-        cacheControl: '3600',
-        upsert: false,
-        onUploadProgress: (progress) => {
-          const percent = (progress.loaded / progress.total) * 100;
-          setUploadProgress(prev => ({ ...prev, [file.name]: percent }));
+    try {
+      const response = await fetch('/api/org-service/upload', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
         },
+        body: formData,
       });
 
-    if (uploadError) {
-      console.error("Upload error:", uploadError);
-      toast.error(`Failed to upload ${file.name}`);
-      // Remove progress for failed file
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Upload failed');
+      }
+
+      const data = await response.json();
+      
+      setUploadProgress(prev => {
+        const newProgress = { ...prev };
+        delete newProgress[file.name];
+        return newProgress;
+      });
+
+      return {
+        url: data.file_url,
+        name: file.name,
+        type: file.type,
+        size: file.size,
+      };
+    } catch (error) {
+      console.error("Upload error:", error);
+      toast.error(error instanceof Error ? error.message : `Failed to upload ${file.name}`);
       setUploadProgress(prev => {
         const newProgress = { ...prev };
         delete newProgress[file.name];
@@ -100,17 +120,6 @@ export function FileUpload({
       });
       return null;
     }
-
-    const { data: { publicUrl } } = supabase.storage
-      .from(bucket)
-      .getPublicUrl(filePath);
-
-    return {
-      url: publicUrl,
-      name: file.name,
-      type: file.type,
-      size: file.size,
-    };
   };
 
   const processFiles = async (selectedFiles: FileList | File[]) => {
@@ -134,10 +143,16 @@ export function FileUpload({
       const result = await uploadFile(file);
       if (result) {
         uploadedFiles.push(result);
+      } else {
+        // Simulate error progress removal
+        setUploadProgress(prev => {
+          const newProgress = { ...prev };
+          delete newProgress[file.name];
+          return newProgress;
+        });
       }
     }
 
-    // Clear all progress after uploads complete
     setUploadProgress({});
     
     const newFiles = [...files, ...uploadedFiles];
@@ -156,7 +171,6 @@ export function FileUpload({
     }
   };
 
-  // Drag & Drop Handlers - FIXED: removed files from dependencies
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -183,7 +197,7 @@ export function FileUpload({
     if (droppedFiles && droppedFiles.length > 0) {
       await processFiles(droppedFiles);
     }
-  }, []); // ✅ Removed 'files' dependency - processFiles will use current state
+  }, []);
 
   const removeFile = (index: number) => {
     const newFiles = files.filter((_, i) => i !== index);
@@ -206,7 +220,6 @@ export function FileUpload({
 
   return (
     <div className="space-y-3">
-      {/* Drag & Drop Area */}
       <div
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
@@ -251,7 +264,6 @@ export function FileUpload({
         )}
       </div>
 
-      {/* Upload Progress - Only show for files currently being uploaded */}
       {uploading && Object.keys(uploadProgress).length > 0 && (
         <div className="space-y-2">
           <p className="text-sm font-medium text-gray-300">Uploading files...</p>
@@ -272,7 +284,6 @@ export function FileUpload({
         </div>
       )}
 
-      {/* File List - Show successfully uploaded files */}
       {files.length > 0 && (
         <div className="space-y-2">
           <p className="text-sm font-medium text-gray-300">Uploaded files:</p>

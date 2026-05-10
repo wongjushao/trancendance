@@ -33,6 +33,28 @@ interface InvitationData {
   personalMessage?: string | null;
 }
 
+const getAuthToken = async () => {
+  const supabase = getSupabaseBrowserClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token;
+};
+
+const getCurrentUser = async () => {
+  const token = await getAuthToken();
+  if (!token) return null;
+  
+  try {
+    const response = await fetch('/api/auth-service/profile', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!response.ok) return null;
+    return await response.json();
+  } catch (error) {
+    console.error("Error fetching user:", error);
+    return null;
+  }
+};
+
 function AcceptInviteContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -131,14 +153,11 @@ function AcceptInviteContent() {
     router.replace(`/register?invite_token=${encodeURIComponent(token)}`);
   }, [authChecked, invitation, token, user, router]);
 
-  // Check if user is logged in
+  // Check if user is logged in using backend API
   useEffect(() => {
     const checkUser = async () => {
-      const supabase = getSupabaseBrowserClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      setUser(user);
+      const userData = await getCurrentUser();
+      setUser(userData);
       setAuthChecked(true);
     };
     checkUser();
@@ -174,12 +193,7 @@ function AcceptInviteContent() {
 
     try {
       if (invitation.inviteSource === 'backend') {
-        const supabase = getSupabaseBrowserClient();
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-
-        const accessToken = session?.access_token;
+        const accessToken = await getAuthToken();
         if (!accessToken) {
           throw new Error('Your session expired. Please sign in again.');
         }
@@ -226,6 +240,12 @@ function AcceptInviteContent() {
     } finally {
       setIsAccepting(false);
     }
+  };
+
+  const handleSignOut = async () => {
+    const supabase = getSupabaseBrowserClient();
+    await supabase.auth.signOut();
+    router.push('/login');
   };
 
   if (isLoading) {
@@ -324,11 +344,7 @@ function AcceptInviteContent() {
                   variant="outline" 
                   size="sm" 
                   className="mt-2 w-full"
-                  onClick={async () => {
-                    const supabase = getSupabaseBrowserClient();
-                    await supabase.auth.signOut();
-                    router.push('/login');
-                  }}
+                  onClick={handleSignOut}
                 >
                   Sign Out and Log In
                 </GlowButton>

@@ -58,14 +58,28 @@ export function CourseProgress({
   const [loading, setLoading] = useState(true);
   const [expandedModules, setExpandedModules] = useState<Set<number>>(new Set());
 
+  const getAuthToken = async () => {
+    const supabase = getSupabaseBrowserClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token;
+  };
+
   useEffect(() => {
     loadProgress();
   }, [courseId, courseClassId, userId]);
 
   const getUserId = async () => {
     if (userId) return userId;
-    const { data: { user } } = await supabase.auth.getUser();
-    return user?.id;
+    const token = await getAuthToken();
+    if (!token) return null;
+    
+    const response = await fetch('/api/auth-service/profile', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    
+    if (!response.ok) return null;
+    const profile = await response.json();
+    return profile.id;
   };
 
   const loadProgress = async () => {
@@ -76,116 +90,126 @@ export function CourseProgress({
       return;
     }
 
-    // Get class member ID
-    const { data: classMember } = await supabase
-      .from("class_members")
-      .select("id")
-      .eq("course_class_id", courseClassId)
-      .eq("user_id", currentUserId)
-      .single();
-
-    if (!classMember) {
+    const token = await getAuthToken();
+    if (!token) {
       setLoading(false);
       return;
     }
 
-    // Get all modules for course
-    const { data: moduleData } = await supabase
-      .from("modules")
-      .select(`
-        id,
-        title,
-        order_index,
-        classes:classes (
-          id,
-          title,
-          order_index,
-          lessons:lessons (
-            id,
-            title,
-            order_index,
-            content_type,
-            is_free_preview,
-            duration_seconds
-          )
-        )
-      `)
-      .eq("course_id", courseId)
-      .order("order_index");
+    try {
+      // Get class member ID via backend
+      const classMemberResponse = await fetch(`/api/org-service/class-members/${courseClassId}/user/${currentUserId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
 
-    if (!moduleData) {
-      setLoading(false);
-      return;
-    }
+      if (!classMemberResponse.ok) {
+        setLoading(false);
+        return;
+      }
 
-    // Get all lesson progress for this user
-    const { data: progressData } = await supabase
-      .from("lesson_progress")
-      .select("lesson_id, status, progress_percent")
-      .eq("class_member_id", classMember.id);
+      const classMember = await classMemberResponse.json();
 
-    const progressMap = new Map();
-    progressData?.forEach((p) => {
-      progressMap.set(p.lesson_id, p);
-    });
+      // Get course modules with classes and lessons
+      const modulesResponse = await fetch(`/api/org-service/courses/${courseId}/modules?include_lessons=true`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
 
-    // Build module progress structure
-    let totalLessonsCount = 0;
-    let totalCompletedCount = 0;
+      if (!modulesResponse.ok) {
+        setLoading(false);
+        return;
+      }
 
-    const modulesWithProgress = moduleData.map((module) => {
-      const classesWithProgress = module.classes.map((classItem) => {
-        const lessonsWithProgress = classItem.lessons.map((lesson) => {
-          const progress = progressMap.get(lesson.id);
-          totalLessonsCount++;
-          if (progress?.status === "completed") totalCompletedCount++;
+      const moduleData = await modulesResponse.json();
+
+      if (!moduleData || moduleData.length === 0) {
+        setLoading(false);
+        return;
+      }
+
+      // Get all lesson progress for this user from backend
+      const progressPromises = [];
+      for (const module of moduleData) {
+        for (const classItem of module.classes || []) {
+          for (const lesson of classItem.lessons || []) {
+            progressPromises.push(
+              fetch(`/api/org-service/lesson-progress?lesson_id=${lesson.id}&class_member_id=${classMember.id}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+              }).then(res => res.ok ? res.json() : null)
+            );
+          }
+        }
+      }
+
+      const progressResults = await Promise.all(progressPromises);
+      const progressMap = new Map();
+      progressResults.forEach(progress => {
+        if (progress && progress.lesson_id) {
+          progressMap.set(progress.lesson_id, progress);
+        }
+      });
+
+      // Build module progress structure
+      let totalLessonsCount = 0;
+      let totalCompletedCount = 0;
+
+      const modulesWithProgress = moduleData.map((module: any) => {
+        const classesWithProgress = (module.classes || []).map((classItem: any) => {
+          const lessonsWithProgress = (classItem.lessons || []).map((lesson: any) => {
+            const progress = progressMap.get(lesson.id);
+            totalLessonsCount++;
+            if (progress?.status === "completed") totalCompletedCount++;
+
+            return {
+              id: lesson.id,
+              title: lesson.title,
+              order_index: lesson.order_index,
+              status: (progress?.status as "not_started" | "in_progress" | "completed") || "not_started",
+              progress_percent: progress?.progress_percent || 0,
+              is_locked: false,
+            };
+          });
+
+          const completedInClass = lessonsWithProgress.filter((l: any) => l.status === "completed").length;
+          const classProgress = lessonsWithProgress.length > 0 
+            ? (completedInClass / lessonsWithProgress.length) * 100 
+            : 0;
 
           return {
-            id: lesson.id,
-            title: lesson.title,
-            order_index: lesson.order_index,
-            status: (progress?.status as "not_started" | "in_progress" | "completed") || "not_started",
-            progress_percent: progress?.progress_percent || 0,
-            is_locked: false, // You can implement prerequisite logic here
+            id: classItem.id,
+            title: classItem.title,
+            order_index: classItem.order_index,
+            lessons: lessonsWithProgress,
+            totalLessons: lessonsWithProgress.length,
+            completedLessons: completedInClass,
+            progress: classProgress,
           };
         });
 
-        const completedInClass = lessonsWithProgress.filter((l) => l.status === "completed").length;
-        const classProgress = lessonsWithProgress.length > 0 
-          ? (completedInClass / lessonsWithProgress.length) * 100 
-          : 0;
+        const completedInModule = classesWithProgress.reduce((sum: number, c: any) => sum + c.completedLessons, 0);
+        const totalInModule = classesWithProgress.reduce((sum: number, c: any) => sum + c.totalLessons, 0);
+        const moduleProgress = totalInModule > 0 ? (completedInModule / totalInModule) * 100 : 0;
 
         return {
-          id: classItem.id,
-          title: classItem.title,
-          order_index: classItem.order_index,
-          lessons: lessonsWithProgress,
-          totalLessons: lessonsWithProgress.length,
-          completedLessons: completedInClass,
-          progress: classProgress,
+          id: module.id,
+          title: module.title,
+          order_index: module.order_index,
+          classes: classesWithProgress,
+          totalLessons: totalInModule,
+          completedLessons: completedInModule,
+          progress: moduleProgress,
         };
       });
 
-      const completedInModule = classesWithProgress.reduce((sum, c) => sum + c.completedLessons, 0);
-      const totalInModule = classesWithProgress.reduce((sum, c) => sum + c.totalLessons, 0);
-      const moduleProgress = totalInModule > 0 ? (completedInModule / totalInModule) * 100 : 0;
-
-      return {
-        id: module.id,
-        title: module.title,
-        order_index: module.order_index,
-        classes: classesWithProgress,
-        totalLessons: totalInModule,
-        completedLessons: completedInModule,
-        progress: moduleProgress,
-      };
-    });
-
-    setModules(modulesWithProgress);
-    setTotalLessons(totalLessonsCount);
-    setCompletedLessons(totalCompletedCount);
-    setOverallProgress(totalLessonsCount > 0 ? (totalCompletedCount / totalLessonsCount) * 100 : 0);
-    setLoading(false);
+      setModules(modulesWithProgress);
+      setTotalLessons(totalLessonsCount);
+      setCompletedLessons(totalCompletedCount);
+      setOverallProgress(totalLessonsCount > 0 ? (totalCompletedCount / totalLessonsCount) * 100 : 0);
+      
+    } catch (error) {
+      console.error("Error loading progress:", error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const toggleModule = (moduleId: number) => {

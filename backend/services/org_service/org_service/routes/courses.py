@@ -1719,3 +1719,361 @@ class LessonProgressResource(Resource):
             return jsonify({"error": str(exc)}), 500
         finally:
             session.close()
+
+# ========== COURSE PREVIEW ENDPOINTS ==========
+
+@courses_ns.route("/courses/<int:course_id>/enrollment/status")
+class CourseEnrollmentStatusResource(Resource):
+    @courses_ns.response(200, "Enrollment status retrieved")
+    @courses_ns.response(401, "Unauthorized")
+    def get(self, course_id: int):
+        """Check if current user is enrolled in a course."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        session = db_session()
+        try:
+            # Check if user has any class_member entry for this course
+            enrolled = session.query(ClassMember).join(
+                CourseClass, CourseClass.id == ClassMember.course_class_id
+            ).filter(
+                CourseClass.course_id == course_id,
+                ClassMember.user_id == user_id,
+                ClassMember.role == "student"
+            ).first() is not None
+
+            return jsonify({"enrolled": enrolled}), 200
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+
+@courses_ns.route("/courses/<int:course_id>/preview-lessons")
+class CoursePreviewLessonsResource(Resource):
+    @courses_ns.response(200, "Preview lessons retrieved")
+    def get(self, course_id: int):
+        """Get preview lessons (first 2 lessons) for a course."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database not configured"}), 503
+
+        session = db_session()
+        try:
+            # Get first module
+            first_module = session.query(Module).filter(
+                Module.course_id == course_id
+            ).order_by(Module.order_index.asc()).first()
+
+            if not first_module:
+                return jsonify({"lessons": []}), 200
+
+            # Get first class
+            first_class = session.query(ContentClass).filter(
+                ContentClass.module_id == first_module.id
+            ).order_by(ContentClass.order_index.asc()).first()
+
+            if not first_class:
+                return jsonify({"lessons": []}), 200
+
+            # Get first 2 lessons (published only, free preview OR any if unpublished course?)
+            lessons = session.query(Lesson).filter(
+                Lesson.class_id == first_class.id
+            ).order_by(Lesson.order_index.asc()).limit(2).all()
+
+            return jsonify({
+                "lessons": [
+                    {
+                        "id": l.id,
+                        "title": l.title,
+                        "content_type": l.content_type,
+                        "order_index": l.order_index
+                    }
+                    for l in lessons
+                ]
+            }), 200
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+@courses_ns.route("/courses/<int:course_id>/modules")
+class CourseModulesResource(Resource):
+    def get(self, course_id: int):
+        """Get course modules with optional lessons."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database not configured"}), 503
+
+        include_lessons = request.args.get("include_lessons", "false").lower() == "true"
+        
+        session = db_session()
+        try:
+            query = session.query(Module).filter(Module.course_id == course_id).order_by(Module.order_index.asc())
+            modules = query.all()
+            
+            result = []
+            for module in modules:
+                module_data = {
+                    "id": module.id,
+                    "title": module.title,
+                    "order_index": module.order_index,
+                    "classes": []
+                }
+                
+                if include_lessons:
+                    classes = session.query(ContentClass).filter(
+                        ContentClass.module_id == module.id
+                    ).order_by(ContentClass.order_index.asc()).all()
+                    
+                    for class_item in classes:
+                        lessons = session.query(Lesson).filter(
+                            Lesson.class_id == class_item.id
+                        ).order_by(Lesson.order_index.asc()).all()
+                        
+                        module_data["classes"].append({
+                            "id": class_item.id,
+                            "title": class_item.title,
+                            "order_index": class_item.order_index,
+                            "lessons": [
+                                {
+                                    "id": l.id,
+                                    "title": l.title,
+                                    "order_index": l.order_index,
+                                    "content_type": l.content_type,
+                                    "duration_seconds": l.duration_seconds
+                                }
+                                for l in lessons
+                            ]
+                        })
+                
+                result.append(module_data)
+            
+            return jsonify(result), 200
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+# ========== COURSE CLASS STUDENTS ENDPOINTS ==========
+
+@courses_ns.route("/course-classes/<int:course_class_id>/students")
+class CourseClassStudentsResource(Resource):
+    @courses_ns.response(200, "Students retrieved")
+    @courses_ns.response(401, "Unauthorized")
+    def get(self, course_class_id: int):
+        """Get all students enrolled in a course class."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        session = db_session()
+        try:
+            # Check if user is instructor or admin
+            course_class = session.query(CourseClass).filter(CourseClass.id == course_class_id).first()
+            if not course_class:
+                return jsonify({"error": "Course class not found"}), 404
+
+            course = session.query(Course).filter(Course.id == course_class.course_id).first()
+            if not course:
+                return jsonify({"error": "Course not found"}), 404
+
+            # Check permission
+            is_instructor = course_class.instructor_id == user_id
+            is_creator = course.created_by == user_id
+            
+            if not is_instructor and not is_creator:
+                membership = session.query(OrganizationMember).filter(
+                    OrganizationMember.organization_id == course.organization_id,
+                    OrganizationMember.user_id == user_id,
+                    OrganizationMember.member_role.in_(['admin', 'sub_admin'])
+                ).first()
+                if not membership:
+                    return jsonify({"error": "Permission denied"}), 403
+
+            # Get all students
+            students = session.query(ClassMember).filter(
+                ClassMember.course_class_id == course_class_id,
+                ClassMember.role == "student"
+            ).all()
+
+            # Get user profiles
+            user_ids = [s.user_id for s in students]
+            profiles = {}
+            if user_ids:
+                for profile in session.query(Profile).filter(Profile.id.in_(user_ids)).all():
+                    profiles[profile.id] = profile
+
+            result = []
+            for student in students:
+                profile = profiles.get(student.user_id)
+                result.append({
+                    "id": student.id,
+                    "user_id": str(student.user_id),
+                    "enrolled_at": student.enrolled_at.isoformat() if student.enrolled_at else None,
+                    "role": student.role,
+                    "user": {
+                        "id": str(profile.id) if profile else None,
+                        "first_name": profile.first_name if profile else None,
+                        "last_name": profile.last_name if profile else None,
+                        "username": profile.username if profile else None,
+                        "email": "",  # Email from auth, not stored in profiles
+                        "avatar_url": profile.avatar_url if profile else None,
+                    }
+                })
+
+            return jsonify({"students": result}), 200
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+
+@courses_ns.route("/course-classes/<int:course_class_id>/students/<user_id>")
+class CourseClassStudentResource(Resource):
+    @courses_ns.response(200, "Student removed")
+    @courses_ns.response(401, "Unauthorized")
+    @courses_ns.response(403, "Permission denied")
+    @courses_ns.response(404, "Student not found")
+    def delete(self, course_class_id: int, user_id: str):
+        """Remove a student from a course class."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database not configured"}), 503
+
+        current_user_id, _email = get_authenticated_user()
+        if current_user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        try:
+            target_user_id = uuid.UUID(user_id)
+        except (ValueError, TypeError):
+            return jsonify({"error": "Invalid user ID"}), 400
+
+        session = db_session()
+        try:
+            # Check permission
+            course_class = session.query(CourseClass).filter(CourseClass.id == course_class_id).first()
+            if not course_class:
+                return jsonify({"error": "Course class not found"}), 404
+
+            course = session.query(Course).filter(Course.id == course_class.course_id).first()
+            if not course:
+                return jsonify({"error": "Course not found"}), 404
+
+            is_instructor = course_class.instructor_id == current_user_id
+            is_creator = course.created_by == current_user_id
+            
+            if not is_instructor and not is_creator:
+                membership = session.query(OrganizationMember).filter(
+                    OrganizationMember.organization_id == course.organization_id,
+                    OrganizationMember.user_id == current_user_id,
+                    OrganizationMember.member_role.in_(['admin', 'sub_admin'])
+                ).first()
+                if not membership:
+                    return jsonify({"error": "Permission denied"}), 403
+
+            # Remove student
+            result = session.query(ClassMember).filter(
+                ClassMember.course_class_id == course_class_id,
+                ClassMember.user_id == target_user_id,
+                ClassMember.role == "student"
+            ).delete()
+
+            if result == 0:
+                return jsonify({"error": "Student not found"}), 404
+
+            session.commit()
+            return jsonify({"message": "Student removed successfully"}), 200
+        except SQLAlchemyError as exc:
+            session.rollback()
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+@courses_ns.route("/upload")
+class FileUploadResource(Resource):
+    @courses_ns.response(200, "File uploaded successfully")
+    @courses_ns.response(400, "Invalid file")
+    @courses_ns.response(401, "Unauthorized")
+    def post(self):
+        """Upload a file to Supabase storage."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        if 'file' not in request.files:
+            return jsonify({"error": "No file uploaded"}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({"error": "No file selected"}), 400
+
+        bucket = request.form.get('bucket', 'general')
+        folder = request.form.get('folder', '')
+
+        # Validate file size (default 50MB)
+        file.seek(0, 2)
+        file_size = file.tell()
+        file.seek(0)
+        MAX_FILE_SIZE = 50 * 1024 * 1024
+        
+        if file_size > MAX_FILE_SIZE:
+            return jsonify({"error": f"File size exceeds 50MB limit"}), 400
+
+        try:
+            supabase_url = os.environ.get("SUPABASE_URL")
+            supabase_service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+            
+            if not supabase_url or not supabase_service_key:
+                return jsonify({"error": "Storage configuration missing"}), 500
+            
+            supabase_admin = create_client(supabase_url, supabase_service_key)
+            
+            # Ensure bucket exists
+            try:
+                supabase_admin.storage.get_bucket(bucket)
+            except:
+                supabase_admin.storage.create_bucket(bucket, {'public': True})
+            
+            # Generate unique filename
+            filename = secure_filename(file.filename)
+            file_ext = filename.rsplit('.', 1)[1].lower() if '.' in filename else ''
+            unique_filename = f"{folder}/{user_id}/{uuid.uuid4().hex}.{file_ext}" if folder else f"{user_id}/{uuid.uuid4().hex}.{file_ext}"
+            
+            file_content = file.read()
+            
+            response = supabase_admin.storage.from_(bucket).upload(
+                unique_filename,
+                file_content,
+                file_options={"content-type": file.content_type or "application/octet-stream"}
+            )
+            
+            if not response:
+                raise Exception("Failed to upload file")
+            
+            public_url = supabase_admin.storage.from_(bucket).get_public_url(unique_filename)
+            
+            return jsonify({
+                "success": True,
+                "file_url": public_url,
+                "file_name": filename,
+                "file_size": file_size
+            }), 200
+            
+        except Exception as e:
+            print(f"Upload error: {str(e)}")
+            return jsonify({"error": str(e)}), 500

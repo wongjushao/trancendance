@@ -3,23 +3,11 @@
 ## Files with Supabase calls:
 
 
-frontend/components/course/CoursePreview.tsx
-frontend/components/course/CourseProgress.tsx
-frontend/components/course/ManageStudents.tsx
-frontend/components/course/LessonPlayer.tsx
 
-frontend/components/SignOutButton.tsx
-frontend/components/organization/InviteMemberModal.tsx
-frontend/components/ui/file-upload.tsx
-frontend/components/settings/SkillsSelector.tsx
-frontend/app/_landing/LandingAuthed.tsx
-frontend/app/(auth)/accept-invite/page.tsx
-frontend/app/(auth)/register/page.tsx
-frontend/app/(auth)/reset-password/page.tsx
-frontend/app/(auth)/login/page.tsx
-frontend/app/(auth)/forgot-password/page.tsx
+
 frontend/app/(main)/dashboard/page.tsx
-frontend/app/(main)/profile/ProfileClient.tsx
+
+
 frontend/app/(main)/profile/[identifier]/page.tsx
 frontend/app/(main)/profile/page.tsx
 frontend/app/(main)/chat/rooms/[roomId]/page.tsx
