@@ -1355,3 +1355,183 @@ class UserCreatedCoursesResource(Resource):
             return jsonify({"error": str(exc)}), 500
         finally:
             session.close()
+
+@courses_ns.route("/courses/upload-thumbnail")
+class CourseThumbnailUploadResource(Resource):
+    @courses_ns.response(200, "Thumbnail uploaded successfully")
+    @courses_ns.response(400, "Invalid file")
+    @courses_ns.response(401, "Unauthorized")
+    @courses_ns.response(403, "Permission denied")
+    def post(self):
+        """Upload a thumbnail image for a course."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        # Get authenticated user
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        # Check if file was uploaded
+        if 'file' not in request.files:
+            return jsonify({"error": "No file uploaded"}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({"error": "No file selected"}), 400
+
+        # Validate file type
+        ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+        file_ext = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else ''
+        
+        if file_ext not in ALLOWED_EXTENSIONS:
+            return jsonify({"error": f"File type not allowed. Allowed: {', '.join(ALLOWED_EXTENSIONS)}"}), 400
+
+        # Validate file size (max 5MB)
+        file.seek(0, 2)
+        file_size = file.tell()
+        file.seek(0)
+        MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
+        
+        if file_size > MAX_FILE_SIZE:
+            return jsonify({"error": f"File size exceeds {MAX_FILE_SIZE // (1024*1024)}MB limit"}), 400
+
+        try:
+            # Get Supabase client
+            supabase_url = os.environ.get("SUPABASE_URL")
+            supabase_service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+            
+            if not supabase_url or not supabase_service_key:
+                return jsonify({"error": "Storage configuration missing"}), 500
+            
+            supabase_admin = create_client(supabase_url, supabase_service_key)
+            
+            # Ensure course-thumbnails bucket exists
+            try:
+                supabase_admin.storage.get_bucket('course-thumbnails')
+            except:
+                supabase_admin.storage.create_bucket('course-thumbnails', {'public': True})
+            
+            # Generate unique filename
+            filename = secure_filename(file.filename)
+            unique_filename = f"courses/{user_id}/{uuid.uuid4().hex}.{file_ext}"
+            
+            file_content = file.read()
+            
+            response = supabase_admin.storage.from_('course-thumbnails').upload(
+                unique_filename,
+                file_content,
+                file_options={"content-type": file.content_type or "image/jpeg"}
+            )
+            
+            if not response:
+                raise Exception("Failed to upload file")
+            
+            public_url = supabase_admin.storage.from_('course-thumbnails').get_public_url(unique_filename)
+            
+            return jsonify({
+                "success": True,
+                "thumbnail_url": public_url,
+                "file_name": filename,
+                "file_size": file_size
+            }), 200
+            
+        except Exception as e:
+            print(f"Thumbnail upload error: {str(e)}")
+            return jsonify({"error": str(e)}), 500
+
+@courses_ns.route("/courses/<int:course_id>")
+class CourseUpdateResource(Resource):
+    @courses_ns.expect(course_create_model, validate=False)
+    @courses_ns.response(200, "Course updated")
+    @courses_ns.response(400, "Invalid request body")
+    @courses_ns.response(401, "Unauthorized")
+    @courses_ns.response(403, "Permission denied")
+    @courses_ns.response(404, "Course not found")
+    def put(self, course_id: int):
+        """Update an existing course."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        payload = request.get_json(silent=True) or {}
+        title = normalize_text(payload.get("title"))
+        description = normalize_text(payload.get("description"))
+        category = normalize_text(payload.get("category"))
+        level = normalize_text(payload.get("level") or "intermediate").lower()
+        visibility = normalize_text(payload.get("visibility") or "private").lower()
+        thumbnail = normalize_text(payload.get("thumbnail") or "")
+        
+        learning_objectives, error = normalize_string_list(
+            payload.get("learning_objectives", payload.get("objectives")),
+            "learning_objectives",
+        )
+        if error:
+            return jsonify({"error": error}), 400
+
+        prerequisites, error = normalize_string_list(payload.get("prerequisites"), "prerequisites")
+        if error:
+            return jsonify({"error": error}), 400
+
+        tags, error = normalize_string_list(payload.get("tags"), "tags")
+        if error:
+            return jsonify({"error": error}), 400
+
+        # Validate fields
+        if not title:
+            return jsonify({"error": "Field 'title' is required"}), 400
+        if not description:
+            return jsonify({"error": "Field 'description' is required"}), 400
+        if not category:
+            return jsonify({"error": "Field 'category' is required"}), 400
+        
+        if level not in ALLOWED_LEVELS:
+            return jsonify({"error": "Field 'level' must be one of: beginner, intermediate, advanced"}), 400
+        if visibility not in ALLOWED_VISIBILITIES:
+            return jsonify({"error": "Field 'visibility' must be one of: public, org, private"}), 400
+
+        session = db_session()
+        try:
+            course = session.query(Course).filter(Course.id == course_id).first()
+            if course is None:
+                return jsonify({"error": "Course not found"}), 404
+
+            # Check if user has permission to edit
+            membership = (
+                session.query(OrganizationMember)
+                .filter(
+                    OrganizationMember.organization_id == course.organization_id,
+                    OrganizationMember.user_id == user_id,
+                )
+                .first()
+            )
+            
+            if course.created_by != user_id and (membership is None or membership.member_role not in COURSE_CREATOR_ROLES):
+                return jsonify({"error": "You do not have permission to edit this course"}), 403
+
+            # Update course fields
+            course.title = title
+            course.description = description
+            course.category = category
+            course.level = level
+            course.visibility = visibility
+            course.thumbnail = thumbnail or None
+            course.learning_objectives = learning_objectives
+            course.prerequisites = prerequisites
+            course.tags = tags
+            
+            session.commit()
+            session.refresh(course)
+
+            return jsonify(serialize_course(course)), 200
+            
+        except SQLAlchemyError as exc:
+            session.rollback()
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()

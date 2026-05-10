@@ -156,6 +156,12 @@ export default function CourseBasicForm({
     setExistingThumbnailUrl("");
   };
 
+  const getAuthToken = async () => {
+    const supabase = getSupabaseBrowserClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token;
+  };
+
   const handleSaveAndContinue = async () => {
     if (!title.trim()) {
       toast.error("Please enter a course title");
@@ -165,36 +171,54 @@ export default function CourseBasicForm({
     setIsSubmitting(true);
 
     try {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) {
+      const token = await getAuthToken();
+      if (!token) {
         toast.error("You must be logged in");
         return;
       }
+
+      // Verify user and get user ID
+      const profileResponse = await fetch('/api/auth-service/profile', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (!profileResponse.ok) {
+        toast.error("Unable to verify user");
+        return;
+      }
+
+      const userProfile = await profileResponse.json();
+      const userId = userProfile.id;
 
       let thumbnailUrl = existingThumbnailUrl;
 
       // Upload new thumbnail if selected
       if (thumbnail) {
-        const fileName = `${Date.now()}_${thumbnail.name}`;
-        const { data: uploadData, error: uploadError } = await supabase.storage
-          .from('course-thumbnails')
-          .upload(fileName, thumbnail);
-        
-        if (!uploadError && uploadData) {
-          const { data: { publicUrl } } = supabase.storage
-            .from('course-thumbnails')
-            .getPublicUrl(fileName);
-          thumbnailUrl = publicUrl;
+        const formData = new FormData();
+        formData.append('file', thumbnail);
+        formData.append('course_id', mode === "create" ? "new" : initialData!.id.toString());
+
+        const uploadResponse = await fetch('/api/org-service/courses/upload-thumbnail', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` },
+          body: formData
+        });
+
+        if (uploadResponse.ok) {
+          const uploadData = await uploadResponse.json();
+          thumbnailUrl = uploadData.thumbnail_url;
         }
       }
 
       if (mode === "create") {
-        // Direct Supabase insert for course creation
-        const { data: newCourse, error: insertError } = await supabase
-          .from('courses')
-          .insert({
+        // Create new course via backend API
+        const createResponse = await fetch('/api/org-service/courses', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
             title: title.trim(),
             description: description.trim() || null,
             level,
@@ -205,24 +229,29 @@ export default function CourseBasicForm({
             tags,
             thumbnail: thumbnailUrl,
             organization_id: organizationId!,
-            created_by: user.id,
+            created_by: userId,
             status: 'draft'
           })
-          .select()
-          .single();
+        });
 
-        if (insertError) throw insertError;
+        if (!createResponse.ok) {
+          const error = await createResponse.json();
+          throw new Error(error.error || 'Failed to create course');
+        }
 
+        const newCourse = await createResponse.json();
         toast.success("Course created successfully!");
-        
-        // Redirect to edit page
         router.push(`/courses/${newCourse.id}/edit`);
         
       } else if (mode === "edit" && initialData) {
-        // Update existing course
-        const { error: updateError } = await supabase
-          .from('courses')
-          .update({
+        // Update existing course via backend API
+        const updateResponse = await fetch(`/api/org-service/courses/${initialData.id}`, {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
             title: title.trim(),
             description: description.trim() || null,
             level,
@@ -231,11 +260,14 @@ export default function CourseBasicForm({
             learning_objectives: learningObjectives,
             prerequisites,
             tags,
-            thumbnail: thumbnailUrl,
+            thumbnail: thumbnailUrl
           })
-          .eq('id', initialData.id);
+        });
 
-        if (updateError) throw updateError;
+        if (!updateResponse.ok) {
+          const error = await updateResponse.json();
+          throw new Error(error.error || 'Failed to update course');
+        }
 
         toast.success("Course updated successfully!");
         if (onSuccess) {
@@ -244,7 +276,7 @@ export default function CourseBasicForm({
       }
     } catch (error) {
       console.error("Error saving course:", error);
-      toast.error("Failed to save course. Please try again.");
+      toast.error(error instanceof Error ? error.message : "Failed to save course. Please try again.");
     } finally {
       setIsSubmitting(false);
     }
