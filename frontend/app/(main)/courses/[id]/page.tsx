@@ -7,7 +7,7 @@ import {
   Play, FileText, Users, MessageSquare, BookOpen, Clock, Star, 
   Award, CheckCircle, Loader2, ArrowLeft, Eye, Shield, 
   Target, Sparkles, Heart, ThumbsUp, Quote, ChevronRight, 
-  GraduationCap, Calendar, TrendingUp, StarHalf, Send, X 
+  GraduationCap, Calendar, TrendingUp, StarHalf, Send, X, Building2,
 } from "lucide-react";
 import { GlowCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
@@ -144,6 +144,35 @@ export default function CourseDetailPage() {
   const [submittingReview, setSubmittingReview] = useState(false);
   const [activeTab, setActiveTab] = useState("overview");
 
+  // Helper to get auth token
+  const getAuthToken = async () => {
+    const supabase = getSupabaseBrowserClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token;
+  };
+
+  // Helper for API requests
+  const apiRequest = async (url: string, options: RequestInit = {}) => {
+    const token = await getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+    
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        ...options.headers,
+      },
+    });
+    
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: response.statusText }));
+      throw new Error(error.error || `Request failed: ${response.status}`);
+    }
+    
+    return response.json();
+  };
+
   useEffect(() => {
     loadCourseData();
   }, [courseId]);
@@ -152,12 +181,13 @@ export default function CourseDetailPage() {
     setLoading(true);
 
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const token = await getAuthToken();
       const headers: HeadersInit = {};
-      if (session?.access_token) {
-        headers.Authorization = `Bearer ${session.access_token}`;
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
       }
 
+      // Using existing backend API: GET /api/org-service/courses/{courseId}/detail
       const res = await fetch(`/api/org-service/courses/${courseId}/detail`, { headers });
       const payload = await res.json().catch(() => ({}));
 
@@ -203,9 +233,10 @@ export default function CourseDetailPage() {
     }
   };
 
+
   const handleEnroll = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
+    const token = await getAuthToken();
+    if (!token) {
       router.push("/login");
       return;
     }
@@ -213,100 +244,15 @@ export default function CourseDetailPage() {
     setEnrolling(true);
 
     try {
-      // First, get the course offering
-      const { data: offerings, error: offeringsError } = await supabase
-        .from("course_classes")
-        .select("id, name, max_students, status")
-        .eq("course_id", courseId)
-        .in("status", ["upcoming", "ongoing"])
-        .order("start_date", { ascending: true });
-
-      if (offeringsError) throw offeringsError;
-      
-      if (!offerings || offerings.length === 0) {
-        toast.error("No active course offerings available");
-        return;
-      }
-      
-      const offeringId = offerings[0].id;
-      
-      // Get course details
-      const { data: courseData } = await supabase
-        .from('courses')
-        .select('visibility, organization_id')
-        .eq('id', courseId)
-        .single();
-
       // For public courses - direct enrollment via backend
-      if (courseData?.visibility === 'public') {
-        const response = await fetch('/api/org-service/users/enroll', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({
-            email: session.user.email,
-            course_class_id: offeringId,
-          }),
-        });
-        
-        const data = await response.json();
-        
-        if (!response.ok) {
-          throw new Error(data.error || "Failed to enroll in course");
-        }
-        
-        toast.success("Successfully enrolled in course!");
-        await loadCourseData();
-        return;
-      }
-
-      // For org/private courses - check organization membership
-      const isMember = await isUserInOrganization(session.user.id, courseData.organization_id);
-      
-      if (!isMember) {
-        // Check for pending request
-        const { data: pendingRequest } = await supabase
-          .from("organization_members")
-          .select("id")
-          .eq("organization_id", courseData.organization_id)
-          .eq("user_id", session.user.id)
-          .eq("member_role", "pending")
-          .maybeSingle();
-        
-        if (pendingRequest) {
-          toast.warning(
-            `Your join request to the organization is pending approval. You'll be able to enroll once approved.`,
-            { duration: 5000 }
-          );
-        } else {
-          const wantsToJoin = confirm(
-            "This course is only available to organization members. Would you like to send a join request to the organization admin?"
-          );
-          
-          if (wantsToJoin) {
-            await sendJoinOrganizationRequest(session.user.id, courseData.organization_id);
-            toast.info(
-              "Join request sent! You'll be able to enroll once an admin approves your membership.",
-              { duration: 5000 }
-            );
-          }
-        }
-        return;
-      }
-      
-      // User is in organization, proceed with enrollment via backend
-      const response = await fetch('/api/org-service/users/enroll', {
+      // Use the correct endpoint: /api/org-service/courses/{courseId}/enroll
+      const response = await fetch(`/api/org-service/courses/${courseId}/enroll`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
+          'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          email: session.user.email,
-          course_class_id: offeringId,
-        }),
+        body: JSON.stringify({}), // The backend doesn't require any body parameters
       });
       
       const data = await response.json();
@@ -316,16 +262,30 @@ export default function CourseDetailPage() {
       }
       
       toast.success("Successfully enrolled in course!");
-      await loadCourseData();
+      await loadCourseData(); // Refresh course data to reflect enrollment
       
     } catch (error) {
       console.error("Error enrolling:", error);
-      toast.error(error instanceof Error ? error.message : "Failed to enroll in course");
+      
+      // Handle specific error cases
+      if (error instanceof Error) {
+        if (error.message.includes("already enrolled")) {
+          toast.info("You are already enrolled in this course");
+          await loadCourseData(); // Refresh to show correct status
+        } else if (error.message.includes("full")) {
+          toast.error("This course offering is full");
+        } else if (error.message.includes("No available course offerings")) {
+          toast.error("No active course offerings available at this time");
+        } else {
+          toast.error(error.message || "Failed to enroll in course");
+        }
+      } else {
+        toast.error("Failed to enroll in course");
+      }
     } finally {
       setEnrolling(false);
     }
   };
-
   const handleContinueLearning = () => {
     for (const module of modules) {
       for (const classItem of module.classes) {

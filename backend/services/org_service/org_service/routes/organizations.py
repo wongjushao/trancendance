@@ -1485,3 +1485,158 @@ class OrganizationDeleteResource(Resource):
             return jsonify({"error": str(exc)}), 500
         finally:
             session.close()
+
+@organizations_ns.route("/organizations/<int:org_id>/join-request")
+class OrganizationJoinRequestResource(Resource):
+    def post(self, org_id: int):
+        """Send a join request to an organization."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        session = db_session()
+        try:
+            # Check if already has pending request
+            existing = session.query(OrganizationMember).filter(
+                OrganizationMember.organization_id == org_id,
+                OrganizationMember.user_id == user_id,
+                OrganizationMember.member_role == "pending"
+            ).first()
+            
+            if existing:
+                return jsonify({"message": "Join request already pending"}), 200
+            
+            # Create pending request
+            new_request = OrganizationMember(
+                organization_id=org_id,
+                user_id=user_id,
+                member_role="pending"
+            )
+            session.add(new_request)
+            session.commit()
+            
+            return jsonify({"message": "Join request sent successfully"}), 201
+        except SQLAlchemyError as exc:
+            session.rollback()
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+@organizations_ns.route("/orgs/<int:org_id>/members/<string:user_id>")
+class OrganizationMemberRoleResource(Resource):
+    @organizations_ns.response(200, "Member role retrieved")
+    @organizations_ns.response(401, "Unauthorized")
+    @organizations_ns.response(404, "Member not found")
+    def get(self, org_id: int, user_id: str):
+        """Get a specific member's role in the organization."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        current_user_id, _email = get_authenticated_user()
+        if current_user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        try:
+            target_uuid = uuid.UUID(user_id)
+        except (ValueError, TypeError):
+            return jsonify({"error": "Invalid user ID format"}), 400
+
+        session = db_session()
+        try:
+            # Check if organization exists
+            organization = session.query(Organization).filter(Organization.id == org_id).first()
+            if not organization:
+                return jsonify({"error": "Organization not found"}), 404
+
+            # Get member
+            member = session.query(OrganizationMember).filter(
+                OrganizationMember.organization_id == org_id,
+                OrganizationMember.user_id == target_uuid
+            ).first()
+
+            if not member:
+                return jsonify({"error": "Member not found"}), 404
+
+            return jsonify({
+                "user_id": str(member.user_id),
+                "member_role": member.member_role,
+                "joined_at": member.created_at.isoformat() if member.created_at else None,
+            }), 200
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+@organizations_ns.route("/organizations/<int:org_id>/membership-status")
+class OrganizationMembershipStatusResource(Resource):
+    @organizations_ns.response(200, "Status retrieved")
+    @organizations_ns.response(401, "Unauthorized")
+    def get(self, org_id: int):
+        """Check user's membership status for an organization."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        session = db_session()
+        try:
+            membership = session.query(OrganizationMember).filter(
+                OrganizationMember.organization_id == org_id,
+                OrganizationMember.user_id == user_id
+            ).first()
+            
+            if not membership:
+                return jsonify({"status": "not_member", "member_role": None}), 200
+            
+            return jsonify({
+                "status": "pending" if membership.member_role == "pending" else "member",
+                "member_role": membership.member_role,
+                "joined_at": membership.created_at.isoformat() if membership.created_at else None,
+            }), 200
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+@organizations_ns.route("/organizations/<int:org_id>/membership-status")
+class OrganizationMembershipStatusResource(Resource):
+    @organizations_ns.response(200, "Status retrieved")
+    @organizations_ns.response(401, "Unauthorized")
+    def get(self, org_id: int):
+        """Check user's membership status for an organization."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        session = db_session()
+        try:
+            membership = session.query(OrganizationMember).filter(
+                OrganizationMember.organization_id == org_id,
+                OrganizationMember.user_id == user_id
+            ).first()
+            
+            if not membership:
+                return jsonify({"status": "not_member", "member_role": None}), 200
+            
+            return jsonify({
+                "status": "pending" if membership.member_role == "pending" else "member",
+                "member_role": membership.member_role,
+                "joined_at": membership.created_at.isoformat() if membership.created_at else None,
+            }), 200
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+

@@ -522,31 +522,20 @@ export async function deleteClass(classId: number): Promise<void> {
 }
 
 // Assignment CRUD operations
-export async function addAssignment(lessonId: number, assignmentData: {
-  course_id: number;
-  title: string;
-  description: string;
-  due_at?: string;
-  points?: number;
-}): Promise<Assignment> {
+export const addAssignment = async (lessonId: number, data: any) => {
   const supabase = getSupabaseBrowserClient();
-  
-  const { data, error } = await supabase
+  const { data: assignment, error } = await supabase
     .from("assignments")
     .insert({
-      lesson_id: lessonId,
-      course_id: assignmentData.course_id,
-      title: assignmentData.title,
-      description: assignmentData.description,
-      due_at: assignmentData.due_at,
-      points: assignmentData.points || 100
+      ...data,
+      lesson_id: lessonId,  // This is critical!
     })
     .select()
     .single();
   
   if (error) throw error;
-  return data;
-}
+  return assignment;
+};
 
 export async function updateAssignment(assignmentId: number, updates: Partial<Assignment>): Promise<Assignment> {
   const supabase = getSupabaseBrowserClient();
