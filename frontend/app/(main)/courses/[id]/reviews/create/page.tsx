@@ -40,6 +40,34 @@ export default function CreateReviewPage() {
   const [userRole, setUserRole] = useState<string | null>(null);
   const [blockReason, setBlockReason] = useState<string | null>(null);
 
+  // ADD these helper functions after imports:
+  const getAuthToken = async () => {
+    const supabase = getSupabaseBrowserClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token;
+  };
+
+  const apiRequest = async (url: string, options: RequestInit = {}) => {
+    const token = await getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+    
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        ...options.headers,
+      },
+    });
+    
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: response.statusText }));
+      throw new Error(error.error || `Request failed: ${response.status}`);
+    }
+    
+    return response.json();
+  };
+
   useEffect(() => {
     checkAccess();
   }, [courseId]);
@@ -48,45 +76,30 @@ export default function CreateReviewPage() {
     try {
       setLoading(true);
       
-      // Get current user
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) {
+      // Get current user profile from backend
+      const userProfile = await apiRequest('/api/auth-service/profile');
+      if (!userProfile) {
         router.push("/login");
         return;
       }
       
       // Get course details
-      const { data: courseData } = await supabase
-        .from("courses")
-        .select("id, title, created_by, organization_id")
-        .eq("id", courseId)
-        .single();
+      const courseDetail = await apiRequest(`/api/org-service/courses/${courseId}/detail`);
+      const courseData = courseDetail.course;
       setCourse(courseData);
       
       // Check if user is the course instructor/creator
-      const isInstructor = courseData.created_by === user.id;
+      const isInstructor = courseData.created_by === userProfile.id;
       setIsCourseInstructor(isInstructor);
       
-      // Check user's role in the organization
-      const { data: orgMembership } = await supabase
-        .from("organization_members")
-        .select("member_role")
-        .eq("organization_id", courseData.organization_id)
-        .eq("user_id", user.id)
-        .single();
-      
-      const orgRole = orgMembership?.member_role || null;
+      // Get user's role in the organization
+      const orgRoleResponse = await apiRequest(`/api/org-service/orgs/${courseData.organization_id}/members/${userProfile.id}`);
+      const orgRole = orgRoleResponse?.member_role || null;
       setUserRole(orgRole);
       
       // Check if already reviewed
-      const { data: existingReview } = await supabase
-        .from("course_reviews")
-        .select("id")
-        .eq("course_id", courseId)
-        .eq("user_id", user.id)
-        .single();
-      
+      const reviews = courseDetail.reviews || [];
+      const existingReview = reviews.find((r: any) => r.user?.id === userProfile.id);
       if (existingReview) {
         setBlockReason("You have already reviewed this course");
         setCanReview(false);
@@ -94,21 +107,9 @@ export default function CreateReviewPage() {
         return;
       }
       
-      // Check if enrolled as STUDENT (not as instructor/teacher)
-      const { data: classMembers } = await supabase
-        .from("class_members")
-        .select(`
-          id,
-          role,
-          course_classes!inner (
-            course_id
-          )
-        `)
-        .eq("user_id", user.id)
-        .eq("course_classes.course_id", courseId)
-        .eq("role", "student");
-      
-      const isEnrolledAsStudent = (classMembers?.length || 0) > 0;
+      // Check if enrolled as student using the enrollment status endpoint
+      const enrollmentStatus = await apiRequest(`/api/org-service/courses/${courseId}/enrollment/status`);
+      const isEnrolledAsStudent = enrollmentStatus.enrolled === true;
       
       // Determine if user can review
       if (isInstructor) {
@@ -116,13 +117,8 @@ export default function CreateReviewPage() {
         setCanReview(false);
       } else if (orgRole === "teacher") {
         // Check if this teacher is associated with this course
-        const { data: teacherCourses } = await supabase
-          .from("course_classes")
-          .select("id")
-          .eq("course_id", courseId)
-          .eq("instructor_id", user.id);
-        
-        const isTeacherForCourse = (teacherCourses?.length || 0) > 0;
+        const courseDetailForCheck = await apiRequest(`/api/org-service/courses/${courseId}/detail`);
+        const isTeacherForCourse = courseDetailForCheck.course?.instructor_id === userProfile.id;
         
         if (isTeacherForCourse) {
           setBlockReason("Teachers cannot review courses they are assigned to");
@@ -166,40 +162,30 @@ export default function CreateReviewPage() {
     setError("");
     
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) {
+      const userProfile = await apiRequest('/api/auth-service/profile');
+      if (!userProfile) {
         router.push("/login");
         return;
       }
       
-      // Double-check eligibility before submitting
-      const { data: classMembers } = await supabase
-        .from("class_members")
-        .select("id")
-        .eq("user_id", user.id)
-        .eq("course_classes.course_id", courseId)
-        .eq("role", "student");
+      // Double-check enrollment via backend
+      const enrollmentStatus = await apiRequest(`/api/org-service/courses/${courseId}/enrollment/status`);
       
-      const isStillEnrolled = (classMembers?.length || 0) > 0;
-      
-      if (!isStillEnrolled) {
+      if (!enrollmentStatus.enrolled) {
         setError("You are no longer enrolled in this course");
         setCanReview(false);
         setSubmitting(false);
         return;
       }
       
-      const { error: submitError } = await supabase
-        .from("course_reviews")
-        .insert({
-          course_id: courseId,
-          user_id: user.id,
+      // Submit review via backend API
+      await apiRequest(`/api/org-service/courses/${courseId}/reviews`, {
+        method: 'POST',
+        body: JSON.stringify({
           rating: rating,
           review: review.trim() || null,
-        });
-      
-      if (submitError) throw submitError;
+        }),
+      });
       
       toast.success("Review submitted successfully!");
       router.push(`/courses/${courseId}/reviews`);
@@ -211,7 +197,7 @@ export default function CreateReviewPage() {
       setSubmitting(false);
     }
   };
-  
+
   const renderStarButtons = () => {
     const stars = [1, 2, 3, 4, 5];
     const displayRating = hoverRating || rating;

@@ -130,7 +130,7 @@ export default function AssignmentSubmissionsPage() {
         fetch(`/api/org-service/courses/${courseId}/detail`, {
           headers: { 'Authorization': `Bearer ${accessToken}` }
         }),
-        fetch(`/api/org-service/courses/assignments/${assignmentId}/submissions`, {
+        fetch(`/api/org-service/assignments/${assignmentId}/submissions`, {
           headers: { 'Authorization': `Bearer ${accessToken}` }
         })
       ]);

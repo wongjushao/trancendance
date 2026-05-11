@@ -73,6 +73,34 @@ export default function CourseReviewsPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
+  // Add these helper functions
+  const getAuthToken = async () => {
+    const supabase = getSupabaseBrowserClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token;
+  };
+
+  const apiRequest = async (url: string, options: RequestInit = {}) => {
+    const token = await getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+    
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        ...options.headers,
+      },
+    });
+    
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: response.statusText }));
+      throw new Error(error.error || `Request failed: ${response.status}`);
+    }
+    
+    return response.json();
+  };
+
   useEffect(() => {
     loadData();
   }, [courseId]);
@@ -81,97 +109,67 @@ export default function CourseReviewsPage() {
     try {
       setLoading(true);
       
-      // Get current user
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      
-      // Get course details
-      const { data: courseData } = await supabase
-        .from("courses")
-        .select("id, title, description, thumbnail, level, category, organization_id, created_by")
-        .eq("id", courseId)
-        .single();
-      setCourse(courseData);
-      
-      // Check if user is the course instructor/creator
-      if (authUser && courseData) {
-        const isInstructor = courseData.created_by === authUser.id;
-        setIsCourseInstructor(isInstructor);
-        
-        // Get user's role in this specific course context (if any)
-        // Check if user is a teacher in the organization
-        const { data: orgMembership } = await supabase
-          .from("organization_members")
-          .select("member_role")
-          .eq("organization_id", courseData.organization_id)
-          .eq("user_id", authUser.id)
-          .single();
-        
-        setUserRole(orgMembership?.member_role || null);
-        
-        // Check if user is enrolled as a STUDENT (not as instructor)
-        const { data: classMembers } = await supabase
-          .from("class_members")
-          .select(`
-            id,
-            role,
-            course_classes!inner (
-              course_id
-            )
-          `)
-          .eq("user_id", authUser.id)
-          .eq("course_classes.course_id", courseId)
-          .eq("role", "student");  // Only student role counts for enrollment
-        
-        const isEnrolledAsStudent = (classMembers?.length || 0) > 0;
-        
-        // Check if user has already reviewed
-        const { data: existingReview } = await supabase
-          .from("course_reviews")
-          .select("id")
-          .eq("course_id", courseId)
-          .eq("user_id", authUser.id)
-          .single();
-        setHasUserReviewed(!!existingReview);
-        
-        // User can review if:
-        // 1. They are enrolled as a STUDENT (not instructor)
-        // 2. They have NOT already reviewed
-        // 3. They are NOT the course creator
-        // 4. They are NOT an instructor for this course (through any offering)
-        const canUserReview = isEnrolledAsStudent && !existingReview && !isInstructor;
-        setCanReview(canUserReview);
+      // Get current user profile
+      let userProfile = null;
+      try {
+        userProfile = await apiRequest('/api/auth-service/profile');
+      } catch (e) {
+        // User not logged in, that's fine
       }
       
-      // Get all reviews with user profiles
-      const { data: reviewsData } = await supabase
-        .from("course_reviews")
-        .select(`
-          *,
-          user:user_id (
-            id,
-            first_name,
-            last_name,
-            username,
-            avatar_url
-          )
-        `)
-        .eq("course_id", courseId)
-        .order("created_at", { ascending: false });
+      // Get course details from backend (includes reviews)
+      const courseDetail = await apiRequest(`/api/org-service/courses/${courseId}/detail`);
+      const courseData = courseDetail.course;
+      setCourse(courseData);
       
-      if (reviewsData) {
-        setReviews(reviewsData);
+      // Process reviews from the course detail response
+      const reviewsData = courseDetail.reviews || [];
+      setReviews(reviewsData);
+      
+      // Calculate stats
+      const total = reviewsData.length;
+      const sum = reviewsData.reduce((acc: number, r: any) => acc + r.rating, 0);
+      const average = total > 0 ? sum / total : 0;
+      
+      const distribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+      reviewsData.forEach((r: any) => {
+        distribution[r.rating as keyof typeof distribution]++;
+      });
+      
+      setStats({ average, total, distribution });
+      
+      // Check user status if logged in
+      if (userProfile) {
+        const isInstructor = courseData.created_by === userProfile.id;
+        setIsCourseInstructor(isInstructor);
         
-        // Calculate stats
-        const total = reviewsData.length;
-        const sum = reviewsData.reduce((acc, r) => acc + r.rating, 0);
-        const average = total > 0 ? sum / total : 0;
+        // Get user's role in the organization
+        let orgRole = null;
+        try {
+          const orgMembers = await apiRequest(`/api/org-service/orgs/${courseData.organization_id}/members`);
+          const member = orgMembers.members?.find((m: any) => m.user_id === userProfile.id);
+          orgRole = member?.member_role || null;
+        } catch (e) {
+          // User not in organization
+        }
+        setUserRole(orgRole);
         
-        const distribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
-        reviewsData.forEach(r => {
-          distribution[r.rating as keyof typeof distribution]++;
-        });
+        // Check if user has already reviewed
+        const existingReview = reviewsData.find((r: any) => r.user?.id === userProfile.id);
+        setHasUserReviewed(!!existingReview);
         
-        setStats({ average, total, distribution });
+        // Check enrollment status
+        let isEnrolledAsStudent = false;
+        try {
+          const enrollmentStatus = await apiRequest(`/api/org-service/courses/${courseId}/enrollment/status`);
+          isEnrolledAsStudent = enrollmentStatus.enrolled === true;
+        } catch (e) {
+          // Not enrolled
+        }
+        
+        // Determine if user can review
+        const canUserReview = isEnrolledAsStudent && !existingReview && !isInstructor;
+        setCanReview(canUserReview);
       }
       
     } catch (error) {
