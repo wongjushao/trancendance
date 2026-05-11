@@ -1,4 +1,16 @@
 services:
+  cert-fetcher:
+    image: trancendance-cert-fetcher:latest
+    build:
+      context: .
+      dockerfile: cert-fetcher/Dockerfile
+    environment:
+      INFISICAL_TOKEN: ${INFISICAL_TOKEN:-}
+      INFISICAL_PROJECT_ID: ${INFISICAL_PROJECT_ID:-}
+    volumes:
+      - certs-data:/certs
+      - ./waf/certs:/local-certs:ro
+
   waf-proxy:
     image: trancendance-waf-proxy:latest
     build:
@@ -8,11 +20,16 @@ services:
       - "8080:8080"
       - "8443:8443"
     volumes:
-      - ./waf/certs:/etc/nginx/certs:ro
+      - certs-data:/etc/nginx/certs:ro
     depends_on:
-      - frontend
-      - prometheus
-      - grafana
+      cert-fetcher:
+        condition: service_completed_successfully
+      frontend:
+        condition: service_started
+      prometheus:
+        condition: service_started
+      grafana:
+        condition: service_started
 
   auth-service:
     image: trancendance-auth-service:latest
@@ -24,7 +41,10 @@ services:
     environment:
       - INFISICAL_TOKEN=${INFISICAL_TOKEN}
     volumes:
-      - ./waf/certs:/etc/trancendance-certs:ro
+      - certs-data:/etc/trancendance-certs:ro
+    depends_on:
+      cert-fetcher:
+        condition: service_completed_successfully
 
   chat-service:
     image: trancendance-chat-service:latest
@@ -36,7 +56,10 @@ services:
     environment:
       - INFISICAL_TOKEN=${INFISICAL_TOKEN}
     volumes:
-      - ./waf/certs:/etc/trancendance-certs:ro
+      - certs-data:/etc/trancendance-certs:ro
+    depends_on:
+      cert-fetcher:
+        condition: service_completed_successfully
 
   org-service:
     image: trancendance-org-service:latest
@@ -48,7 +71,10 @@ services:
     environment:
       - INFISICAL_TOKEN=${INFISICAL_TOKEN}
     volumes:
-      - ./waf/certs:/etc/trancendance-certs:ro
+      - certs-data:/etc/trancendance-certs:ro
+    depends_on:
+      cert-fetcher:
+        condition: service_completed_successfully
 
   notification-service:
     image: trancendance-notification-service:latest
@@ -60,7 +86,10 @@ services:
     environment:
       - INFISICAL_TOKEN=${INFISICAL_TOKEN}
     volumes:
-      - ./waf/certs:/etc/trancendance-certs:ro
+      - certs-data:/etc/trancendance-certs:ro
+    depends_on:
+      cert-fetcher:
+        condition: service_completed_successfully
 
   frontend:
     build: ./frontend
@@ -76,12 +105,18 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
-      - ./waf/certs:/etc/trancendance-certs:ro
+      - certs-data:/etc/trancendance-certs:ro
     depends_on:
-      - auth-service
-      - chat-service
-      - org-service
-      - notification-service
+      cert-fetcher:
+        condition: service_completed_successfully
+      auth-service:
+        condition: service_started
+      chat-service:
+        condition: service_started
+      org-service:
+        condition: service_started
+      notification-service:
+        condition: service_started
 
   node-exporter:
     image: prom/node-exporter:latest
@@ -97,13 +132,16 @@ services:
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus/web.yml:/etc/prometheus/web.yml:ro
-      - ./waf/certs:/etc/trancendance-certs:ro
+      - certs-data:/etc/trancendance-certs:ro
     expose:
       - "9090"
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --web.config.file=/etc/prometheus/web.yml
       - --web.external-url=https://localhost/prometheus/
+    depends_on:
+      cert-fetcher:
+        condition: service_completed_successfully
 
   grafana:
     build:
@@ -122,6 +160,12 @@ services:
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning
       - ./grafana/dashboards:/var/lib/grafana/dashboards
-      - ./waf/certs:/etc/trancendance-certs:ro
+      - certs-data:/etc/trancendance-certs:ro
     depends_on:
-      - prometheus
+      cert-fetcher:
+        condition: service_completed_successfully
+      prometheus:
+        condition: service_started
+
+volumes:
+  certs-data:
