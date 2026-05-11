@@ -3,13 +3,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server-client";
 import type { EmailOtpType } from "@supabase/supabase-js";
-
-function getSiteOrigin(): string {
-  return (
-    process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ??
-    "http://localhost:3000"
-  );
-}
+import { getServerSiteOrigin } from "@/lib/site-url";
 
 async function checkOnboardingStatus(token: string): Promise<boolean> {
   try {
@@ -45,7 +39,7 @@ export async function GET(request: NextRequest) {
   const type = searchParams.get("type") as EmailOtpType | null;
   const next = searchParams.get("next") ?? "/dashboard";
 
-  const siteOrigin = getSiteOrigin();
+  const siteOrigin = getServerSiteOrigin();
 
   console.log("[auth/confirm] Debug:", { 
     code_exists: !!code, 

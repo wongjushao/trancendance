@@ -1,14 +1,7 @@
 // frontend/app/auth/callback/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server-client";
-
-function getSiteOrigin(): string {
-  const envUrl = process.env.NEXT_PUBLIC_SITE_URL;
-  if (envUrl) {
-    return envUrl.replace(/\/$/, "");
-  }
-  return "https://localhost:3000";
-}
+import { getServerSiteOrigin } from "@/lib/site-url";
 
 function getAuthServiceOrigin(): string {
   return (process.env.NEXT_PUBLIC_BACKEND_URL || "https://auth-service:5001").replace(/\/$/, "");
@@ -59,14 +52,14 @@ export async function GET(request: NextRequest) {
   if (error) {
     console.error("[Auth Callback] OAuth error:", error, errorDescription);
     return NextResponse.redirect(
-      new URL(`/auth/error?message=${encodeURIComponent(errorDescription || error)}`, getSiteOrigin())
+      new URL(`/auth/error?message=${encodeURIComponent(errorDescription || error)}`, getServerSiteOrigin())
     );
   }
 
   if (!code) {
     console.warn("[Auth Callback] No code provided; redirecting to login after email confirmation");
     return NextResponse.redirect(
-      new URL("/login?confirmed=true", getSiteOrigin())
+      new URL("/login?confirmed=true", getServerSiteOrigin())
     );
   }
 
@@ -80,14 +73,14 @@ export async function GET(request: NextRequest) {
     if (sessionError) {
       console.error("[Auth Callback] Session exchange error:", sessionError);
       return NextResponse.redirect(
-        new URL(`/auth/error?message=${encodeURIComponent(sessionError.message)}`, getSiteOrigin())
+        new URL(`/auth/error?message=${encodeURIComponent(sessionError.message)}`, getServerSiteOrigin())
       );
     }
 
     if (!sessionData.session) {
       console.error("[Auth Callback] No session returned");
       return NextResponse.redirect(
-        new URL("/auth/error?message=No session created", getSiteOrigin())
+        new URL("/auth/error?message=No session created", getServerSiteOrigin())
       );
     }
 
@@ -101,7 +94,7 @@ export async function GET(request: NextRequest) {
     const type = requestUrl.searchParams.get("type");
     if (type === "recovery") {
       console.log("[Auth Callback] Password recovery flow");
-      return NextResponse.redirect(new URL("/reset-password", getSiteOrigin()));
+      return NextResponse.redirect(new URL("/reset-password", getServerSiteOrigin()));
     }
 
     // Check MFA status
@@ -155,16 +148,16 @@ export async function GET(request: NextRequest) {
         token: inviteTokenRaw.trim(),
       }).toString();
       console.log("[Auth Callback] invite_token present, redirecting to accept-invite");
-      return NextResponse.redirect(new URL(`/accept-invite?${qp}`, getSiteOrigin()));
+      return NextResponse.redirect(new URL(`/accept-invite?${qp}`, getServerSiteOrigin()));
     }
 
     console.log("[Auth Callback] No MFA required, redirecting to dashboard");
-    return NextResponse.redirect(new URL("/dashboard", getSiteOrigin()));
+    return NextResponse.redirect(new URL("/dashboard", getServerSiteOrigin()));
     
   } catch (error) {
     console.error("[Auth Callback] Unexpected error:", error);
     return NextResponse.redirect(
-      new URL("/auth/error?message=Authentication failed", getSiteOrigin())
+      new URL("/auth/error?message=Authentication failed", getServerSiteOrigin())
     );
   }
 }
