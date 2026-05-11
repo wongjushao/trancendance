@@ -136,8 +136,8 @@ def get_user_organization_ids(session, user_id: uuid.UUID) -> list:
     return [m[0] for m in memberships]
 
 
-def get_course_progress(session, course_id: int, user_id: uuid.UUID) -> dict:
-    """Get user's progress in a course."""
+def get_course_progress(session, course_id: int, user_id: uuid.UUID, class_member_id: int = None) -> dict:
+    """Get user's progress in a course for a specific offering."""
     # Get all lessons in the course
     lessons = session.query(Lesson).join(
         ContentClass, ContentClass.id == Lesson.class_id
@@ -150,14 +150,17 @@ def get_course_progress(session, course_id: int, user_id: uuid.UUID) -> dict:
     total_lessons = len(lessons)
     lesson_ids = [l.id for l in lessons]
     
-    # Get completed lessons
+    # Get completed lessons - filter by class_member_id if provided
     completed = 0
     if lesson_ids:
-        completed = session.query(LessonProgress).filter(
+        query = session.query(LessonProgress).filter(
             LessonProgress.user_id == user_id,
             LessonProgress.lesson_id.in_(lesson_ids),
             LessonProgress.status == "completed"
-        ).count()
+        )
+        if class_member_id:
+            query = query.filter(LessonProgress.class_member_id == class_member_id)
+        completed = query.count()
     
     progress = int((completed / total_lessons) * 100) if total_lessons > 0 else 0
     
@@ -166,7 +169,6 @@ def get_course_progress(session, course_id: int, user_id: uuid.UUID) -> dict:
         "completed_lessons": completed,
         "progress": progress
     }
-
 
 def get_instructor_info(session, user_id: uuid.UUID) -> dict:
     """Get instructor name and avatar."""
@@ -1144,7 +1146,7 @@ class SubmissionUploadResource(Resource):
 
 @courses_ns.route("/users/me/enrolled-courses")
 class UserEnrolledCoursesResource(Resource):
-    @courses_ns.response(200, "Success", fields.List(fields.Nested(course_list_model)))
+    @courses_ns.response(200, "Success")
     @courses_ns.response(401, "Unauthorized")
     def get(self):
         """Get all courses the current user is enrolled in."""
@@ -1158,34 +1160,40 @@ class UserEnrolledCoursesResource(Resource):
         
         session = db_session()
         try:
-            # Get enrolled course IDs from class_members (offering-based enrollment)
-            enrolled_courses = session.query(Course).join(
-                CourseClass, CourseClass.course_id == Course.id
-            ).join(
-                ClassMember, ClassMember.course_class_id == CourseClass.id
-            ).filter(
+            # Get all class members for this user with their offering info
+            class_members = session.query(ClassMember).filter(
                 ClassMember.user_id == user_id,
                 ClassMember.role == "student"
-            ).distinct().all()
-            
-            # Also get direct course_members enrollments
-            direct_enrollments = session.query(Course).join(
-                CourseMember, CourseMember.course_id == Course.id
-            ).filter(
-                CourseMember.user_id == user_id,
-                CourseMember.role == "student",
-                CourseMember.status == "active"
             ).all()
             
-            # Combine and deduplicate
-            all_courses = {c.id: c for c in enrolled_courses}
-            for c in direct_enrollments:
-                all_courses[c.id] = c
+            if not class_members:
+                return jsonify({"courses": [], "total": 0}), 200
+            
+            # Get unique course IDs with their offering info
+            course_offering_map = {}
+            for cm in class_members:
+                course_class = session.query(CourseClass).filter(
+                    CourseClass.id == cm.course_class_id
+                ).first()
+                if course_class:
+                    course = session.query(Course).filter(
+                        Course.id == course_class.course_id
+                    ).first()
+                    if course:
+                        if course.id not in course_offering_map:
+                            course_offering_map[course.id] = {
+                                "course": course,
+                                "class_member_id": cm.id,
+                                "offering_id": course_class.id
+                            }
             
             result_courses = []
-            for course in all_courses.values():
-                # Get progress data
-                progress_data = get_course_progress(session, course.id, user_id)
+            for course_id, data in course_offering_map.items():
+                course = data["course"]
+                class_member_id = data["class_member_id"]
+                
+                # Get progress for this specific offering
+                progress_data = get_course_progress(session, course.id, user_id, class_member_id)
                 instructor = get_instructor_info(session, course.created_by)
                 org = session.query(Organization).filter(Organization.id == course.organization_id).first()
                 
@@ -1213,6 +1221,8 @@ class UserEnrolledCoursesResource(Resource):
             }), 200
             
         except SQLAlchemyError as exc:
+            import traceback
+            traceback.print_exc()
             return jsonify({"error": str(exc)}), 500
         finally:
             session.close()
@@ -1236,23 +1246,19 @@ class DiscoverCoursesResource(Resource):
         
         session = db_session()
         try:
-            # Get enrolled course IDs
-            enrolled_ids_query = session.query(Course.id).join(
-                CourseClass, CourseClass.course_id == Course.id
-            ).join(
-                ClassMember, ClassMember.course_class_id == CourseClass.id
-            ).filter(
+            # Get enrolled course IDs from class_members
+            enrolled_course_ids = set()
+            class_members = session.query(ClassMember).filter(
                 ClassMember.user_id == user_id,
                 ClassMember.role == "student"
-            ).union(
-                session.query(CourseMember.course_id).filter(
-                    CourseMember.user_id == user_id,
-                    CourseMember.role == "student",
-                    CourseMember.status == "active"
-                )
-            ).distinct()
+            ).all()
             
-            enrolled_ids = [row[0] for row in enrolled_ids_query.all()]
+            for cm in class_members:
+                course_class = session.query(CourseClass).filter(
+                    CourseClass.id == cm.course_class_id
+                ).first()
+                if course_class:
+                    enrolled_course_ids.add(course_class.course_id)
             
             # Get user's organization IDs
             user_org_ids = get_user_organization_ids(session, user_id)
@@ -1264,8 +1270,8 @@ class DiscoverCoursesResource(Resource):
             )
             
             # Exclude enrolled courses
-            if enrolled_ids:
-                query = query.filter(~Course.id.in_(enrolled_ids))
+            if enrolled_course_ids:
+                query = query.filter(~Course.id.in_(enrolled_course_ids))
             
             # Apply visibility rules
             if user_org_ids:
@@ -1317,13 +1323,84 @@ class DiscoverCoursesResource(Resource):
             }), 200
             
         except SQLAlchemyError as exc:
+            import traceback
+            traceback.print_exc()
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+@courses_ns.route("/users/me/created-courses")
+class UserCreatedCoursesResource(Resource):
+    @courses_ns.response(200, "Success")
+    @courses_ns.response(401, "Unauthorized")
+    def get(self):
+        """Get courses created by the current user."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+        
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+        
+        include_archived = request.args.get("include_archived", "false").lower() == "true"
+        
+        session = db_session()
+        try:
+            # Build query for courses created by this user
+            query = session.query(Course).filter(Course.created_by == user_id)
+            
+            # Filter by status
+            if include_archived:
+                query = query.filter(Course.status.in_(["draft", "published", "archived"]))
+            else:
+                query = query.filter(Course.status.in_(["draft", "published"]))
+            
+            courses = query.order_by(Course.created_at.desc()).all()
+            
+            result_courses = []
+            for course in courses:
+                org = session.query(Organization).filter(Organization.id == course.organization_id).first()
+                
+                # Get student count for this course
+                course_classes = session.query(CourseClass).filter(CourseClass.course_id == course.id).all()
+                class_ids = [cc.id for cc in course_classes]
+                student_count = 0
+                if class_ids:
+                    student_count = session.query(ClassMember).filter(
+                        ClassMember.course_class_id.in_(class_ids),
+                        ClassMember.role == "student"
+                    ).count()
+                
+                result_courses.append({
+                    "id": course.id,
+                    "title": course.title,
+                    "description": course.description,
+                    "visibility": course.visibility,
+                    "status": course.status,
+                    "organization_id": course.organization_id,
+                    "organization_name": org.name if org else None,
+                    "created_by": str(course.created_by),
+                    "created_at": course.created_at.isoformat() if course.created_at else None,
+                    "instructor_name": "You",
+                    "instructor_avatar": None,
+                    "enrolled": False,
+                    "students_count": student_count,  # Add student count for teacher view
+                })
+            
+            return jsonify({
+                "courses": result_courses,
+                "total": len(result_courses)
+            }), 200
+            
+        except SQLAlchemyError as exc:
+            import traceback
+            traceback.print_exc()
             return jsonify({"error": str(exc)}), 500
         finally:
             session.close()
 
 
-@courses_ns.route("/users/me/created-courses")
-class UserCreatedCoursesResource(Resource):
     @courses_ns.response(200, "Success")
     @courses_ns.response(401, "Unauthorized")
     def get(self):
