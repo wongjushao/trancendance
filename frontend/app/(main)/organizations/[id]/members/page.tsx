@@ -65,92 +65,160 @@ interface Member {
   };
 }
 
+interface OrganizationData {
+  id: number;
+  name: string;
+  description: string | null;
+  slug: string | null;
+  created_by: string;
+  created_at: string;
+}
+
+// Helper to get auth token
+const getAuthToken = async () => {
+  const supabase = getSupabaseBrowserClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token;
+};
+
 export default function OrganizationMembersPage() {
   const params = useParams();
   const router = useRouter();
   const orgId = parseInt(params.id as string);
   
   const [loading, setLoading] = useState(true);
-  const [organization, setOrganization] = useState<any>(null);
+  const [organization, setOrganization] = useState<OrganizationData | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [memberEmails, setMemberEmails] = useState<Record<string, string>>({});
   const [roleModalOpen, setRoleModalOpen] = useState(false);
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [newRole, setNewRole] = useState("");
   const [updatingRole, setUpdatingRole] = useState(false);
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState("member");
+  const [inviteRole, setInviteRole] = useState<"student" | "teacher" | "sub_admin">("student");
   const [inviting, setInviting] = useState(false);
   
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        setLoading(true);
-        const supabase = getSupabaseBrowserClient();
-        
-        // Get current user
-        const { data: { user } } = await supabase.auth.getUser();
-        
-        if (!user) {
-          router.push("/login");
-          return;
-        }
-        setCurrentUserId(user.id);
-        
-        // Get organization details
-        const { data: orgData } = await supabase
-          .from("organizations")
-          .select("*")
-          .eq("id", orgId)
-          .single();
-        setOrganization(orgData);
-        
-        // Get current user's role
-        const { data: currentMember } = await supabase
-          .from("organization_members")
-          .select("member_role")
-          .eq("organization_id", orgId)
-          .eq("user_id", user.id)
-          .single();
-        
-        setCurrentUserRole(currentMember?.member_role || null);
-        
-        // Get all members with profiles
-        const { data: membersData } = await supabase
-          .from("organization_members")
-          .select(`
-            *,
-            user:profiles!user_id (
-              id,
-              first_name,
-              last_name,
-              username,
-              email,
-              avatar_url
-            )
-          `)
-          .eq("organization_id", orgId)
-          .order("created_at", { ascending: true });
-        
-        setMembers(membersData || []);
-        
-      } catch (error) {
-        console.error("Error loading members:", error);
-        toast.error("Failed to load members");
-      } finally {
-        setLoading(false);
-      }
-    };
-    
     loadData();
   }, [orgId, router]);
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      const token = await getAuthToken();
+      
+      if (!token) {
+        router.push("/login");
+        return;
+      }
+      
+      // Get current user info from auth service
+      const userResponse = await fetch('/api/auth-service/auth/me', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (!userResponse.ok) {
+        router.push("/login");
+        return;
+      }
+      
+      const userData = await userResponse.json();
+      setCurrentUserId(userData.id);
+      
+      // Get organization details
+      const orgResponse = await fetch(`/api/org-service/orgs/${orgId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (!orgResponse.ok) {
+        toast.error("Failed to load organization");
+        return;
+      }
+      
+      const orgData = await orgResponse.json();
+      setOrganization(orgData);
+      
+      // Get current user's role
+      const roleResponse = await fetch(`/api/org-service/orgs/${orgId}/members/${userData.id}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (roleResponse.ok) {
+        const roleData = await roleResponse.json();
+        setCurrentUserRole(roleData.member_role);
+      }
+      
+      // Get all members
+      const membersResponse = await fetch(`/api/org-service/orgs/${orgId}/members`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (!membersResponse.ok) {
+        toast.error("Failed to load members");
+        return;
+      }
+      
+      const membersData = await membersResponse.json();
+      
+      // Collect user IDs to fetch emails
+      const userIds = membersData.members.map((m: any) => m.user_id);
+      await fetchMemberEmails(userIds, token);
+      
+      // Format members with emails
+      const formattedMembers = membersData.members.map((m: any) => ({
+        id: m.id,
+        user_id: m.user_id,
+        member_role: m.member_role,
+        created_at: m.created_at,
+        user: {
+          id: m.user_id,
+          first_name: m.user?.first_name || null,
+          last_name: m.user?.last_name || null,
+          username: m.user?.username || null,
+          email: memberEmails[m.user_id] || "",
+          avatar_url: m.user?.avatar_url || null,
+        }
+      }));
+      
+      setMembers(formattedMembers);
+      
+    } catch (error) {
+      console.error("Error loading data:", error);
+      toast.error("Failed to load organization data");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchMemberEmails = async (userIds: string[], token: string) => {
+    if (userIds.length === 0) return;
+    
+    try {
+      const response = await fetch('/api/org-service/users/batch-emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ user_ids: userIds }),
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setMemberEmails(data.users || {});
+      }
+    } catch (error) {
+      console.error("Error fetching emails:", error);
+    }
+  };
   
   const filteredMembers = members.filter(member => {
     const fullName = `${member.user.first_name || ""} ${member.user.last_name || ""}`.toLowerCase();
-    const email = member.user.email?.toLowerCase() || "";
+    const email = (member.user.email || "").toLowerCase();
     const search = searchTerm.toLowerCase();
     return fullName.includes(search) || email.includes(search);
   });
@@ -162,15 +230,25 @@ export default function OrganizationMembersPage() {
     
     setUpdatingRole(true);
     try {
-      const supabase = getSupabaseBrowserClient();
+      const token = await getAuthToken();
+      if (!token) {
+        toast.error("Authentication required");
+        return;
+      }
       
-      const { error } = await supabase
-        .from("organization_members")
-        .update({ member_role: newRole })
-        .eq("organization_id", orgId)
-        .eq("user_id", selectedMember.user_id);
+      const response = await fetch(`/api/org-service/orgs/${orgId}/members/${selectedMember.user_id}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ member_role: newRole }),
+      });
       
-      if (error) throw error;
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to update role");
+      }
       
       // Update local state
       setMembers(members.map(m => 
@@ -185,7 +263,7 @@ export default function OrganizationMembersPage() {
       
     } catch (error) {
       console.error("Error updating role:", error);
-      toast.error("Failed to update role");
+      toast.error(error instanceof Error ? error.message : "Failed to update role");
     } finally {
       setUpdatingRole(false);
     }
@@ -197,22 +275,28 @@ export default function OrganizationMembersPage() {
     }
     
     try {
-      const supabase = getSupabaseBrowserClient();
+      const token = await getAuthToken();
+      if (!token) {
+        toast.error("Authentication required");
+        return;
+      }
       
-      const { error } = await supabase
-        .from("organization_members")
-        .delete()
-        .eq("organization_id", orgId)
-        .eq("user_id", member.user_id);
+      const response = await fetch(`/api/org-service/orgs/${orgId}/members/${member.user_id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       
-      if (error) throw error;
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to remove member");
+      }
       
       setMembers(members.filter(m => m.user_id !== member.user_id));
       toast.success("Member removed");
       
     } catch (error) {
       console.error("Error removing member:", error);
-      toast.error("Failed to remove member");
+      toast.error(error instanceof Error ? error.message : "Failed to remove member");
     }
   };
   
@@ -222,74 +306,56 @@ export default function OrganizationMembersPage() {
       return;
     }
     
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(inviteEmail)) {
+      toast.error("Please enter a valid email address");
+      return;
+    }
+    
     setInviting(true);
     try {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
+      const token = await getAuthToken();
+      if (!token) {
+        toast.error("Authentication required");
+        return;
+      }
       
-      // Check if user exists
-      const { data: existingUser } = await supabase
-        .from("profiles")
-        .select("id")
-        .eq("email", inviteEmail)
-        .single();
+      const response = await fetch(`/api/org-service/orgs/${orgId}/invite`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: inviteEmail,
+          role: inviteRole,
+        }),
+      });
       
-      if (existingUser) {
-        // Check if already a member
-        const { data: existingMember } = await supabase
-          .from("organization_members")
-          .select("id")
-          .eq("organization_id", orgId)
-          .eq("user_id", existingUser.id)
-          .single();
-        
-        if (existingMember) {
-          toast.error("User is already a member of this organization");
-          setInviteModalOpen(false);
-          setInviteEmail("");
-          return;
-        }
-        
-        // Add directly
-        await supabase
-          .from("organization_members")
-          .insert({
-            organization_id: orgId,
-            user_id: existingUser.id,
-            member_role: inviteRole,
-          });
-        
-        toast.success("User added to organization");
-      } else {
-        // Create invitation (mock for now)
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to send invitation");
+      }
+      
+      const data = await response.json();
+      
+      if (data.email_sent) {
         toast.success(`Invitation sent to ${inviteEmail}`);
+      } else {
+        toast.info(`Invitation created for ${inviteEmail}. Email delivery is not configured.`);
+        if (data.mock_email) {
+          console.log("Mock invitation email:", data.mock_email);
+        }
       }
       
       setInviteModalOpen(false);
       setInviteEmail("");
-      setInviteRole("member");
-      
-      // Refresh members list
-      const { data: membersData } = await supabase
-        .from("organization_members")
-        .select(`
-          *,
-          user:profiles!user_id (
-            id,
-            first_name,
-            last_name,
-            username,
-            email,
-            avatar_url
-          )
-        `)
-        .eq("organization_id", orgId);
-      
-      setMembers(membersData || []);
+      setInviteRole("student");
       
     } catch (error) {
       console.error("Error inviting member:", error);
-      toast.error("Failed to invite member");
+      toast.error(error instanceof Error ? error.message : "Failed to invite member");
     } finally {
       setInviting(false);
     }
@@ -300,9 +366,9 @@ export default function OrganizationMembersPage() {
       case "admin":
         return <Badge className="bg-purple-500/20 text-purple-300">Admin</Badge>;
       case "sub_admin":
-        return <Badge className="bg-blue-500/20 text-blue-300">Sub-Admin</Badge>;
+        return <Badge className="bg-indigo-500/20 text-indigo-300">Sub-Admin</Badge>;
       case "teacher":
-        return <Badge className="bg-green-500/20 text-green-300">Teacher</Badge>;
+        return <Badge className="bg-blue-500/20 text-blue-300">Teacher</Badge>;
       default:
         return <Badge variant="secondary">Member</Badge>;
     }
@@ -313,9 +379,9 @@ export default function OrganizationMembersPage() {
       case "admin":
         return <Crown className="w-4 h-4 text-purple-400" />;
       case "sub_admin":
-        return <Shield className="w-4 h-4 text-blue-400" />;
+        return <Shield className="w-4 h-4 text-indigo-400" />;
       case "teacher":
-        return <UserCheck className="w-4 h-4 text-green-400" />;
+        return <UserCheck className="w-4 h-4 text-blue-400" />;
       default:
         return <Users className="w-4 h-4 text-gray-400" />;
     }
@@ -492,7 +558,7 @@ export default function OrganizationMembersPage() {
           <DialogHeader>
             <DialogTitle className="text-white">Change Member Role</DialogTitle>
             <DialogDescription>
-              Update role
+              Update the member's role in this organization.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -503,12 +569,15 @@ export default function OrganizationMembersPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="member">Member</SelectItem>
+                  <SelectItem value="student">Student</SelectItem>
                   <SelectItem value="teacher">Teacher</SelectItem>
                   <SelectItem value="sub_admin">Sub-Admin</SelectItem>
                   <SelectItem value="admin">Admin</SelectItem>
                 </SelectContent>
               </Select>
+              <p className="text-xs text-gray-500 mt-2">
+                Note: You cannot change the role of the primary admin.
+              </p>
             </div>
           </div>
           <DialogFooter>
@@ -540,21 +609,31 @@ export default function OrganizationMembersPage() {
             </div>
             <div>
               <Label>Role</Label>
-              <Select value={inviteRole} onValueChange={setInviteRole}>
+              <Select value={inviteRole} onValueChange={(v: any) => setInviteRole(v)}>
                 <SelectTrigger className="mt-2">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="member">Member</SelectItem>
+                  <SelectItem value="student">Student</SelectItem>
                   <SelectItem value="teacher">Teacher</SelectItem>
-                  <SelectItem value="sub_admin">Sub-Admin</SelectItem>
+                  {currentUserRole === "admin" && (
+                    <SelectItem value="sub_admin">Sub-Admin</SelectItem>
+                  )}
                 </SelectContent>
               </Select>
+              <p className="text-xs text-gray-500 mt-2">
+                {currentUserRole === "admin" 
+                  ? "You can invite students, teachers, and sub-admins." 
+                  : "You can only invite students and teachers."}
+              </p>
             </div>
           </div>
           <DialogFooter>
             <GlowButton variant="ghost" onClick={() => setInviteModalOpen(false)}>Cancel</GlowButton>
-            <GlowButton onClick={handleInvite} isLoading={inviting}>Send Invitation</GlowButton>
+            <GlowButton onClick={handleInvite} isLoading={inviting}>
+              <Mail className="w-4 h-4 mr-2" />
+              Send Invitation
+            </GlowButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>

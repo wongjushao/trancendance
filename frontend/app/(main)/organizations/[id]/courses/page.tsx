@@ -50,108 +50,157 @@ interface Course {
   lesson_count?: number;
 }
 
+interface OrganizationData {
+  id: number;
+  name: string;
+  description: string | null;
+  slug: string | null;
+  created_by: string;
+  created_at: string;
+}
+
+// Helper to get auth token
+const getAuthToken = async () => {
+  const supabase = getSupabaseBrowserClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token;
+};
+
 export default function OrganizationCoursesPage() {
   const params = useParams();
   const router = useRouter();
   const orgId = parseInt(params.id as string);
   
   const [loading, setLoading] = useState(true);
-  const [organization, setOrganization] = useState<any>(null);
+  const [organization, setOrganization] = useState<OrganizationData | null>(null);
   const [courses, setCourses] = useState<Course[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [userRole, setUserRole] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   
   useEffect(() => {
     const loadData = async () => {
       try {
         setLoading(true);
-        const supabase = getSupabaseBrowserClient();
+        const token = await getAuthToken();
         
-        // Get current user
-        const { data: { user } } = await supabase.auth.getUser();
-        
-        if (!user) {
+        if (!token) {
           router.push("/login");
           return;
         }
         
+        // Get current user from backend
+        const userResponse = await fetch('/api/auth-service/auth/me', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (!userResponse.ok) {
+          router.push("/login");
+          return;
+        }
+        
+        const userData = await userResponse.json();
+        setCurrentUserId(userData.id);
+        
         // Get organization details
-        const { data: orgData } = await supabase
-          .from("organizations")
-          .select("*")
-          .eq("id", orgId)
-          .single();
+        const orgResponse = await fetch(`/api/org-service/orgs/${orgId}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (!orgResponse.ok) {
+          toast.error("Organization not found");
+          return;
+        }
+        
+        const orgData = await orgResponse.json();
         setOrganization(orgData);
         
         // Check user role in organization
-        const { data: memberData } = await supabase
-          .from("organization_members")
-          .select("member_role")
-          .eq("organization_id", orgId)
-          .eq("user_id", user.id)
-          .single();
+        const roleResponse = await fetch(`/api/org-service/orgs/${orgId}/members/${userData.id}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
         
-        setUserRole(memberData?.member_role || null);
+        if (roleResponse.ok) {
+          const memberData = await roleResponse.json();
+          setUserRole(memberData.member_role);
+        }
         
-        // Get all courses for this organization
-        const { data: coursesData } = await supabase
-          .from("courses")
-          .select(`
-            *,
-            profiles!created_by (
-              first_name,
-              last_name,
-              username
-            )
-          `)
-          .eq("organization_id", orgId)
-          .order("created_at", { ascending: false });
+        // FIXED: Use the correct endpoint - /courses endpoint with organization_id filter
+        const coursesResponse = await fetch(`/api/org-service/courses?organization_id=${orgId}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
         
-        if (coursesData) {
-          // Get enrolled counts for each course
-          const coursesWithStats = await Promise.all(
-            coursesData.map(async (course) => {
-              // Get class members count
-              const { data: classMembers } = await supabase
-                .from("class_members")
-                .select("id")
-                .eq("course_class_id", course.id)
-                .eq("role", "student");
-              
-              // Get lesson count
-              const { data: modules } = await supabase
-                .from("modules")
-                .select(`
-                  classes (
-                    lessons (id)
-                  )
-                `)
-                .eq("course_id", course.id);
-              
-              let lessonCount = 0;
-              if (modules) {
-                lessonCount = modules.reduce((total, module) => {
-                  const moduleLessons = module.classes?.reduce((sum: number, classItem: any) => {
-                    return sum + (classItem.lessons?.length || 0);
-                  }, 0) || 0;
-                  return total + moduleLessons;
-                }, 0);
+        if (!coursesResponse.ok) {
+          toast.error("Failed to load courses");
+          return;
+        }
+        
+        const coursesData = await coursesResponse.json();
+        
+        // Get detailed info for each course (enrollment count, lesson count, rating)
+        const coursesWithDetails = await Promise.all(
+          (coursesData.courses || []).map(async (course: any) => {
+            let enrolledCount = 0;
+            let lessonCount = 0;
+            let instructorName = course.instructor_name || "Instructor";
+            
+            try {
+              const detailResponse = await fetch(`/api/org-service/courses/${course.id}/detail`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+              });
+              if (detailResponse.ok) {
+                const detail = await detailResponse.json();
+                enrolledCount = detail.course?.students_count || 0;
+                
+                // Count lessons
+                if (detail.modules) {
+                  for (const module of detail.modules) {
+                    for (const classItem of module.classes || []) {
+                      lessonCount += (classItem.lessons || []).length;
+                    }
+                  }
+                }
               }
               
-              return {
-                ...course,
-                instructor_name: course.profiles?.first_name 
-                  ? `${course.profiles.first_name} ${course.profiles.last_name || ""}`
-                  : course.profiles?.username || "Unknown",
-                enrolled_count: classMembers?.length || 0,
-                lesson_count: lessonCount,
-              };
-            })
-          );
-          
-          setCourses(coursesWithStats);
-        }
+              // Get instructor name from profile if available
+              if (course.created_by) {
+                const profileResponse = await fetch(`/api/auth-service/profile/public/${course.created_by}`, {
+                  headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (profileResponse.ok) {
+                  const profile = await profileResponse.json();
+                  if (profile.first_name && profile.last_name) {
+                    instructorName = `${profile.first_name} ${profile.last_name}`;
+                  } else if (profile.first_name) {
+                    instructorName = profile.first_name;
+                  } else if (profile.username) {
+                    instructorName = profile.username;
+                  }
+                }
+              }
+            } catch (err) {
+              console.error("Error fetching course details:", err);
+            }
+            
+            return {
+              id: course.id,
+              title: course.title,
+              description: course.description,
+              thumbnail: course.thumbnail,
+              status: course.status,
+              visibility: course.visibility,
+              level: course.level,
+              category: course.category,
+              created_at: course.created_at,
+              instructor_name: instructorName,
+              enrolled_count: enrolledCount,
+              lesson_count: lessonCount,
+            };
+          })
+        );
+        
+        setCourses(coursesWithDetails);
         
       } catch (error) {
         console.error("Error loading organization courses:", error);

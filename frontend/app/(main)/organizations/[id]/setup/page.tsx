@@ -33,6 +33,31 @@ interface SetupStep {
   optional?: boolean;
 }
 
+// Helper to get auth token
+const getAuthToken = async () => {
+  const supabase = getSupabaseBrowserClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token;
+};
+
+// Helper to get current user info from backend
+const getCurrentUser = async () => {
+  const token = await getAuthToken();
+  if (!token) return null;
+  
+  try {
+    const response = await fetch('/api/auth-service/auth/me', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    
+    if (!response.ok) return null;
+    return await response.json();
+  } catch (error) {
+    console.error("Error fetching current user:", error);
+    return null;
+  }
+};
+
 export default function OrganizationSetupPage() {
   const params = useParams();
   const router = useRouter();
@@ -86,35 +111,54 @@ export default function OrganizationSetupPage() {
     const checkSetupStatus = async () => {
       try {
         setLoading(true);
-        const supabase = getSupabaseBrowserClient();
-        const { data: { session } } = await supabase.auth.getSession();
-
-        if (!session) {
+        
+        // Get current user from backend API
+        const user = await getCurrentUser();
+        
+        if (!user) {
           router.push("/login");
           return;
         }
 
-        // Check if user is admin
-        const isAdmin = roleData.role === "admin" && roleData.organizationId === orgId;
-        
+        // Check if user is admin using backend role endpoint
+        const token = await getAuthToken();
+        if (!token) {
+          router.push("/login");
+          return;
+        }
+
+        // Get user's role in this organization
+        const roleResponse = await fetch(`/api/org-service/orgs/${orgId}/members/${user.id}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (!roleResponse.ok) {
+          toast.error("You don't have access to this organization");
+          router.push(`/organizations/${orgId}`);
+          return;
+        }
+
+        const memberData = await roleResponse.json();
+        const isAdmin = memberData.member_role === "admin" || memberData.member_role === "sub_admin";
+
         if (!isAdmin) {
           toast.error("You don't have permission to set up this organization");
           router.push(`/organizations/${orgId}`);
           return;
         }
 
-        // Get organization details
-        const response = await fetch(`/api/org-service/orgs/${orgId}/setup-status`, {
+        // Get organization setup status
+        const setupResponse = await fetch(`/api/org-service/orgs/${orgId}/setup-status`, {
           headers: {
-            Authorization: `Bearer ${session.access_token}`,
+            Authorization: `Bearer ${token}`,
           },
         });
 
-        if (!response.ok) {
+        if (!setupResponse.ok) {
           throw new Error("Failed to fetch setup status");
         }
 
-        const data = await response.json();
+        const data = await setupResponse.json();
 
         if (data.is_setup_complete) {
           // Already set up, redirect to organization page
@@ -125,7 +169,7 @@ export default function OrganizationSetupPage() {
         // Fetch organization details
         const orgResponse = await fetch(`/api/org-service/orgs/${orgId}`, {
           headers: {
-            Authorization: `Bearer ${session.access_token}`,
+            Authorization: `Bearer ${token}`,
           },
         });
 
@@ -173,29 +217,30 @@ export default function OrganizationSetupPage() {
   const saveOrganizationDetails = async () => {
     setSaving(true);
     try {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { session } } = await supabase.auth.getSession();
+      const token = await getAuthToken();
 
-      if (!session) {
-        toast.error("Session expired");
+      if (!token) {
+        toast.error("Session expired. Please log in again.");
+        router.push("/login");
         return;
       }
 
-      // Update organization
+      // Update organization via backend API
       const response = await fetch(`/api/org-service/orgs/${orgId}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          description: orgSettings.description,
-          slug: orgSettings.slug,
+          description: orgSettings.description || null,
+          slug: orgSettings.slug || null,
         }),
       });
 
       if (!response.ok) {
-        throw new Error("Failed to update organization");
+        const error = await response.json();
+        throw new Error(error.error || "Failed to update organization");
       }
 
       toast.success("Organization details saved");
@@ -207,7 +252,7 @@ export default function OrganizationSetupPage() {
       setCurrentStep(currentStep + 1);
     } catch (error) {
       console.error("Error saving organization details:", error);
-      toast.error("Failed to save organization details");
+      toast.error(error instanceof Error ? error.message : "Failed to save organization details");
     } finally {
       setSaving(false);
     }
@@ -225,19 +270,26 @@ export default function OrganizationSetupPage() {
 
     setSaving(true);
     
-    const emails = inviteEmails.split(/[\n,]+/).map(e => e.trim()).filter(e => e);
+    const emails = inviteEmails.split(/[\n,]+/).map(e => e.trim()).filter(e => e && e.includes('@'));
+
+    if (emails.length === 0) {
+      toast.error("No valid email addresses found");
+      setSaving(false);
+      return;
+    }
 
     try {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { session } } = await supabase.auth.getSession();
+      const token = await getAuthToken();
 
-      if (!session) {
-        toast.error("Session expired");
+      if (!token) {
+        toast.error("Session expired. Please log in again.");
+        router.push("/login");
         return;
       }
 
       let successCount = 0;
       let failCount = 0;
+      const failedEmails: string[] = [];
 
       for (const email of emails) {
         try {
@@ -245,22 +297,27 @@ export default function OrganizationSetupPage() {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              Authorization: `Bearer ${session.access_token}`,
+              Authorization: `Bearer ${token}`,
             },
             body: JSON.stringify({
               email,
               role: inviteRole,
-              message: `You've been invited to join ${organization?.name} as a ${inviteRole}.`,
+              personal_message: `You've been invited to join ${organization?.name} as a ${inviteRole}.`,
             }),
           });
 
           if (response.ok) {
             successCount++;
           } else {
+            const error = await response.json();
+            console.error(`Failed to invite ${email}:`, error);
             failCount++;
+            failedEmails.push(email);
           }
         } catch (err) {
+          console.error(`Error inviting ${email}:`, err);
           failCount++;
+          failedEmails.push(email);
         }
       }
 
@@ -268,7 +325,7 @@ export default function OrganizationSetupPage() {
         toast.success(`Invited ${successCount} member${successCount !== 1 ? "s" : ""}`);
       }
       if (failCount > 0) {
-        toast.warning(`Failed to invite ${failCount} member${failCount !== 1 ? "s" : ""}`);
+        toast.warning(`Failed to invite ${failCount} member${failCount !== 1 ? "s" : ""}: ${failedEmails.join(", ")}`);
       }
 
       setSteps(prev => prev.map((step, idx) =>
@@ -286,11 +343,11 @@ export default function OrganizationSetupPage() {
   const completeSetup = async () => {
     setSaving(true);
     try {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { session } } = await supabase.auth.getSession();
+      const token = await getAuthToken();
 
-      if (!session) {
-        toast.error("Session expired");
+      if (!token) {
+        toast.error("Session expired. Please log in again.");
+        router.push("/login");
         return;
       }
 
@@ -298,13 +355,14 @@ export default function OrganizationSetupPage() {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ is_setup_complete: true }),
       });
 
       if (!response.ok) {
-        throw new Error("Failed to complete setup");
+        const error = await response.json();
+        throw new Error(error.error || "Failed to complete setup");
       }
 
       toast.success("Organization setup complete!");
@@ -315,7 +373,7 @@ export default function OrganizationSetupPage() {
       
       setSetupComplete(true);
       
-      // Refresh role data
+      // Refresh role data to update user's permissions
       await refreshRole();
       
       // Redirect after short delay
@@ -324,7 +382,7 @@ export default function OrganizationSetupPage() {
       }, 1500);
     } catch (error) {
       console.error("Error completing setup:", error);
-      toast.error("Failed to complete setup");
+      toast.error(error instanceof Error ? error.message : "Failed to complete setup");
     } finally {
       setSaving(false);
     }
@@ -481,6 +539,9 @@ export default function OrganizationSetupPage() {
                   rows={5}
                   className="mt-3 font-mono text-sm"
                 />
+                <p className="text-xs text-gray-500 mt-2">
+                  Invited users will receive an email with instructions to join.
+                </p>
               </div>
 
               <div>

@@ -874,10 +874,6 @@ class OrganizationMemberInvitationAcceptResource(Resource):
 
 @organizations_ns.route("/orgs/<int:org_id>/members")
 class OrganizationMembersListResource(Resource):
-    @organizations_ns.response(200, "Members retrieved")
-    @organizations_ns.response(401, "Unauthorized")
-    @organizations_ns.response(403, "Permission denied")
-    @organizations_ns.response(404, "Organization not found")
     def get(self, org_id: int):
         """Get all members of an organization with their profiles."""
         db_session = current_app.config.get("DB_SESSION")
@@ -888,14 +884,14 @@ class OrganizationMembersListResource(Resource):
         if user_id is None:
             return jsonify({"error": "Unauthorized"}), 401
 
+        limit = request.args.get("limit", type=int)
         session = db_session()
+        
         try:
-            # Check if organization exists
             org = session.query(Organization).filter(Organization.id == org_id).first()
             if not org:
                 return jsonify({"error": "Organization not found"}), 404
 
-            # Check if user has permission to view members (must be a member)
             viewer_membership = session.query(OrganizationMember).filter(
                 OrganizationMember.organization_id == org_id,
                 OrganizationMember.user_id == user_id
@@ -904,12 +900,14 @@ class OrganizationMembersListResource(Resource):
             if not viewer_membership:
                 return jsonify({"error": "You are not a member of this organization"}), 403
 
-            # Get all members with user profiles
-            members = (
-                session.query(OrganizationMember)
-                .filter(OrganizationMember.organization_id == org_id)
-                .all()
+            query = session.query(OrganizationMember).filter(
+                OrganizationMember.organization_id == org_id
             )
+            
+            if limit:
+                query = query.limit(limit)
+            
+            members = query.all()
 
             user_ids = [m.user_id for m in members]
             profiles = {}
@@ -946,7 +944,6 @@ class OrganizationMembersListResource(Resource):
             return jsonify({"error": str(exc)}), 500
         finally:
             session.close()
-
 
 @organizations_ns.route("/orgs/<int:org_id>/members/<string:member_id>")
 class OrganizationMemberDetailResource(Resource):

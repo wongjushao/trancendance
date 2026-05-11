@@ -1,0 +1,635 @@
+server_tokens off;
+
+map ${DOLLAR}http_upgrade ${DOLLAR}connection_upgrade {
+  default upgrade;
+  '' close;
+}
+
+upstream frontend_upstream {
+  server frontend:3000;
+}
+
+upstream prometheus_upstream {
+  server prometheus:9090;
+}
+
+upstream grafana_upstream {
+  server grafana:3000;
+}
+
+upstream auth_service_upstream {
+  server auth-service:5001;
+}
+
+upstream chat_service_upstream {
+  server chat-service:5002;
+}
+
+upstream org_service_upstream {
+  server org-service:5003;
+}
+
+upstream notification_service_upstream {
+  server notification-service:5004;
+}
+
+server {
+  listen ${PORT:-8080} default_server;
+  server_name ${SERVER_NAME};
+  port_in_redirect off;
+
+  location / {
+    return 301 https://${DOLLAR}host${DOLLAR}request_uri;
+  }
+
+  include includes/location_common.conf;
+}
+
+server {
+  listen ${SSL_PORT:-8443} ssl;
+  server_name ${SERVER_NAME};
+  port_in_redirect off;
+
+  proxy_buffer_size 32k;
+  proxy_buffers 8 32k;
+  proxy_busy_buffers_size 64k;
+
+  ssl_certificate ${SSL_CERT_FILE};
+  ssl_certificate_key ${SSL_CERT_KEY_FILE};
+  ssl_session_timeout 1d;
+  ssl_session_cache shared:MozSSL:10m;
+  ssl_session_tickets off;
+  ssl_dhparam /etc/ssl/certs/dhparam-${SSL_DH_BITS}.pem;
+  ssl_protocols ${SSL_PROTOCOLS};
+  ssl_ciphers ${SSL_CIPHERS};
+  ssl_prefer_server_ciphers ${SSL_PREFER_CIPHERS};
+  ssl_stapling ${SSL_OCSP_STAPLING};
+  ssl_stapling_verify ${SSL_OCSP_STAPLING};
+  ssl_verify_client ${SSL_VERIFY};
+  ssl_verify_depth ${SSL_VERIFY_DEPTH};
+
+  client_max_body_size 10m;
+
+  location / {
+    include includes/cors.conf;
+    proxy_set_header Host ${DOLLAR}host;
+    proxy_set_header Proxy "";
+    proxy_set_header Upgrade ${DOLLAR}http_upgrade;
+    proxy_set_header Connection ${DOLLAR}connection_upgrade;
+    proxy_set_header X-REAL-IP ${DOLLAR}remote_addr;
+    proxy_set_header X-Forwarded-For ${DOLLAR}proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Port ${DOLLAR}server_port;
+    proxy_set_header X-Forwarded-Proto ${DOLLAR}scheme;
+    proxy_http_version 1.1;
+    proxy_buffering off;
+    proxy_connect_timeout 60s;
+    proxy_read_timeout 36000s;
+    proxy_redirect off;
+    proxy_pass_header Authorization;
+    proxy_pass http://frontend_upstream;
+  }
+
+  location = /grafana {
+    return 301 /grafana/;
+  }
+
+  location /grafana/ {
+    include includes/cors.conf;
+    proxy_set_header Host ${DOLLAR}host;
+    proxy_set_header Proxy "";
+    proxy_set_header Upgrade ${DOLLAR}http_upgrade;
+    proxy_set_header Connection ${DOLLAR}connection_upgrade;
+    proxy_set_header X-REAL-IP ${DOLLAR}remote_addr;
+    proxy_set_header X-Forwarded-For ${DOLLAR}proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Port ${DOLLAR}server_port;
+    proxy_set_header X-Forwarded-Proto ${DOLLAR}scheme;
+    proxy_http_version 1.1;
+    proxy_buffering off;
+    proxy_connect_timeout 60s;
+    proxy_read_timeout 36000s;
+    proxy_redirect off;
+    proxy_pass_header Authorization;
+    proxy_set_header X-Forwarded-Prefix /grafana;
+    proxy_ssl_server_name on;
+    proxy_ssl_name grafana;
+    proxy_ssl_trusted_certificate /etc/nginx/certs/internal-ca.crt;
+    proxy_ssl_verify on;
+    proxy_pass https://grafana_upstream;
+  }
+
+  location = /prometheus {
+    return 301 /prometheus/;
+  }
+
+  location /prometheus/ {
+    include includes/cors.conf;
+    proxy_set_header Host ${DOLLAR}host;
+    proxy_set_header Proxy "";
+    proxy_set_header Upgrade ${DOLLAR}http_upgrade;
+    proxy_set_header Connection ${DOLLAR}connection_upgrade;
+    proxy_set_header X-REAL-IP ${DOLLAR}remote_addr;
+    proxy_set_header X-Forwarded-For ${DOLLAR}proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Port ${DOLLAR}server_port;
+    proxy_set_header X-Forwarded-Proto ${DOLLAR}scheme;
+    proxy_http_version 1.1;
+    proxy_buffering off;
+    proxy_connect_timeout 60s;
+    proxy_read_timeout 36000s;
+    proxy_redirect off;
+    proxy_pass_header Authorization;
+    proxy_set_header X-Forwarded-Prefix /prometheus;
+    proxy_ssl_server_name on;
+    proxy_ssl_name prometheus;
+    proxy_ssl_trusted_certificate /etc/nginx/certs/internal-ca.crt;
+    proxy_ssl_verify on;
+    proxy_pass https://prometheus_upstream;
+  }
+
+  location = /api/auth-service {
+    return 301 /api/auth-service/;
+  }
+
+  location = /api/auth-service/docs {
+      include includes/cors.conf;
+
+      proxy_set_header Host ${DOLLAR}host;
+      proxy_set_header Proxy "";
+      proxy_set_header X-REAL-IP ${DOLLAR}remote_addr;
+      proxy_set_header X-Forwarded-For ${DOLLAR}proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Port ${DOLLAR}server_port;
+      proxy_set_header X-Forwarded-Proto ${DOLLAR}scheme;
+      proxy_set_header X-Forwarded-Prefix /api/auth-service;
+      proxy_set_header X-Script-Name /api/auth-service;
+      proxy_redirect off;
+
+      proxy_ssl_server_name on;
+      proxy_ssl_name auth-service;
+      proxy_ssl_trusted_certificate /etc/nginx/certs/internal-ca.crt;
+      proxy_ssl_verify on;
+      proxy_pass https://auth_service_upstream/docs;
+  }
+
+  location = /api/auth-service/docs/ {
+    return 301 /api/auth-service/docs;
+  }
+
+  location = /api/auth-service/swagger.json {
+      include includes/cors.conf;
+
+      proxy_set_header Host ${DOLLAR}host;
+      proxy_set_header Proxy "";
+      proxy_set_header X-REAL-IP ${DOLLAR}remote_addr;
+      proxy_set_header X-Forwarded-For ${DOLLAR}proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Port ${DOLLAR}server_port;
+      proxy_set_header X-Forwarded-Proto ${DOLLAR}scheme;
+      proxy_set_header X-Forwarded-Prefix /api/auth-service;
+      proxy_set_header X-Script-Name /api/auth-service;
+      proxy_redirect off;
+
+      proxy_ssl_server_name on;
+      proxy_ssl_name auth-service;
+      proxy_ssl_trusted_certificate /etc/nginx/certs/internal-ca.crt;
+      proxy_ssl_verify on;
+      proxy_pass https://auth_service_upstream/swagger.json;
+  }
+
+  location /api/auth-service/swaggerui/ {
+      include includes/cors.conf;
+
+      proxy_set_header Host ${DOLLAR}host;
+      proxy_set_header Proxy "";
+      proxy_set_header X-REAL-IP ${DOLLAR}remote_addr;
+      proxy_set_header X-Forwarded-For ${DOLLAR}proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Port ${DOLLAR}server_port;
+      proxy_set_header X-Forwarded-Proto ${DOLLAR}scheme;
+      proxy_set_header X-Forwarded-Prefix /api/auth-service;
+      proxy_set_header X-Script-Name /api/auth-service;
+      proxy_redirect off;
+
+      proxy_ssl_server_name on;
+      proxy_ssl_name auth-service;
+      proxy_ssl_trusted_certificate /etc/nginx/certs/internal-ca.crt;
+      proxy_ssl_verify on;
+      proxy_pass https://auth_service_upstream/swaggerui/;
+  }
+
+  location /api/auth-service/ {
+      include includes/cors.conf;
+
+      proxy_set_header Host ${DOLLAR}host;
+      proxy_set_header Proxy "";
+      proxy_set_header Upgrade ${DOLLAR}http_upgrade;
+      proxy_set_header Connection ${DOLLAR}connection_upgrade;
+      proxy_set_header X-REAL-IP ${DOLLAR}remote_addr;
+      proxy_set_header X-Forwarded-For ${DOLLAR}proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Port ${DOLLAR}server_port;
+      proxy_set_header X-Forwarded-Proto ${DOLLAR}scheme;
+
+      proxy_http_version 1.1;
+      proxy_buffering off;
+      proxy_connect_timeout 60s;
+      proxy_read_timeout 36000s;
+      proxy_redirect off;
+      proxy_pass_header Authorization;
+
+      proxy_set_header X-Forwarded-Prefix /api/auth-service;
+      proxy_set_header X-Script-Name /api/auth-service; 
+
+      proxy_ssl_server_name on;
+      proxy_ssl_name auth-service;
+      proxy_ssl_trusted_certificate /etc/nginx/certs/internal-ca.crt;
+      proxy_ssl_verify on;
+      proxy_pass https://auth_service_upstream;
+  }
+
+  location = /api/chat {
+    return 301 /api/chat/;
+  }
+
+  location = /api/chat/docs {
+    return 404;
+  }
+
+  location = /api/chat/docs/ {
+    return 404;
+  }
+
+  location = /api/chat/swagger.json {
+    return 404;
+  }
+
+  location /api/chat/swaggerui/ {
+    return 404;
+  }
+
+  location /api/chat/ {
+      include includes/cors.conf;
+
+      proxy_set_header Host ${DOLLAR}host;
+      proxy_set_header Proxy "";
+      proxy_set_header Upgrade ${DOLLAR}http_upgrade;
+      proxy_set_header Connection ${DOLLAR}connection_upgrade;
+      proxy_set_header X-REAL-IP ${DOLLAR}remote_addr;
+      proxy_set_header X-Forwarded-For ${DOLLAR}proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Port ${DOLLAR}server_port;
+      proxy_set_header X-Forwarded-Proto ${DOLLAR}scheme;
+
+      proxy_http_version 1.1;
+      proxy_buffering off;
+      proxy_connect_timeout 60s;
+      proxy_read_timeout 36000s;
+      proxy_redirect off;
+      proxy_pass_header Authorization;
+
+      proxy_set_header X-Forwarded-Prefix /api/chat;
+      proxy_set_header X-Script-Name /api/chat;
+
+      proxy_ssl_server_name on;
+      proxy_ssl_name chat-service;
+      proxy_ssl_trusted_certificate /etc/nginx/certs/internal-ca.crt;
+      proxy_ssl_verify on;
+      proxy_pass https://chat_service_upstream/;
+  }
+
+  location = /api/chat-service {
+    return 301 /api/chat-service/;
+  }
+
+  location = /api/chat-service/docs {
+      include includes/cors.conf;
+
+      proxy_set_header Host ${DOLLAR}host;
+      proxy_set_header Proxy "";
+      proxy_set_header X-REAL-IP ${DOLLAR}remote_addr;
+      proxy_set_header X-Forwarded-For ${DOLLAR}proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Port ${DOLLAR}server_port;
+      proxy_set_header X-Forwarded-Proto ${DOLLAR}scheme;
+      proxy_set_header X-Forwarded-Prefix /api/chat-service;
+      proxy_set_header X-Script-Name /api/chat-service;
+      proxy_redirect off;
+
+      proxy_ssl_server_name on;
+      proxy_ssl_name chat-service;
+      proxy_ssl_trusted_certificate /etc/nginx/certs/internal-ca.crt;
+      proxy_ssl_verify on;
+      proxy_pass https://chat_service_upstream/docs;
+  }
+
+  location = /api/chat-service/docs/ {
+    return 301 /api/chat-service/docs;
+  }
+
+  location = /api/chat-service/swagger.json {
+      include includes/cors.conf;
+
+      proxy_set_header Host ${DOLLAR}host;
+      proxy_set_header Proxy "";
+      proxy_set_header X-REAL-IP ${DOLLAR}remote_addr;
+      proxy_set_header X-Forwarded-For ${DOLLAR}proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Port ${DOLLAR}server_port;
+      proxy_set_header X-Forwarded-Proto ${DOLLAR}scheme;
+      proxy_set_header X-Forwarded-Prefix /api/chat-service;
+      proxy_set_header X-Script-Name /api/chat-service;
+      proxy_redirect off;
+
+      proxy_ssl_server_name on;
+      proxy_ssl_name chat-service;
+      proxy_ssl_trusted_certificate /etc/nginx/certs/internal-ca.crt;
+      proxy_ssl_verify on;
+      proxy_pass https://chat_service_upstream/swagger.json;
+  }
+
+  location /api/chat-service/swaggerui/ {
+      include includes/cors.conf;
+
+      proxy_set_header Host ${DOLLAR}host;
+      proxy_set_header Proxy "";
+      proxy_set_header X-REAL-IP ${DOLLAR}remote_addr;
+      proxy_set_header X-Forwarded-For ${DOLLAR}proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Port ${DOLLAR}server_port;
+      proxy_set_header X-Forwarded-Proto ${DOLLAR}scheme;
+      proxy_set_header X-Forwarded-Prefix /api/chat-service;
+      proxy_set_header X-Script-Name /api/chat-service;
+      proxy_redirect off;
+
+      proxy_ssl_server_name on;
+      proxy_ssl_name chat-service;
+      proxy_ssl_trusted_certificate /etc/nginx/certs/internal-ca.crt;
+      proxy_ssl_verify on;
+      proxy_pass https://chat_service_upstream/swaggerui/;
+  }
+
+  location /api/chat-service/ {
+      include includes/cors.conf;
+
+      proxy_set_header Host ${DOLLAR}host;
+      proxy_set_header Proxy "";
+      proxy_set_header Upgrade ${DOLLAR}http_upgrade;
+      proxy_set_header Connection ${DOLLAR}connection_upgrade;
+      proxy_set_header X-REAL-IP ${DOLLAR}remote_addr;
+      proxy_set_header X-Forwarded-For ${DOLLAR}proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Port ${DOLLAR}server_port;
+      proxy_set_header X-Forwarded-Proto ${DOLLAR}scheme;
+
+      proxy_http_version 1.1;
+      proxy_buffering off;
+      proxy_connect_timeout 60s;
+      proxy_read_timeout 36000s;
+      proxy_redirect off;
+      proxy_pass_header Authorization;
+
+      proxy_set_header X-Forwarded-Prefix /api/chat-service;
+      proxy_set_header X-Script-Name /api/chat-service;
+
+      proxy_ssl_server_name on;
+      proxy_ssl_name chat-service;
+      proxy_ssl_trusted_certificate /etc/nginx/certs/internal-ca.crt;
+      proxy_ssl_verify on;
+      proxy_pass https://chat_service_upstream/;
+  }
+
+  location = /api/org {
+    return 301 /api/org/;
+  }
+
+  location = /api/org/docs {
+    return 404;
+  }
+
+  location = /api/org/docs/ {
+    return 404;
+  }
+
+  location = /api/org/swagger.json {
+    return 404;
+  }
+
+  location /api/org/swaggerui/ {
+    return 404;
+  }
+
+  location /api/org/ {
+      include includes/cors.conf;
+
+      proxy_set_header Host ${DOLLAR}host;
+      proxy_set_header Proxy "";
+      proxy_set_header Upgrade ${DOLLAR}http_upgrade;
+      proxy_set_header Connection ${DOLLAR}connection_upgrade;
+      proxy_set_header X-REAL-IP ${DOLLAR}remote_addr;
+      proxy_set_header X-Forwarded-For ${DOLLAR}proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Port ${DOLLAR}server_port;
+      proxy_set_header X-Forwarded-Proto ${DOLLAR}scheme;
+
+      proxy_http_version 1.1;
+      proxy_buffering off;
+      proxy_connect_timeout 60s;
+      proxy_read_timeout 36000s;
+      proxy_redirect off;
+      proxy_pass_header Authorization;
+
+      proxy_set_header X-Forwarded-Prefix /api/org;
+      proxy_set_header X-Script-Name /api/org;
+
+      proxy_ssl_server_name on;
+      proxy_ssl_name org-service;
+      proxy_ssl_trusted_certificate /etc/nginx/certs/internal-ca.crt;
+      proxy_ssl_verify on;
+      proxy_pass https://org_service_upstream/;
+  }
+
+  location = /api/org-service {
+    return 301 /api/org-service/;
+  }
+
+  location = /api/org-service/docs {
+      include includes/cors.conf;
+
+      proxy_set_header Host ${DOLLAR}host;
+      proxy_set_header Proxy "";
+      proxy_set_header X-REAL-IP ${DOLLAR}remote_addr;
+      proxy_set_header X-Forwarded-For ${DOLLAR}proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Port ${DOLLAR}server_port;
+      proxy_set_header X-Forwarded-Proto ${DOLLAR}scheme;
+      proxy_set_header X-Forwarded-Prefix /api/org-service;
+      proxy_set_header X-Script-Name /api/org-service;
+      proxy_redirect off;
+
+      proxy_ssl_server_name on;
+      proxy_ssl_name org-service;
+      proxy_ssl_trusted_certificate /etc/nginx/certs/internal-ca.crt;
+      proxy_ssl_verify on;
+      proxy_pass https://org_service_upstream/docs;
+  }
+
+  location = /api/org-service/docs/ {
+    return 301 /api/org-service/docs;
+  }
+
+  location = /api/org-service/swagger.json {
+      include includes/cors.conf;
+
+      proxy_set_header Host ${DOLLAR}host;
+      proxy_set_header Proxy "";
+      proxy_set_header X-REAL-IP ${DOLLAR}remote_addr;
+      proxy_set_header X-Forwarded-For ${DOLLAR}proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Port ${DOLLAR}server_port;
+      proxy_set_header X-Forwarded-Proto ${DOLLAR}scheme;
+      proxy_set_header X-Forwarded-Prefix /api/org-service;
+      proxy_set_header X-Script-Name /api/org-service;
+      proxy_redirect off;
+
+      proxy_ssl_server_name on;
+      proxy_ssl_name org-service;
+      proxy_ssl_trusted_certificate /etc/nginx/certs/internal-ca.crt;
+      proxy_ssl_verify on;
+      proxy_pass https://org_service_upstream/swagger.json;
+  }
+
+  location /api/org-service/swaggerui/ {
+      include includes/cors.conf;
+
+      proxy_set_header Host ${DOLLAR}host;
+      proxy_set_header Proxy "";
+      proxy_set_header X-REAL-IP ${DOLLAR}remote_addr;
+      proxy_set_header X-Forwarded-For ${DOLLAR}proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Port ${DOLLAR}server_port;
+      proxy_set_header X-Forwarded-Proto ${DOLLAR}scheme;
+      proxy_set_header X-Forwarded-Prefix /api/org-service;
+      proxy_set_header X-Script-Name /api/org-service;
+      proxy_redirect off;
+
+      proxy_ssl_server_name on;
+      proxy_ssl_name org-service;
+      proxy_ssl_trusted_certificate /etc/nginx/certs/internal-ca.crt;
+      proxy_ssl_verify on;
+      proxy_pass https://org_service_upstream/swaggerui/;
+  }
+
+  location /api/org-service/ {
+      include includes/cors.conf;
+
+      proxy_set_header Host ${DOLLAR}host;
+      proxy_set_header Proxy "";
+      proxy_set_header Upgrade ${DOLLAR}http_upgrade;
+      proxy_set_header Connection ${DOLLAR}connection_upgrade;
+      proxy_set_header X-REAL-IP ${DOLLAR}remote_addr;
+      proxy_set_header X-Forwarded-For ${DOLLAR}proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Port ${DOLLAR}server_port;
+      proxy_set_header X-Forwarded-Proto ${DOLLAR}scheme;
+
+      proxy_http_version 1.1;
+      proxy_buffering off;
+      proxy_connect_timeout 60s;
+      proxy_read_timeout 36000s;
+      proxy_redirect off;
+      proxy_pass_header Authorization;
+
+      proxy_set_header X-Forwarded-Prefix /api/org-service;
+      proxy_set_header X-Script-Name /api/org-service;
+
+      proxy_ssl_server_name on;
+      proxy_ssl_name org-service;
+      proxy_ssl_trusted_certificate /etc/nginx/certs/internal-ca.crt;
+      proxy_ssl_verify on;
+      proxy_pass https://org_service_upstream/;
+  }
+
+  location = /api/notification-service {
+    return 301 /api/notification-service/;
+  }
+
+  location = /api/notification-service/docs {
+      include includes/cors.conf;
+
+      proxy_set_header Host ${DOLLAR}host;
+      proxy_set_header Proxy "";
+      proxy_set_header X-REAL-IP ${DOLLAR}remote_addr;
+      proxy_set_header X-Forwarded-For ${DOLLAR}proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Port ${DOLLAR}server_port;
+      proxy_set_header X-Forwarded-Proto ${DOLLAR}scheme;
+      proxy_set_header X-Forwarded-Prefix /api/notification-service;
+      proxy_set_header X-Script-Name /api/notification-service;
+      proxy_redirect off;
+
+      proxy_ssl_server_name on;
+      proxy_ssl_name notification-service;
+      proxy_ssl_trusted_certificate /etc/nginx/certs/internal-ca.crt;
+      proxy_ssl_verify on;
+      proxy_pass https://notification_service_upstream/docs;
+  }
+
+  location = /api/notification-service/docs/ {
+    return 301 /api/notification-service/docs;
+  }
+
+  location = /api/notification-service/swagger.json {
+      include includes/cors.conf;
+
+      proxy_set_header Host ${DOLLAR}host;
+      proxy_set_header Proxy "";
+      proxy_set_header X-REAL-IP ${DOLLAR}remote_addr;
+      proxy_set_header X-Forwarded-For ${DOLLAR}proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Port ${DOLLAR}server_port;
+      proxy_set_header X-Forwarded-Proto ${DOLLAR}scheme;
+      proxy_set_header X-Forwarded-Prefix /api/notification-service;
+      proxy_set_header X-Script-Name /api/notification-service;
+      proxy_redirect off;
+
+      proxy_ssl_server_name on;
+      proxy_ssl_name notification-service;
+      proxy_ssl_trusted_certificate /etc/nginx/certs/internal-ca.crt;
+      proxy_ssl_verify on;
+      proxy_pass https://notification_service_upstream/swagger.json;
+  }
+
+  location /api/notification-service/swaggerui/ {
+      include includes/cors.conf;
+
+      proxy_set_header Host ${DOLLAR}host;
+      proxy_set_header Proxy "";
+      proxy_set_header X-REAL-IP ${DOLLAR}remote_addr;
+      proxy_set_header X-Forwarded-For ${DOLLAR}proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Port ${DOLLAR}server_port;
+      proxy_set_header X-Forwarded-Proto ${DOLLAR}scheme;
+      proxy_set_header X-Forwarded-Prefix /api/notification-service;
+      proxy_set_header X-Script-Name /api/notification-service;
+      proxy_redirect off;
+
+      proxy_ssl_server_name on;
+      proxy_ssl_name notification-service;
+      proxy_ssl_trusted_certificate /etc/nginx/certs/internal-ca.crt;
+      proxy_ssl_verify on;
+      proxy_pass https://notification_service_upstream/swaggerui/;
+  }
+
+  location /api/notification-service/ {
+      include includes/cors.conf;
+
+      proxy_set_header Host ${DOLLAR}host;
+      proxy_set_header Proxy "";
+      proxy_set_header Upgrade ${DOLLAR}http_upgrade;
+      proxy_set_header Connection ${DOLLAR}connection_upgrade;
+      proxy_set_header X-REAL-IP ${DOLLAR}remote_addr;
+      proxy_set_header X-Forwarded-For ${DOLLAR}proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Port ${DOLLAR}server_port;
+      proxy_set_header X-Forwarded-Proto ${DOLLAR}scheme;
+
+      proxy_http_version 1.1;
+      proxy_buffering off;
+      proxy_connect_timeout 60s;
+      proxy_read_timeout 36000s;
+      proxy_redirect off;
+      proxy_pass_header Authorization;
+
+      proxy_set_header X-Forwarded-Prefix /api/notification-service;
+      proxy_set_header X-Script-Name /api/notification-service;
+
+      proxy_ssl_server_name on;
+      proxy_ssl_name notification-service;
+      proxy_ssl_trusted_certificate /etc/nginx/certs/internal-ca.crt;
+      proxy_ssl_verify on;
+      proxy_pass https://notification_service_upstream/;
+  }
+
+  include includes/location_common.conf;
+}

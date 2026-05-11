@@ -2167,3 +2167,156 @@ class FileUploadResource(Resource):
         except Exception as e:
             print(f"Upload error: {str(e)}")
             return jsonify({"error": str(e)}), 500
+
+# Add to org_service/routes/courses.py
+
+@courses_ns.route("/organizations/<int:org_id>/published-courses")
+class OrganizationPublishedCoursesResource(Resource):
+    def get(self, org_id: int):
+        """Get published courses for an organization (public view)."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+        
+        limit = request.args.get("limit", 6, type=int)
+        session = db_session()
+        
+        try:
+            courses = session.query(Course).filter(
+                Course.organization_id == org_id,
+                Course.status == "published"
+            ).order_by(Course.created_at.desc()).limit(limit).all()
+            
+            result = []
+            for course in courses:
+                # Get instructor info
+                instructor = session.query(Profile).filter(Profile.id == course.created_by).first()
+                instructor_name = "Instructor"
+                if instructor:
+                    if instructor.first_name and instructor.last_name:
+                        instructor_name = f"{instructor.first_name} {instructor.last_name}"
+                    elif instructor.first_name:
+                        instructor_name = instructor.first_name
+                    elif instructor.username:
+                        instructor_name = instructor.username
+                
+                # Get student count
+                course_classes = session.query(CourseClass).filter(CourseClass.course_id == course.id).all()
+                class_ids = [cc.id for cc in course_classes]
+                student_count = 0
+                if class_ids:
+                    student_count = session.query(ClassMember).filter(
+                        ClassMember.course_class_id.in_(class_ids),
+                        ClassMember.role == "student"
+                    ).count()
+                
+                # Get average rating
+                reviews = session.query(CourseReview).filter(CourseReview.course_id == course.id).all()
+                avg_rating = sum(r.rating for r in reviews) / len(reviews) if reviews else 0
+                
+                result.append({
+                    "id": course.id,
+                    "title": course.title,
+                    "description": course.description,
+                    "thumbnail": course.thumbnail,
+                    "level": course.level,
+                    "category": course.category,
+                    "instructor_name": instructor_name,
+                    "students_count": student_count,
+                    "rating": round(avg_rating, 1),
+                    "created_at": course.created_at.isoformat(),
+                })
+            
+            return jsonify({"courses": result}), 200
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+@courses_ns.route("/organizations/<int:org_id>/courses")
+class OrganizationCoursesResource(Resource):
+    @courses_ns.param('include_stats', 'Include enrollment and lesson counts', type=bool, default=False)
+    def get(self, org_id: int):
+        """Get all courses for an organization with optional statistics."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        token = extract_bearer_token()
+        user_id, _email = None, None
+        if token:
+            user_id, _email = verify_supabase_jwt(token)
+        
+        include_stats = request.args.get('include_stats', 'false').lower() == 'true'
+        
+        session = db_session()
+        try:
+            # Check if organization exists
+            org = session.query(Organization).filter(Organization.id == org_id).first()
+            if not org:
+                return jsonify({"error": "Organization not found"}), 404
+            
+            # Get all courses for this organization
+            courses = session.query(Course).filter(
+                Course.organization_id == org_id
+            ).order_by(Course.created_at.desc()).all()
+            
+            result_courses = []
+            for course in courses:
+                # Get instructor info
+                instructor = session.query(Profile).filter(Profile.id == course.created_by).first()
+                instructor_name = "Unknown"
+                if instructor:
+                    if instructor.first_name and instructor.last_name:
+                        instructor_name = f"{instructor.first_name} {instructor.last_name}"
+                    elif instructor.first_name:
+                        instructor_name = instructor.first_name
+                    elif instructor.username:
+                        instructor_name = instructor.username
+                
+                course_data = {
+                    "id": course.id,
+                    "title": course.title,
+                    "description": course.description,
+                    "thumbnail": course.thumbnail,
+                    "status": course.status,
+                    "visibility": course.visibility,
+                    "level": course.level,
+                    "category": course.category,
+                    "created_at": course.created_at.isoformat(),
+                    "instructor_name": instructor_name,
+                }
+                
+                if include_stats:
+                    # Get enrollment count
+                    course_classes = session.query(CourseClass).filter(CourseClass.course_id == course.id).all()
+                    class_ids = [cc.id for cc in course_classes]
+                    enrolled_count = 0
+                    if class_ids:
+                        enrolled_count = session.query(ClassMember).filter(
+                            ClassMember.course_class_id.in_(class_ids),
+                            ClassMember.role == "student"
+                        ).count()
+                    
+                    # Get lesson count
+                    modules = session.query(Module).filter(Module.course_id == course.id).all()
+                    lesson_count = 0
+                    for module in modules:
+                        classes = session.query(ContentClass).filter(ContentClass.module_id == module.id).all()
+                        for class_item in classes:
+                            lesson_count += session.query(Lesson).filter(Lesson.class_id == class_item.id).count()
+                    
+                    course_data["enrolled_count"] = enrolled_count
+                    course_data["lesson_count"] = lesson_count
+                
+                result_courses.append(course_data)
+            
+            return jsonify({
+                "courses": result_courses,
+                "total": len(result_courses)
+            }), 200
+            
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()

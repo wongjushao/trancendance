@@ -699,6 +699,38 @@ export default function CourseDetailPage() {
             </GlowCard>
           )}
 
+          {/* Organization Info - Add this new section */}
+          {course.organization_id && course.organization_name && (
+            <div className="mt-6 p-4 bg-gray-800/30 rounded-lg border border-gray-700">
+              <div className="flex items-center justify-between flex-wrap gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-purple-500/20">
+                    <Building2 className="w-5 h-5 text-purple-400" />
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-400">Offered by</p>
+                    <Link 
+                      href={`/organizations/${course.organization_id}`}
+                      className="text-lg font-semibold text-white hover:text-purple-400 transition-colors"
+                    >
+                      {course.organization_name}
+                    </Link>
+                  </div>
+                </div>
+                
+                {/* Show members link for organization members */}
+                {course.user_role && (course.user_role === "admin" || course.user_role === "teacher") && (
+                  <Link href={`/organizations/${course.organization_id}/members`}>
+                    <GlowButton variant="outline" size="sm">
+                      <Users className="w-4 h-4 mr-2" />
+                      View All Members
+                    </GlowButton>
+                  </Link>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* What's Included section */}
           <GlowCard>
             <div className="p-6">

@@ -1,3 +1,4 @@
+// frontend/app/(main)/organizations/[id]/page.tsx
 "use client";
 
 import { useState, useEffect } from "react";
@@ -12,9 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { useRole } from "@/components/providers/RoleProvider";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 import { toast } from "sonner";
-import { Label } from "@/components/ui/label"; // ADD THIS
-
-// Remove the Star function at the end - we're importing it now
+import { Label } from "@/components/ui/label";
 
 interface Member {
   id: number;
@@ -25,6 +24,7 @@ interface Member {
   joinDate: string;
   courses: number;
   avatar_url?: string;
+  email?: string;
 }
 
 interface Course {
@@ -34,6 +34,7 @@ interface Course {
   students: number;
   thumbnail?: string;
   level?: string;
+  rating?: number;
 }
 
 interface OrganizationData {
@@ -49,10 +50,16 @@ interface PageProps {
   params: Promise<{ id: string }>;
 }
 
+// Helper to get auth token
+const getAuthToken = async () => {
+  const supabase = getSupabaseBrowserClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token;
+};
+
 export default function OrganizationPublicPage({ params }: PageProps) {
   const { id } = use(params);
   const organizationId = parseInt(id);
-  const supabase = getSupabaseBrowserClient();
   const { roleData } = useRole();
   
   const [loading, setLoading] = useState(true);
@@ -61,6 +68,7 @@ export default function OrganizationPublicPage({ params }: PageProps) {
   const [courses, setCourses] = useState<Course[]>([]);
   const [userRole, setUserRole] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [memberEmails, setMemberEmails] = useState<Record<string, string>>({});
   const [stats, setStats] = useState({
     totalMembers: 0,
     totalCourses: 0,
@@ -75,190 +83,168 @@ export default function OrganizationPublicPage({ params }: PageProps) {
   const loadOrganizationData = async () => {
     setLoading(true);
     
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      setCurrentUserId(user.id);
-    }
-
     try {
-      // 1. Get organization details
-      const { data: org, error: orgError } = await supabase
-        .from("organizations")
-        .select("*")
-        .eq("id", organizationId)
-        .single();
+      const token = await getAuthToken();
+      
+      // Get current user from backend API
+      if (token) {
+        const userResponse = await fetch('/api/auth-service/auth/me', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (userResponse.ok) {
+          const userData = await userResponse.json();
+          setCurrentUserId(userData.id);
+        }
+      }
 
-      if (orgError) throw orgError;
-      if (!org) {
+      // 1. Get organization details via backend
+      const orgResponse = await fetch(`/api/org-service/orgs/${organizationId}`, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+      });
+
+      if (!orgResponse.ok) {
         toast.error("Organization not found");
         return;
       }
 
+      const org = await orgResponse.json();
       setOrganization(org);
 
       // 2. Get user's role in this organization (if logged in)
-      if (user) {
-        const { data: memberRole } = await supabase
-          .from("organization_members")
-          .select("member_role")
-          .eq("organization_id", organizationId)
-          .eq("user_id", user.id)
-          .single();
+      if (token && currentUserId) {
+        const roleResponse = await fetch(`/api/org-service/orgs/${organizationId}/members/${currentUserId}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
 
-        setUserRole(memberRole?.member_role || null);
+        if (roleResponse.ok) {
+          const memberData = await roleResponse.json();
+          setUserRole(memberData.member_role);
+        }
       }
 
-      // 3. Get organization members (limit to recent for public view)
-      const { data: memberData } = await supabase
-        .from("organization_members")
-        .select(`
-          id,
-          user_id,
-          member_role,
-          created_at,
-          user:profiles!organization_members_user_id_fkey (
-            id,
-            first_name,
-            last_name,
-            username,
-            avatar_url
-          )
-        `)
-        .eq("organization_id", organizationId)
-        .order("created_at", { ascending: false })
-        .limit(12);
+      // 3. Get organization members via backend API
+      const membersResponse = await fetch(`/api/org-service/orgs/${organizationId}/members?limit=12`, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+      });
 
-      // Get member course counts
-      const formattedMembers: Member[] = await Promise.all((memberData || []).map(async (m: any) => {
-        let courseCount = 0;
+      if (membersResponse.ok) {
+        const membersData = await membersResponse.json();
         
-        if (m.member_role === "student") {
-          const { count } = await supabase
-            .from("class_members")
-            .select("id", { count: "exact", head: true })
-            .eq("user_id", m.user_id);
-          courseCount = count || 0;
-        } else if (m.member_role === "teacher") {
-          const { count } = await supabase
-            .from("courses")
-            .select("id", { count: "exact", head: true })
-            .eq("created_by", m.user_id);
-          courseCount = count || 0;
-        }
-        
-        const name = m.user?.first_name 
-          ? `${m.user.first_name} ${m.user.last_name || ""}`.trim()
-          : m.user?.username || "Member";
-        const avatarInitial = m.user?.first_name?.[0] || m.user?.username?.[0] || "U";
-        
-        return {
-          id: m.id,
-          user_id: m.user_id,
-          name,
-          avatar: avatarInitial.toUpperCase(),
-          avatar_url: m.user?.avatar_url,
-          role: m.member_role,
-          joinDate: new Date(m.created_at).toISOString().split("T")[0],
-          courses: courseCount,
-        };
-      }));
-
-      setMembers(formattedMembers);
-
-      // 4. Get published courses
-      const { data: courseData } = await supabase
-        .from("courses")
-        .select(`
-          *,
-          profiles:created_by (
-            first_name,
-            last_name,
-            username
-          )
-        `)
-        .eq("organization_id", organizationId)
-        .eq("status", "published")
-        .order("created_at", { ascending: false })
-        .limit(6);
-
-      // Get instructor names and student counts
-      const formattedCourses: Course[] = await Promise.all((courseData || []).map(async (c: any) => {
-        const instructorName = c.profiles?.first_name 
-          ? `${c.profiles.first_name} ${c.profiles.last_name || ""}`.trim()
-          : c.profiles?.username || "Instructor";
-
-        // Get student count through course_classes
-        const { data: courseClasses } = await supabase
-          .from("course_classes")
-          .select("id")
-          .eq("course_id", c.id);
-        
-        const classIds = courseClasses?.map(cc => cc.id) || [];
-        let studentCount = 0;
-        if (classIds.length > 0) {
-          const { count } = await supabase
-            .from("class_members")
-            .select("id", { count: "exact", head: true })
-            .in("course_class_id", classIds);
-          studentCount = count || 0;
+        // Collect user IDs to fetch emails
+        const userIds = membersData.members?.map((m: any) => m.user_id) || [];
+        if (userIds.length > 0 && token) {
+          await fetchMemberEmails(userIds, token);
         }
 
-        // Get average rating
-        const { data: reviews } = await supabase
-          .from("course_reviews")
-          .select("rating")
-          .eq("course_id", c.id);
+        // Format members without needing additional API calls
+        // Use the data we already have
+        const formattedMembers: Member[] = (membersData.members || []).map((m: any) => {
+          const name = m.user?.first_name 
+            ? `${m.user.first_name} ${m.user.last_name || ""}`.trim()
+            : m.user?.username || "Member";
+          const avatarInitial = m.user?.first_name?.[0] || m.user?.username?.[0] || "U";
+          
+          return {
+            id: m.id,
+            user_id: m.user_id,
+            name,
+            avatar: avatarInitial.toUpperCase(),
+            avatar_url: m.user?.avatar_url,
+            role: m.member_role,
+            joinDate: new Date(m.created_at).toISOString().split("T")[0],
+            courses: 0, // Will update from course data if needed
+            email: memberEmails[m.user_id] || "",
+          };
+        });
+
+        setMembers(formattedMembers);
+        setStats(prev => ({ ...prev, totalMembers: formattedMembers.length }));
+      }
+
+      // 4. Get published courses using the existing /courses endpoint
+      const coursesResponse = await fetch(`/api/org-service/courses?organization_id=${organizationId}&status=published&limit=6`, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+      });
+
+      if (coursesResponse.ok) {
+        const coursesData = await coursesResponse.json();
         
-        const avgRating = reviews?.length 
-          ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length 
+        // Get detailed info for each course
+        const formattedCourses: Course[] = await Promise.all(
+          (coursesData.courses || []).map(async (course: any) => {
+            // Get student count and rating from course detail
+            let studentCount = 0;
+            let avgRating = 0;
+            
+            try {
+              const detailResponse = await fetch(`/api/org-service/courses/${course.id}/detail`, {
+                headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+              });
+              if (detailResponse.ok) {
+                const detail = await detailResponse.json();
+                studentCount = detail.course?.students_count || 0;
+                avgRating = detail.course?.rating || 0;
+              }
+            } catch (err) {
+              console.error("Error fetching course detail:", err);
+            }
+            
+            return {
+              id: course.id,
+              title: course.title,
+              instructor: course.instructor_name || "Instructor",
+              students: studentCount,
+              thumbnail: course.thumbnail,
+              level: course.level,
+              rating: avgRating,
+            };
+          })
+        );
+
+        setCourses(formattedCourses);
+        
+        // Calculate stats from courses data
+        const totalStudents = formattedCourses.reduce((sum, c) => sum + c.students, 0);
+        const avgRating = formattedCourses.length > 0
+          ? formattedCourses.reduce((sum, c) => sum + (c.rating || 0), 0) / formattedCourses.length
           : 0;
 
-        return {
-          id: c.id,
-          title: c.title,
-          instructor: instructorName,
-          students: studentCount,
-          thumbnail: c.thumbnail,
-          level: c.level,
-        };
-      }));
-
-      setCourses(formattedCourses);
-
-      // 5. Calculate stats
-      const totalMembers = formattedMembers.length;
-      const totalCoursesCount = formattedCourses.length;
-      
-      // Get total students across all courses
-      const totalStudents = formattedCourses.reduce((sum, c) => sum + c.students, 0);
-      
-      // Get average rating across courses
-      let totalRating = 0;
-      let ratingCount = 0;
-      for (const course of courseData || []) {
-        const { data: reviews } = await supabase
-          .from("course_reviews")
-          .select("rating")
-          .eq("course_id", course.id);
-        if (reviews && reviews.length > 0) {
-          totalRating += reviews.reduce((sum, r) => sum + r.rating, 0);
-          ratingCount += reviews.length;
-        }
+        setStats(prev => ({
+          ...prev,
+          totalCourses: formattedCourses.length,
+          totalStudents,
+          avgRating,
+        }));
       }
-      const avgRating = ratingCount > 0 ? totalRating / ratingCount : 0;
-
-      setStats({
-        totalMembers,
-        totalCourses: totalCoursesCount,
-        totalStudents,
-        avgRating,
-      });
 
     } catch (error) {
       console.error("Error loading organization:", error);
       toast.error("Failed to load organization data");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchMemberEmails = async (userIds: string[], token: string) => {
+    if (userIds.length === 0) return;
+    
+    try {
+      const response = await fetch('/api/org-service/users/batch-emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ user_ids: userIds }),
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setMemberEmails(data.users || {});
+      }
+    } catch (error) {
+      console.error("Error fetching emails:", error);
     }
   };
 
@@ -330,7 +316,6 @@ export default function OrganizationPublicPage({ params }: PageProps) {
                   </GlowButton>
                 </Link>
               )}
-
             </div>
           </div>
         </div>
@@ -432,7 +417,11 @@ export default function OrganizationPublicPage({ params }: PageProps) {
                         </h3>
                         <p className="text-sm text-gray-400 mb-3 line-clamp-2">{course.instructor}</p>
                         <div className="flex items-center justify-between text-sm">
-                          <span className="text-gray-400">{course.students} students</span>
+                          <div className="flex items-center gap-2">
+                            <Star className="w-4 h-4 text-yellow-400 fill-yellow-400" />
+                            <span className="text-gray-400">{course.rating?.toFixed(1) || "0.0"}</span>
+                            <span className="text-gray-500">• {course.students} students</span>
+                          </div>
                           {course.level && (
                             <Badge variant="secondary" className="text-xs">
                               {course.level}
@@ -455,8 +444,6 @@ export default function OrganizationPublicPage({ params }: PageProps) {
           </GlowCard>
         </TabsContent>
       </Tabs>
-
- 
     </div>
   );
 }

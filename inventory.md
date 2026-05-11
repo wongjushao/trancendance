@@ -8,20 +8,19 @@
 
 
 
-
-
-
-
-
 frontend/app/(main)/organizations/[id]/members/page.tsx
 
 frontend/app/(main)/organizations/[id]/setup/page.tsx
 
 frontend/app/(main)/organizations/[id]/page.tsx
 
+
 frontend/app/(main)/organizations/[id]/admin/page.tsx
 
+
 frontend/app/(main)/organizations/[id]/courses/page.tsx
+
+
 
 frontend/app/(main)/settings/page.tsx
 

@@ -480,3 +480,55 @@ class UserDiscoverCoursesResource(Resource):
             return jsonify({"error": str(exc)}), 500
         finally:
             session.close()
+
+# Add to org_service/routes/users.py
+
+@users_ns.route("/users/<string:user_id>/enrolled-courses/count")
+class UserEnrolledCoursesCountResource(Resource):
+    def get(self, user_id: str):
+        """Get count of courses a student is enrolled in."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+        
+        try:
+            user_uuid = uuid.UUID(user_id)
+        except ValueError:
+            return jsonify({"error": "Invalid user ID"}), 400
+        
+        session = db_session()
+        try:
+            count = session.query(ClassMember).filter(
+                ClassMember.user_id == user_uuid,
+                ClassMember.role == "student"
+            ).count()
+            
+            return jsonify({"count": count}), 200
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+# Add to org_service/routes/users.py
+
+@users_ns.route("/users/<string:user_id>/created-courses/count")
+class UserCreatedCoursesCountResource(Resource):
+    def get(self, user_id: str):
+        """Get count of courses a teacher/instructor has created."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+        
+        try:
+            user_uuid = uuid.UUID(user_id)
+        except ValueError:
+            return jsonify({"error": "Invalid user ID"}), 400
+        
+        session = db_session()
+        try:
+            count = session.query(Course).filter(Course.created_by == user_uuid).count()
+            return jsonify({"count": count}), 200
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()

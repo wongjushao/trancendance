@@ -540,6 +540,49 @@ export default function PublicProfilePage() {
               </div>
             </GlowCard>
           )}
+
+          {/* Organizations Section - NEW */}
+          {profile.organizations && profile.organizations.length > 0 && (
+            <GlowCard>
+              <div className="space-y-4">
+                <div className="flex items-center gap-2">
+                  <Building2 className="w-5 h-5 text-purple-400" />
+                  <h2 className="text-xl font-semibold text-white">Organizations</h2>
+                </div>
+                <div className="space-y-3">
+                  {profile.organizations.map((org: any) => (
+                    <Link 
+                      key={org.id}
+                      href={`/organizations/${org.id}`}
+                      className="block p-4 rounded-xl bg-white/[0.03] border border-white/10 hover:border-purple-500/40 transition-all group"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center">
+                            <Building2 className="w-5 h-5 text-white" />
+                          </div>
+                          <div>
+                            <p className="font-semibold text-white group-hover:text-purple-400 transition-colors">
+                              {org.name}
+                            </p>
+                            <div className="flex items-center gap-2 mt-1">
+                              <Badge className={org.role === "admin" ? "bg-purple-500/20 text-purple-400" : "bg-blue-500/20 text-blue-400"}>
+                                {org.role}
+                              </Badge>
+                              <span className="text-xs text-gray-500">
+                                Joined {new Date(org.joined_at).toLocaleDateString()}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                        <ChevronRight className="w-5 h-5 text-gray-500 group-hover:text-purple-400 transition-colors" />
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            </GlowCard>
+          )}
         </div>
       </div>
     </div>
