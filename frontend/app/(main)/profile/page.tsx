@@ -1,32 +1,21 @@
 import { redirect } from "next/navigation";
-import { cookies } from "next/headers";
+import { createSupabaseServerClient } from "@/lib/supabase/server-client";
 import ProfileClient from "./ProfileClient";
 
 /**
  * Server component wrapper.
- * Fetches the authenticated user via backend API and passes it to the client component
+ * Session comes from Supabase cookies (same as the rest of the app), not a bare `access_token` cookie.
  */
 export default async function ProfilePage() {
-  const cookieStore = cookies();
-  const accessToken = cookieStore.get("access_token")?.value;
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
 
-  if (!accessToken) redirect("/");
-
-  try {
-    const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth-service/auth/me`, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-      cache: "no-store",
-    });
-
-    if (!response.ok) redirect("/");
-
-    const user = await response.json();
-
-    return <ProfileClient user={user} />;
-  } catch (error) {
-    console.error("Error fetching user:", error);
-    redirect("/");
+  if (error || !user) {
+    redirect("/login?redirect=/profile");
   }
+
+  return <ProfileClient user={user} />;
 }
