@@ -4,31 +4,6 @@
 
 
 
-frontend/app/(main)/courses/page.tsx
-
-frontend/app/(main)/courses/[id]/analytics/page.tsx
-
-frontend/app/(main)/courses/[id]/chat/page.tsx
-
-frontend/app/(main)/courses/[id]/offerings/[offeringId]/students/page.tsx
-frontend/app/(main)/courses/[id]/offerings/[offeringId]/schedules/page.tsx
-frontend/app/(main)/courses/[id]/offerings/[offeringId]/edit/page.tsx
-
-
-frontend/app/(main)/courses/[id]/offerings/create/page.tsx
-
-
-
-frontend/app/(main)/courses/[id]/learn/page.tsx
-
-frontend/app/(main)/courses/[id]/assignments/[assignmentId]/submissions/page.tsx
-
-
-
-frontend/app/(main)/courses/[id]/reviews/create/page.tsx
-
-frontend/app/(main)/courses/[id]/reviews/page.tsx
-
 frontend/app/(main)/courses/[id]/edit/page.tsx
 
 frontend/app/(main)/courses/[id]/page.tsx

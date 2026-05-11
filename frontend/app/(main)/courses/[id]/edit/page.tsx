@@ -231,7 +231,12 @@ function SortableLessonItem({ lesson, index, classId, moduleId, onEdit, onDelete
     }
   };
 
-  const hasAssignment = lesson.assignments && lesson.assignments.length > 0;
+  // Debug: Log assignments data
+  console.log(`Lesson "${lesson.title}" (ID: ${lesson.id}) - Assignments:`, lesson.assignments);
+  
+  // Safe check for assignments - ensure it's an array
+  const assignments = Array.isArray(lesson.assignments) ? lesson.assignments : [];
+  const hasAssignments = assignments.length > 0;
 
   return (
     <div ref={setNodeRef} style={style} className="bg-slate-900/50 rounded-lg p-3">
@@ -246,39 +251,75 @@ function SortableLessonItem({ lesson, index, classId, moduleId, onEdit, onDelete
             {lesson.is_free_preview && (
               <Badge variant="secondary" className="text-xs">Free Preview</Badge>
             )}
-            {hasAssignment && (
-              <Badge className="bg-purple-500/20 text-purple-300 text-xs">
-                <ClipboardList className="w-3 h-3 mr-1" />
-                {lesson.assignments.length} Assignment
+            {hasAssignments && (
+              <Badge variant="outline" className="text-xs bg-purple-500/10 text-purple-400">
+                {assignments.length} Assignment{assignments.length !== 1 ? 's' : ''}
               </Badge>
             )}
           </div>
-          {lesson.duration_seconds && (
-            <div className="text-xs text-gray-400">
-              Duration: {Math.floor(lesson.duration_seconds / 60)} minutes
-            </div>
-          )}
-          {!hasAssignment && (
-            <div className="mt-2">
-              <button
-                onClick={() => onAddAssignment(lesson, classId, moduleId)}
-                className="text-xs text-purple-400 hover:text-purple-300 transition-colors flex items-center gap-1"
-              >
-                <Plus className="w-3 h-3" />
-                Add Assignment
-              </button>
-            </div>
-          )}
+
+          {/* Assignment Management */}
+          <div className="mt-2 space-y-2">
+            {/* List existing assignments */}
+            {hasAssignments && assignments.map((assignment: any) => (
+              <div key={assignment.id} className="flex items-center justify-between bg-slate-800/30 rounded-lg p-2 border border-slate-700/50">
+                <div className="flex items-center gap-2 flex-1 min-w-0">
+                  <ClipboardList className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
+                  <span className="text-gray-200 text-sm truncate">{assignment.title}</span>
+                  <span className="text-gray-500 text-xs flex-shrink-0">({assignment.points || 0} pts)</span>
+                </div>
+                <div className="flex items-center gap-1 flex-shrink-0 ml-2">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onAddAssignment(lesson, classId, moduleId, assignment);
+                    }}
+                    className="p-1.5 rounded-md hover:bg-purple-500/20 transition-all duration-200"
+                    title="Edit assignment"
+                  >
+                    <Edit className="w-3.5 h-3.5 text-blue-400 hover:text-blue-300" />
+                  </button>
+                  <button
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      if (confirm(`Delete assignment "${assignment.title}"? This action cannot be undone.`)) {
+                        try {
+                          const { deleteAssignment } = await import("@/lib/supabase/courses");
+                          await deleteAssignment(assignment.id);
+                          toast.success("Assignment deleted");
+                          // Call loadCourse through the onAddAssignment callback with a special flag
+                          // Or better, call the loadCourse function directly if available
+                          if (window.location.pathname) {
+                            // Just refresh the data by calling the parent's loadCourse
+                            // Since we can't access it directly, we'll use a custom event
+                            window.dispatchEvent(new CustomEvent('refreshAssignments'));
+                          }
+                        } catch (error) {
+                          console.error("Error deleting assignment:", error);
+                          toast.error("Failed to delete assignment");
+                        }
+                      }
+                    }}
+                    className="p-1.5 rounded-md hover:bg-red-500/20 transition-all duration-200"
+                    title="Delete assignment"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-red-400 hover:text-red-300" />
+                  </button>
+                </div>
+              </div>
+            ))}
+            
+            {/* Add new assignment button */}
+            <button
+              onClick={() => onAddAssignment(lesson, classId, moduleId)}
+              className="text-xs text-purple-400 hover:text-purple-300 transition-colors flex items-center gap-1 mt-1"
+            >
+              <Plus className="w-3 h-3" />
+              {hasAssignments ? "Add Another Assignment" : "Add Assignment"}
+            </button>
+          </div>
         </div>
-        <div className="flex gap-2">
-          <GlowButton 
-            size="sm" 
-            variant="secondary" 
-            onClick={() => onAddAssignment(lesson, classId, moduleId)}
-            title={hasAssignment ? "Edit Assignment" : "Add Assignment"}
-          >
-            <ClipboardList className="w-3 h-3" />
-          </GlowButton>
+        <div className="flex gap-2 flex-shrink-0">
           <GlowButton size="sm" variant="secondary" onClick={() => onEdit(lesson, classId, moduleId)}>
             <Edit className="w-3 h-3" />
           </GlowButton>
@@ -290,6 +331,7 @@ function SortableLessonItem({ lesson, index, classId, moduleId, onEdit, onDelete
     </div>
   );
 }
+
 export default function EditCoursePage() {
   const params = useParams();
   const router = useRouter();
@@ -371,6 +413,34 @@ export default function EditCoursePage() {
     end_time: "",
   });
 
+  // Helper functions for backend API calls
+  const getAuthToken = async () => {
+    const supabase = getSupabaseBrowserClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token;
+  };
+
+  const apiRequest = async (url: string, options: RequestInit = {}) => {
+    const token = await getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+    
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        ...options.headers,
+      },
+    });
+    
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: response.statusText }));
+      throw new Error(error.error || `Request failed: ${response.status}`);
+    }
+    
+    return response.json();
+  };
+
   // Drag and drop sensors
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -391,53 +461,101 @@ export default function EditCoursePage() {
   // Fetch user's organizations
   useEffect(() => {
     const fetchOrganizations = async () => {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (user) {
-        const { data: memberships } = await supabase
-          .from("organization_members")
-          .select("organization_id, organizations(*)")
-          .eq("user_id", user.id);
-        
-        if (memberships) {
-          const orgs = memberships.map(m => m.organizations).filter(Boolean);
-          setOrganizations(orgs);
-          if (orgs.length > 0) {
-            setSelectedOrgId(orgs[0].id);
-          }
+      try {
+        const data = await apiRequest('/api/org-service/organizations/memberships');
+        const orgs = data.organizations || [];
+        setOrganizations(orgs);
+        if (orgs.length > 0) {
+          setSelectedOrgId(orgs[0].id);
         }
+      } catch (error) {
+        console.error("Error fetching organizations:", error);
       }
     };
     
     fetchOrganizations();
   }, []);
 
-  // Get current user ID
+  // Get current user ID via backend
   useEffect(() => {
     const getCurrentUser = async () => {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        console.log("Current user ID:", user.id);
-        setCurrentUserId(user.id);
-      } else {
-        console.error("No user found!");
+      try {
+        const userProfile = await apiRequest('/api/auth-service/profile');
+        if (userProfile) {
+          console.log("Current user ID:", userProfile.id);
+          setCurrentUserId(userProfile.id);
+        }
+      } catch (error) {
+        console.error("Error fetching user:", error);
       }
     };
     getCurrentUser();
   }, []);
   
-  // Load course data
+  // Load course data via backend API
   const loadCourse = async () => {
     try {
       setLoading(true);
-      const data = await getCourseWithDetails(courseId);
-      setCourse(data);
+      
+      // Fetch course with modules and classes
+      const data = await apiRequest(`/api/org-service/courses/${courseId}/detail`);
+      
+      // Fetch assignments separately
+      let assignmentsByLesson: Record<number, any[]> = {};
+      try {
+        const assignmentsData = await apiRequest(`/api/org-service/courses/${courseId}/assignments`);
+        const allAssignments = assignmentsData.assignments || [];
+        
+        // Group assignments by lesson_id
+        assignmentsByLesson = {};
+        allAssignments.forEach((assignment: any) => {
+          const lessonId = assignment.lesson_id;
+          if (!assignmentsByLesson[lessonId]) {
+            assignmentsByLesson[lessonId] = [];
+          }
+          assignmentsByLesson[lessonId].push(assignment);
+        });
+        
+        console.log("Fetched assignments:", allAssignments.length);
+        console.log("Assignments by lesson:", assignmentsByLesson);
+      } catch (err) {
+        console.warn("Could not fetch assignments:", err);
+        // Continue without assignments if this fails
+      }
+      
+      // Process the data to ensure assignments are properly structured
+      const processedModules = (data.modules || []).map((module: any) => ({
+        ...module,
+        classes: (module.classes || []).map((classItem: any) => ({
+          ...classItem,
+          lessons: (classItem.lessons || []).map((lesson: any) => ({
+            ...lesson,
+            // Get assignments from our fetched data
+            assignments: assignmentsByLesson[lesson.id] || []
+          }))
+        }))
+      }));
+      
+      // Log to verify assignments
+      if (processedModules) {
+        processedModules.forEach((module: any) => {
+          module.classes.forEach((classItem: any) => {
+            classItem.lessons.forEach((lesson: any) => {
+              console.log(`Lesson "${lesson.title}" (ID: ${lesson.id}) has ${lesson.assignments?.length || 0} assignments`);
+            });
+          });
+        });
+      }
+      
+      setCourse({
+        ...data.course,
+        modules: processedModules,
+        course_classes: data.course_classes || [],
+      });
       
       // Auto-expand first module
-      if (data?.modules && data.modules.length > 0) {
-        setExpandedModules(new Set([data.modules[0].id]));
+      if (processedModules && processedModules.length > 0) {
+        setExpandedModules(new Set([processedModules[0].id]));
       }
     } catch (error) {
       console.error("Error loading course:", error);
@@ -446,7 +564,22 @@ export default function EditCoursePage() {
       setLoading(false);
     }
   };
-  
+
+  useEffect(() => {
+    const handleRefresh = () => {
+      loadCourse();
+    };
+    window.addEventListener('refreshAssignments', handleRefresh);
+    return () => {
+      window.removeEventListener('refreshAssignments', handleRefresh);
+    };
+  }, [loadCourse]);
+
+  const refreshAssignments = async () => {
+    console.log("Refreshing assignments...");
+    await loadCourse();
+  };
+    
   useEffect(() => {
     if (courseId) {
       loadCourse();
@@ -487,29 +620,21 @@ export default function EditCoursePage() {
       setCourse({ ...course, modules: newModules });
       
       try {
-        const supabase = getSupabaseBrowserClient();
+        // Send batch update to backend
+        const updates = newModules.map((module, index) => ({
+          id: module.id,
+          order_index: index,
+        }));
         
-        // Step 1: Set all order_indexes to temporary negative values to avoid conflicts
-        for (let i = 0; i < newModules.length; i++) {
-          await supabase
-            .from('modules')
-            .update({ order_index: - (i + 1) - 1000 }) // Use large negative offset
-            .eq('id', newModules[i].id);
-        }
-        
-        // Step 2: Set them to the correct values
-        for (let i = 0; i < newModules.length; i++) {
-          await supabase
-            .from('modules')
-            .update({ order_index: i })
-            .eq('id', newModules[i].id);
-        }
+        await apiRequest('/api/org-service/modules/reorder', {
+          method: 'POST',
+          body: JSON.stringify({ updates }),
+        });
         
         toast.success("Module order updated");
       } catch (error) {
         console.error("Error updating module order:", error);
         toast.error("Failed to update module order. Please try again.");
-        // Revert on error - reload from server
         await loadCourse();
       }
     }
@@ -517,158 +642,98 @@ export default function EditCoursePage() {
 
   // Replace the existing handleDragEndClasses with this:
   const handleDragEndClasses = async (event: DragEndEvent) => {
-    console.log("=== DRAG END CLASSES ===");
-    console.log("Active:", event.active);
-    console.log("Over:", event.over);
-    
     const { active, over } = event;
-    if (!course?.modules) {
-      console.log("No course modules found");
-      return;
-    }
-    if (!over) {
-      console.log("No over target found");
-      return;
-    }
+    if (!course?.modules) return;
+    if (!over) return;
     
     const activeId = active.id as number;
     const overId = over.id as number;
     
-    console.log("Active ID:", activeId, "Over ID:", overId);
-    
-    if (activeId === overId) {
-      console.log("Same item, ignoring");
-      return;
-    }
+    if (activeId === overId) return;
     
     // Find source class and its parent module
     let sourceModuleId: number | null = null;
     let sourceClass: any = null;
     let sourceClassIndex: number = -1;
     
-    console.log("Searching for source class...");
     for (const module of course.modules) {
-      console.log(`Checking module ${module.id} (${module.title}) with ${module.classes.length} classes`);
       const foundIndex = module.classes.findIndex(c => c.id === activeId);
       if (foundIndex !== -1) {
         sourceModuleId = module.id;
         sourceClass = module.classes[foundIndex];
         sourceClassIndex = foundIndex;
-        console.log(`Found source class in module ${sourceModuleId} at index ${sourceClassIndex}`);
         break;
       }
     }
     
-    if (!sourceModuleId || !sourceClass) {
-      console.log("Source class not found!");
-      return;
-    }
+    if (!sourceModuleId || !sourceClass) return;
     
     // Find target location
     let targetModuleId: number | null = null;
     let targetClassIndex: number = -1;
-    let targetType = "";
     
     // Check if over is a class
-    console.log("Searching for target (checking if over is a class)...");
     for (const module of course.modules) {
       const foundIndex = module.classes.findIndex(c => c.id === overId);
       if (foundIndex !== -1) {
         targetModuleId = module.id;
         targetClassIndex = foundIndex;
-        targetType = "class";
-        console.log(`Found target class in module ${targetModuleId} at index ${targetClassIndex}`);
         break;
       }
     }
     
-    // If over is a module (not a class), append to end of that module
+    // If over is a module, append to end
     if (targetModuleId === null) {
-      console.log("Target is not a class, checking if it's a module...");
       const targetModule = course.modules.find(m => m.id === overId);
       if (targetModule) {
         targetModuleId = targetModule.id;
         targetClassIndex = targetModule.classes.length;
-        targetType = "module";
-        console.log(`Found target module ${targetModuleId}, will append at end (index ${targetClassIndex})`);
       }
     }
     
-    if (targetModuleId === null) {
-      console.log("Target not found as class or module!");
-      return;
-    }
-    
-    console.log(`Moving class from module ${sourceModuleId} to module ${targetModuleId} (target type: ${targetType})`);
+    if (targetModuleId === null) return;
     
     // Create updated modules structure
     let updatedModules = [...course.modules];
     
-    // Find source module index
     const sourceModuleIndex = updatedModules.findIndex(m => m.id === sourceModuleId);
-    // Remove from source
     const [removedClass] = updatedModules[sourceModuleIndex].classes.splice(sourceClassIndex, 1);
-    console.log(`Removed class "${removedClass.title}" from module ${sourceModuleId}`);
     
-    // Find target module index
     const targetModuleIndex = updatedModules.findIndex(m => m.id === targetModuleId);
-    // Insert at target position
     const insertIndex = targetClassIndex === -1 ? updatedModules[targetModuleIndex].classes.length : targetClassIndex;
     updatedModules[targetModuleIndex].classes.splice(insertIndex, 0, removedClass);
-    console.log(`Inserted class at module ${targetModuleId}, index ${insertIndex}`);
     
     // Update UI immediately
     setCourse({ ...course, modules: updatedModules });
     
     try {
-      const supabase = getSupabaseBrowserClient();
-      
       // Collect all classes that need updates
-      const allClassesToUpdate: { id: number; module_id: number; order_index: number }[] = [];
+      const allUpdates: { id: number; module_id: number; order_index: number }[] = [];
       
-      // Add classes from source module (if it still has classes)
+      // Update source module classes
       if (updatedModules[sourceModuleIndex].classes.length > 0) {
         for (let i = 0; i < updatedModules[sourceModuleIndex].classes.length; i++) {
-          allClassesToUpdate.push({
+          allUpdates.push({
             id: updatedModules[sourceModuleIndex].classes[i].id,
             module_id: sourceModuleId,
-            order_index: i
+            order_index: i,
           });
         }
-        console.log(`Updated ${updatedModules[sourceModuleIndex].classes.length} classes in source module`);
       }
       
-      // Add classes from target module
+      // Update target module classes
       for (let i = 0; i < updatedModules[targetModuleIndex].classes.length; i++) {
-        allClassesToUpdate.push({
+        allUpdates.push({
           id: updatedModules[targetModuleIndex].classes[i].id,
           module_id: targetModuleId,
-          order_index: i
+          order_index: i,
         });
       }
-      console.log(`Updated ${updatedModules[targetModuleIndex].classes.length} classes in target module`);
-      console.log("Classes to update:", allClassesToUpdate);
       
-      // Step 1: Set all affected classes to temporary negative values
-      for (const classToUpdate of allClassesToUpdate) {
-        await supabase
-          .from('classes')
-          .update({ order_index: -classToUpdate.order_index - 1000 })
-          .eq('id', classToUpdate.id);
-      }
-      console.log("Set temporary order_index values");
-      
-      // Step 2: Set them to correct values with proper module_id
-      for (const classToUpdate of allClassesToUpdate) {
-        await supabase
-          .from('classes')
-          .update({ 
-            order_index: classToUpdate.order_index,
-            module_id: classToUpdate.module_id
-          })
-          .eq('id', classToUpdate.id);
-      }
-      console.log("Set final order_index values");
+      await apiRequest('/api/org-service/classes/reorder', {
+        method: 'POST',
+        body: JSON.stringify({ updates: allUpdates }),
+      });
       
       toast.success(sourceModuleId === targetModuleId ? "Class order updated" : "Class moved to new module");
     } catch (error) {
@@ -720,7 +785,7 @@ const getDayName = (day: number): string => {
     let targetClassId: number | null = null;
     let targetLessonIndex: number = -1;
     
-    // First check if over is a lesson
+    // Check if over is a lesson
     for (const module of course.modules) {
       for (const classItem of module.classes) {
         const foundIndex = classItem.lessons.findIndex(l => l.id === overId);
@@ -733,7 +798,7 @@ const getDayName = (day: number): string => {
       if (targetClassId) break;
     }
     
-    // If over is a class (not a lesson), append to end of that class
+    // If over is a class, append to end
     if (targetClassId === null) {
       for (const module of course.modules) {
         const foundClass = module.classes.find(c => c.id === overId);
@@ -750,14 +815,10 @@ const getDayName = (day: number): string => {
     // Create updated structure
     let updatedModules = [...course.modules];
     
-    // Find source locations
-    let sourceModuleIndex = updatedModules.findIndex(m => m.id === sourceModuleId);
-    let sourceClassIndex = updatedModules[sourceModuleIndex].classes.findIndex(c => c.id === sourceClassId);
-    
-    // Remove from source
+    const sourceModuleIndex = updatedModules.findIndex(m => m.id === sourceModuleId);
+    const sourceClassIndex = updatedModules[sourceModuleIndex].classes.findIndex(c => c.id === sourceClassId);
     const [removedLesson] = updatedModules[sourceModuleIndex].classes[sourceClassIndex].lessons.splice(sourceLessonIndex, 1);
     
-    // Find target locations
     let targetModuleIndex = -1;
     let targetClassIndex = -1;
     
@@ -772,57 +833,42 @@ const getDayName = (day: number): string => {
     
     if (targetModuleIndex === -1) return;
     
-    // Insert at target position
-    const insertIndex = targetLessonIndex === -1 ? updatedModules[targetModuleIndex].classes[targetClassIndex].lessons.length : targetLessonIndex;
+    const insertIndex = targetLessonIndex === -1 
+      ? updatedModules[targetModuleIndex].classes[targetClassIndex].lessons.length 
+      : targetLessonIndex;
     updatedModules[targetModuleIndex].classes[targetClassIndex].lessons.splice(insertIndex, 0, removedLesson);
     
     // Update UI immediately
     setCourse({ ...course, modules: updatedModules });
     
     try {
-      const supabase = getSupabaseBrowserClient();
-      
       // Collect all lessons that need updates
-      const allLessonsToUpdate: { id: number; class_id: number; order_index: number }[] = [];
+      const allUpdates: { id: number; class_id: number; order_index: number }[] = [];
       
-      // Add lessons from source class (if it still has lessons)
+      // Update source class lessons
       if (updatedModules[sourceModuleIndex].classes[sourceClassIndex].lessons.length > 0) {
         for (let i = 0; i < updatedModules[sourceModuleIndex].classes[sourceClassIndex].lessons.length; i++) {
-          allLessonsToUpdate.push({
+          allUpdates.push({
             id: updatedModules[sourceModuleIndex].classes[sourceClassIndex].lessons[i].id,
             class_id: sourceClassId,
-            order_index: i
+            order_index: i,
           });
         }
       }
       
-      // Add lessons from target class
+      // Update target class lessons
       for (let i = 0; i < updatedModules[targetModuleIndex].classes[targetClassIndex].lessons.length; i++) {
-        allLessonsToUpdate.push({
+        allUpdates.push({
           id: updatedModules[targetModuleIndex].classes[targetClassIndex].lessons[i].id,
           class_id: targetClassId,
-          order_index: i
+          order_index: i,
         });
       }
       
-      // Step 1: Set all affected lessons to temporary negative values
-      for (const lessonToUpdate of allLessonsToUpdate) {
-        await supabase
-          .from('lessons')
-          .update({ order_index: -lessonToUpdate.order_index - 1000 })
-          .eq('id', lessonToUpdate.id);
-      }
-      
-      // Step 2: Set them to correct values with proper class_id
-      for (const lessonToUpdate of allLessonsToUpdate) {
-        await supabase
-          .from('lessons')
-          .update({ 
-            order_index: lessonToUpdate.order_index,
-            class_id: lessonToUpdate.class_id
-          })
-          .eq('id', lessonToUpdate.id);
-      }
+      await apiRequest('/api/org-service/lessons/reorder', {
+        method: 'POST',
+        body: JSON.stringify({ updates: allUpdates }),
+      });
       
       toast.success(sourceClassId === targetClassId ? "Lesson order updated" : "Lesson moved to new class");
     } catch (error) {
@@ -853,28 +899,32 @@ const getDayName = (day: number): string => {
     
     try {
       if (editingModule) {
-        await updateModule(editingModule.id, { title: moduleForm.title });
-        setCourse({
-          ...course!,
-          modules: course!.modules?.map(m =>
-            m.id === editingModule.id ? { ...m, title: moduleForm.title } : m
-          )
+        await apiRequest(`/api/org-service/modules/${editingModule.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ title: moduleForm.title }),
         });
-        toast.success("Module updated");
       } else {
-        const newModule = await addModule(courseId, {
-          title: moduleForm.title,
-          order_index: course?.modules?.length || 0,
+        // Use the current number of modules as the new order_index
+        const newOrderIndex = course?.modules?.length || 0;
+        
+        await apiRequest('/api/org-service/modules', {
+          method: 'POST',
+          body: JSON.stringify({
+            course_id: courseId,
+            title: moduleForm.title,
+            order_index: newOrderIndex,
+          }),
         });
-        setCourse({
-          ...course!,
-          modules: [...(course?.modules || []), { ...newModule, classes: [] }]
-        });
-        toast.success("Module added");
       }
+      
+      // Refresh course data after save
+      await loadCourse();
       setModuleModalOpen(false);
-    } catch (error) {
-      toast.error("Failed to save module");
+      toast.success(editingModule ? "Module updated" : "Module added");
+      
+    } catch (error: any) {
+      console.error("Error saving module:", error);
+      toast.error(error.message || "Failed to save module");
     }
   };
 
@@ -1170,14 +1220,19 @@ const getDayName = (day: number): string => {
   };
   
   // Assignment CRUD - FULLY FIXED with null checks
-  const openAssignmentModal = async (lesson: LessonWithAssignments, classId: number, moduleId: number) => {
+  const openAssignmentModal = (lesson: LessonWithAssignments, classId: number, moduleId: number, existingAssignment?: any) => {
     console.log("=== OPEN ASSIGNMENT MODAL ===");
     console.log("Lesson ID:", lesson.id);
+    console.log("Lesson title:", lesson.title);
+    console.log("Existing assignment:", existingAssignment);
+    console.log("All assignments for this lesson:", lesson.assignments);
     
-    const existingAssignment = lesson.assignments?.[0];
+    // Ensure assignments is an array
+    const assignments = lesson.assignments || [];
+    console.log(`Found ${assignments.length} assignments for this lesson`);
     
     if (existingAssignment) {
-      console.log("Editing existing assignment:", existingAssignment);
+      // Edit existing assignment
       setEditingAssignment({ 
         assignment: existingAssignment, 
         lessonId: lesson.id
@@ -1185,12 +1240,11 @@ const getDayName = (day: number): string => {
       setAssignmentForm({
         title: existingAssignment.title || "",
         description: existingAssignment.description || "",
-        due_at: existingAssignment.due_at || "",
+        due_at: existingAssignment.due_at ? existingAssignment.due_at.split('T')[0] : "",
         points: existingAssignment.points || 100,
       });
     } else {
-      console.log("Creating new assignment for lesson:", lesson.id);
-      // Set editingAssignment with lessonId, assignment as null
+      // Create new assignment
       setEditingAssignment({ 
         assignment: null, 
         lessonId: lesson.id
@@ -1233,7 +1287,7 @@ const getDayName = (day: number): string => {
           points: assignmentForm.points,
         });
         
-        toast.success("Assignment updated");
+        toast.success("Assignment updated successfully");
         
       } 
       // Check if we're creating a new assignment
@@ -1259,7 +1313,7 @@ const getDayName = (day: number): string => {
         
         await addAssignment(editingAssignment.lessonId, assignmentData);
         
-        toast.success("Assignment added");
+        toast.success("Assignment added successfully");
       } 
       else {
         console.error("Invalid state - no assignment ID or lesson ID", editingAssignment);
@@ -1267,8 +1321,7 @@ const getDayName = (day: number): string => {
         return;
       }
       
-      // Reload course data and close modal
-      await loadCourse();
+      // Close modal
       setAssignmentModalOpen(false);
       
       // Reset form
@@ -1280,12 +1333,17 @@ const getDayName = (day: number): string => {
         points: 100,
       });
       
-    } catch (error) {
+      // Force a complete reload of course data
+      console.log("Reloading course data to show new assignment...");
+      await loadCourse();
+      console.log("Course reload complete");
+      
+    } catch (error: any) {
       console.error("ERROR in saveAssignment:", error);
       toast.error(`Failed to save assignment: ${error.message || "Please try again"}`);
     }
   };
-
+  
   const handleDeleteAssignment = async (assignmentId: number) => {
     console.log("=== HANDLE DELETE ASSIGNMENT ===");
     console.log("Assignment ID to delete:", assignmentId);
@@ -1390,15 +1448,31 @@ const getDayName = (day: number): string => {
       };
       
       console.log("offeringData being sent:", offeringData);
+      console.log("Course ID:", courseId);
       
+      let response;
       if (editingOffering) {
-        await updateCourseClass(editingOffering.id, offeringData);
+        // Update existing offering
+        response = await apiRequest(`/api/org-service/course-classes/${editingOffering.id}`, {
+          method: 'PUT',
+          body: JSON.stringify(offeringData),
+        });
         toast.success("Offering updated successfully");
       } else {
-        await addCourseClass(courseId, offeringData);
+        // Create new offering - the backend expects course_id in the body
+        response = await apiRequest(`/api/org-service/course-classes`, {
+          method: 'POST',
+          body: JSON.stringify({
+            course_id: courseId,
+            ...offeringData
+          }),
+        });
         toast.success("Offering added successfully");
       }
       
+      console.log("API response:", response);
+      
+      // Refresh course data
       await loadCourse();
       setOfferingModalOpen(false);
       
@@ -1418,7 +1492,7 @@ const getDayName = (day: number): string => {
       toast.error(`Failed to save offering: ${error.message || "Please try again"}`);
     }
   };
-  
+
   const deleteOffering = async (offeringId: number) => {
     if (confirm("Are you sure you want to delete this offering? This will remove all enrollments and schedules.")) {
       try {
@@ -1604,11 +1678,15 @@ const getDayName = (day: number): string => {
   
   const handleMoveToOrganization = async (orgId: number) => {
     try {
-      await updateCourse(courseId, { organization_id: orgId });
+      await apiRequest(`/api/org-service/courses/${courseId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ organization_id: orgId }),
+      });
       await loadCourse();
       setSelectedOrgId(orgId);
       toast.success("Course moved to new organization");
     } catch (error) {
+      console.error("Error moving course:", error);
       toast.error("Failed to move course");
     }
   };

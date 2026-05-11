@@ -77,20 +77,6 @@ export default function CreateCoursePage() {
           return;
         }
 
-        // Step 4: Verify the organization has completed setup
-        const setupResponse = await fetch(`/api/org-service/orgs/${orgId}/setup-status`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-
-        if (setupResponse.ok) {
-          const setupData = await setupResponse.json();
-          if (!setupData.is_setup_complete) {
-            setError(`Organization "${orgName}" has not completed setup. Please complete organization setup first.`);
-            setIsCheckingOrg(false);
-            return;
-          }
-        }
-
         // Step 5: Set the organization for course creation
         setOrganization({
           id: orgId,
