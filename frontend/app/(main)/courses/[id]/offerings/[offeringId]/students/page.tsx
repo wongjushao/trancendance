@@ -170,23 +170,27 @@ export default function CourseStudentsPage() {
     setLoadingOfferings(true);
     
     try {
-      const response = await fetch(`/api/org-service/courses/${courseId}/detail`, {
+      // Use the new dedicated offerings endpoint
+      const response = await fetch(`/api/org-service/courses/${courseId}/offerings`, {
         headers: { 'Authorization': `Bearer ${accessToken}` }
       });
       
+      console.log("Offerings endpoint response status:", response.status);
+      
       if (response.ok) {
         const data = await response.json();
-        const offerings = data.course_classes || [];
-        const activeOfferings = offerings.filter((o: any) => 
-          o.status === 'upcoming' || o.status === 'ongoing'
-        );
+        console.log("Offerings from dedicated endpoint:", data);
         
-        setCourseOfferings(activeOfferings);
+        const offerings = data.offerings || [];
+        setCourseOfferings(offerings);
         
-        // Auto-select first offering if available
-        if (activeOfferings.length > 0 && enrollData.offeringId === 0) {
-          setEnrollData(prev => ({ ...prev, offeringId: activeOfferings[0].id }));
+        if (offerings.length > 0 && enrollData.offeringId === 0) {
+          setEnrollData(prev => ({ ...prev, offeringId: offerings[0].id }));
         }
+      } else {
+        console.error("Failed to fetch offerings:", response.status);
+        const errorText = await response.text();
+        console.error("Error body:", errorText);
       }
     } catch (error) {
       console.error('Error fetching course offerings:', error);

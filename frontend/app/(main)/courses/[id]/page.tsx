@@ -7,7 +7,7 @@ import {
   Play, FileText, Users, MessageSquare, BookOpen, Clock, Star, 
   Award, CheckCircle, Loader2, ArrowLeft, Eye, Shield, 
   Target, Sparkles, Heart, ThumbsUp, Quote, ChevronRight, 
-  GraduationCap, Calendar, TrendingUp, StarHalf, Send, X 
+  GraduationCap, Calendar, TrendingUp, StarHalf, Send, X, Building2,
 } from "lucide-react";
 import { GlowCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";

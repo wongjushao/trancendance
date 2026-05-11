@@ -3259,3 +3259,58 @@ class SubmissionDetailResource(Resource):
             return jsonify({"error": str(exc)}), 500
         finally:
             session.close()
+
+@courses_ns.route("/courses/<int:course_id>/offerings")
+class CourseOfferingsResource(Resource):
+    @courses_ns.response(200, "Course offerings retrieved")
+    @courses_ns.response(401, "Unauthorized")
+    @courses_ns.response(404, "Course not found")
+    def get(self, course_id: int):
+        """Get all course offerings/classes for a course."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        session = db_session()
+        try:
+            # Check if course exists
+            course = session.query(Course).filter(Course.id == course_id).first()
+            if not course:
+                return jsonify({"error": "Course not found"}), 404
+
+            # Get all course classes (offerings) for this course
+            offerings = session.query(CourseClass).filter(
+                CourseClass.course_id == course_id
+            ).order_by(CourseClass.created_at.desc()).all()
+
+            result = []
+            for offering in offerings:
+                # Get enrolled student count
+                student_count = session.query(ClassMember).filter(
+                    ClassMember.course_class_id == offering.id,
+                    ClassMember.role == "student"
+                ).count()
+
+                result.append({
+                    "id": offering.id,
+                    "name": offering.name,
+                    "description": offering.description,
+                    "status": offering.status,
+                    "max_students": offering.max_students,
+                    "start_date": offering.start_date.isoformat() if offering.start_date else None,
+                    "end_date": offering.end_date.isoformat() if offering.end_date else None,
+                    "instructor_id": str(offering.instructor_id) if offering.instructor_id else None,
+                    "is_published": offering.is_published,
+                    "created_at": offering.created_at.isoformat() if offering.created_at else None,
+                    "student_count": student_count,
+                })
+
+            return jsonify({"offerings": result}), 200
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()

@@ -1239,166 +1239,139 @@ export default function CourseLearnPage() {
 
   // Load course data
   useEffect(() => {
+
+    // Helper functions - add at the top after imports
+    const getAuthToken = async () => {
+      const supabase = getSupabaseBrowserClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      return session?.access_token;
+    };
+
+    const apiRequest = async (url: string, options: RequestInit = {}) => {
+      const token = await getAuthToken();
+      if (!token) throw new Error("Not authenticated");
+      
+      const response = await fetch(url, {
+        ...options,
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          ...options.headers,
+        },
+      });
+      
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: response.statusText }));
+        throw new Error(error.error || `Request failed: ${response.status}`);
+      }
+      
+      return response.json();
+    };
+
+    const getCurrentUserProfile = async () => {
+      return apiRequest('/api/auth-service/profile');
+    };
+
+    // Replace the entire loadData function with this:
     const loadData = async () => {
       setLoading(true);
       try {
-        const { data: { user: authUser } } = await supabase.auth.getUser();
-        if (!authUser) {
+        // Get current user profile from backend
+        const userProfile = await getCurrentUserProfile();
+        if (!userProfile) {
           router.push("/login");
           return;
         }
-        setUser(authUser);
+        setUser(userProfile);
 
-        // First, get all course classes for this course
-        const { data: courseClasses } = await supabase
-          .from("course_classes")
-          .select("id")
-          .eq("course_id", courseId);
-
-        if (!courseClasses || courseClasses.length === 0) {
-          toast.error("No active offerings for this course");
+        // Get course details from backend
+        const courseDetail = await apiRequest(`/api/org-service/courses/${courseId}/detail`);
+        
+        if (!courseDetail.course) {
+          toast.error("Course not found");
           router.push(`/courses/${courseId}`);
           return;
         }
 
-        const classIds = courseClasses.map(cc => cc.id);
+        // Get class member ID directly from the API response
+        let cmId = courseDetail.class_member_id;
 
-        // Get class member ID for this course using the array of class IDs
-        const { data: classMembers } = await supabase
-          .from("class_members")
-          .select("id")
-          .eq("user_id", authUser.id)
-          .in("course_class_id", classIds)
-          .limit(1);
+        // If no class member found, check if user is course creator
+        if (!cmId && courseDetail.course.created_by === userProfile.id) {
+          console.log("Course creator accessing without enrollment");
+          cmId = -1; // Special value for creator
+        }
 
-        let cmId = null;
-        if (classMembers && classMembers.length > 0) {
-          cmId = classMembers[0].id;
-          setClassMemberId(cmId);
-        } else {
-          // User is not enrolled in this course
+        if (!cmId) {
           toast.error("You are not enrolled in this course");
           router.push(`/courses/${courseId}`);
           return;
         }
+        setClassMemberId(cmId);
+        console.log("Class member ID:", cmId);
+        console.log("Course class ID:", courseDetail.course_class_id);
 
-        // Get course details with organization and instructor
-        const { data: courseData } = await supabase
-          .from("courses")
-          .select(`
-            *,
-            organization:organizations!courses_organization_id_fkey (name),
-            instructor:profiles!courses_created_by_fkey (first_name, last_name, username, avatar_url)
-          `)
-          .eq("id", courseId)
-          .single();
+        // Get lesson progress for all lessons
+        const progressMap = new Map();
+        const rawModules = courseDetail.modules || [];
 
-        if (!courseData) {
-          toast.error("Course not found");
-          router.push("/courses");
-          return;
-        }
-
-        // Get all modules, classes, and lessons
-        const { data: modulesData } = await supabase
-          .from("modules")
-          .select(`
-            *,
-            classes:classes (
-              *,
-              lessons:lessons (
-                *,
-                assignments:assignments (
-                  *,
-                  submissions:submissions (
-                    *,
-                    user:profiles!user_id (id)
-                  )
-                )
-              )
-            )
-          `)
-          .eq("course_id", courseId)
-          .order("order_index", { ascending: true });
-
-        // Get lesson progress
-        let progressMap = new Map<number, { status: string; progress_percent: number }>();
-        if (cmId) {
-          const { data: lessonProgress } = await supabase
-            .from("lesson_progress")
-            .select("*")
-            .eq("class_member_id", cmId);
-
-          lessonProgress?.forEach((progress) => {
-            progressMap.set(progress.lesson_id, {
-              status: progress.status,
-              progress_percent: progress.progress_percent || 0,
-            });
-          });
-        }
-
-        // Get course reviews
-        const { data: reviewsData } = await supabase
-          .from("course_reviews")
-          .select("*")
-          .eq("course_id", courseId);
-
-        if (reviewsData) {
-          setCourseReviews(reviewsData);
-          if (reviewsData.length > 0) {
-            const avg = reviewsData.reduce((sum, r) => sum + r.rating, 0) / reviewsData.length;
-            setAverageRating(avg);
+        for (const module of rawModules) {
+          for (const classItem of module.classes || []) {
+            for (const lesson of classItem.lessons || []) {
+              try {
+                const progress = await apiRequest(`/api/org-service/lesson-progress?lesson_id=${lesson.id}&class_member_id=${cmId}`);
+                if (progress && progress.status) {
+                  progressMap.set(lesson.id, {
+                    status: progress.status,
+                    progress_percent: progress.progress_percent || 0,
+                  });
+                }
+              } catch (e) {
+                // No progress record yet
+              }
+            }
           }
-          const userReviewData = reviewsData.find(r => r.user_id === authUser.id);
-          setUserReview(userReviewData);
         }
+
+        // Process course reviews
+        const reviews = courseDetail.reviews || [];
+        setCourseReviews(reviews);
+        if (reviews.length > 0) {
+          const avg = reviews.reduce((sum: number, r: any) => sum + r.rating, 0) / reviews.length;
+          setAverageRating(avg);
+        }
+        const userReviewData = reviews.find((r: any) => r.user?.id === userProfile.id);
+        setUserReview(userReviewData);
 
         // Build module structure with progress
         let totalLessons = 0;
         let completedLessons = 0;
-        
-        const modulesWithProgress: ModuleData[] = (modulesData || []).map((module: any) => {
+
+        const modulesWithProgress: ModuleData[] = rawModules.map((module: any) => {
           const classesWithProgress: ClassData[] = (module.classes || []).map((classItem: any) => {
             const lessonsWithProgress: LessonData[] = (classItem.lessons || []).map((lesson: any) => {
               const progress = progressMap.get(lesson.id);
               const isCompleted = progress?.status === "completed";
-              
+
               totalLessons++;
               if (isCompleted) completedLessons++;
 
-              // Process assignments with user submissions
               let assignments: AssignmentData[] = [];
               if (lesson.assignments && lesson.assignments.length > 0) {
                 assignments = lesson.assignments.map((assignment: any) => {
-                  const submission = assignment.submissions?.find(
-                    (s: any) => s.user_id === authUser.id
-                  );
-                  
                   let status: AssignmentData["status"] = "pending";
-                  if (submission) {
-                    if (submission.grade !== null) {
-                      status = "graded";
-                    } else {
-                      status = "submitted";
-                    }
+                  if (assignment.submission) {
+                    status = assignment.submission.grade !== null ? "graded" : "submitted";
                   } else if (assignment.due_at && new Date(assignment.due_at) < new Date()) {
                     status = "overdue";
                   }
-
                   return {
                     id: assignment.id,
                     title: assignment.title,
                     description: assignment.description || "",
                     due_at: assignment.due_at,
                     points: assignment.points,
-                    submission: submission ? {
-                      id: submission.id,
-                      submitted_at: submission.submitted_at,
-                      content_url: submission.content_url,
-                      text_content: submission.text_content,
-                      grade: submission.grade,
-                      feedback: submission.feedback,
-                    } : undefined,
+                    submission: assignment.submission,
                     status,
                   };
                 });
@@ -1407,7 +1380,7 @@ export default function CourseLearnPage() {
               return {
                 id: lesson.id,
                 title: lesson.title,
-                content_type: lesson.content_type as "video" | "text" | "quiz",
+                content_type: lesson.content_type,
                 content_url: lesson.content_url,
                 content_json: lesson.content_json,
                 duration_seconds: lesson.duration_seconds,
@@ -1415,14 +1388,12 @@ export default function CourseLearnPage() {
                 is_free_preview: lesson.is_free_preview,
                 is_completed: isCompleted,
                 progress_percent: progress?.progress_percent || 0,
-                assignments: assignments.length > 0 ? assignments : undefined,
+                assignments,
               };
-            }).sort((a: LessonData, b: LessonData) => a.order_index - b.order_index);
+            }).sort((a, b) => a.order_index - b.order_index);
 
             const completedInClass = lessonsWithProgress.filter(l => l.is_completed).length;
-            const classProgress = lessonsWithProgress.length > 0 
-              ? (completedInClass / lessonsWithProgress.length) * 100 
-              : 0;
+            const classProgress = lessonsWithProgress.length > 0 ? (completedInClass / lessonsWithProgress.length) * 100 : 0;
 
             return {
               id: classItem.id,
@@ -1433,7 +1404,7 @@ export default function CourseLearnPage() {
               total_count: lessonsWithProgress.length,
               progress: classProgress,
             };
-          }).sort((a: ClassData, b: ClassData) => a.order_index - b.order_index);
+          }).sort((a, b) => a.order_index - b.order_index);
 
           const completedInModule = classesWithProgress.reduce((sum, c) => sum + c.completed_count, 0);
           const totalInModule = classesWithProgress.reduce((sum, c) => sum + c.total_count, 0);
@@ -1448,29 +1419,27 @@ export default function CourseLearnPage() {
             total_count: totalInModule,
             progress: moduleProgress,
           };
-        }).sort((a: ModuleData, b: ModuleData) => a.order_index - b.order_index);
+        }).sort((a, b) => a.order_index - b.order_index);
 
         setModules(modulesWithProgress);
         setOverallProgress(totalLessons > 0 ? (completedLessons / totalLessons) * 100 : 0);
 
         setCourse({
-          id: courseData.id,
-          title: courseData.title,
-          description: courseData.description || "",
-          thumbnail: courseData.thumbnail,
+          id: courseDetail.course.id,
+          title: courseDetail.course.title,
+          description: courseDetail.course.description || "",
+          thumbnail: courseDetail.course.thumbnail,
           modules: modulesWithProgress,
-          organization_id: courseData.organization_id,
-          organization_name: courseData.organization?.name,
-          instructor_name: courseData.instructor?.first_name 
-            ? `${courseData.instructor.first_name} ${courseData.instructor.last_name || ""}`.trim()
-            : courseData.instructor?.username || "Instructor",
-          instructor_avatar: courseData.instructor?.avatar_url,
+          organization_id: courseDetail.course.organization_id,
+          organization_name: courseDetail.course.organization_name,
+          instructor_name: courseDetail.course.instructor_name || "Instructor",
+          instructor_avatar: courseDetail.course.instructor_avatar,
         });
 
-        // Find the first incomplete lesson or first lesson overall
+        // Find first incomplete lesson
         let firstLesson: LessonData | null = null;
         let firstLessonIndices = { moduleIndex: -1, classIndex: -1, lessonIndex: -1 };
-        
+
         for (let mIdx = 0; mIdx < modulesWithProgress.length; mIdx++) {
           for (let cIdx = 0; cIdx < modulesWithProgress[mIdx].classes.length; cIdx++) {
             for (let lIdx = 0; lIdx < modulesWithProgress[mIdx].classes[cIdx].lessons.length; lIdx++) {
@@ -1580,9 +1549,9 @@ export default function CourseLearnPage() {
     if (!classMemberId || !user) return;
 
     try {
-      const { error } = await supabase
-        .from("lesson_progress")
-        .upsert({
+      await apiRequest('/api/org-service/lesson-progress', {
+        method: 'POST',
+        body: JSON.stringify({
           class_member_id: classMemberId,
           lesson_id: lessonId,
           user_id: user.id,
@@ -1590,13 +1559,10 @@ export default function CourseLearnPage() {
           progress_percent: Math.floor(progressPercent),
           last_accessed_at: new Date().toISOString(),
           completed_at: status === "completed" ? new Date().toISOString() : null,
-        }, {
-          onConflict: "class_member_id,lesson_id",
-        });
+        })
+      });
 
-      if (error) throw error;
-
-      // Update local state
+      // Update local state (same as your existing code)
       setModules(prevModules => {
         const newModules = [...prevModules];
         for (let mIdx = 0; mIdx < newModules.length; mIdx++) {
@@ -1606,32 +1572,23 @@ export default function CourseLearnPage() {
                 newModules[mIdx].classes[cIdx].lessons[lIdx].is_completed = status === "completed";
                 newModules[mIdx].classes[cIdx].lessons[lIdx].progress_percent = progressPercent;
                 
-                // Update class progress
                 const classLessons = newModules[mIdx].classes[cIdx].lessons;
                 const completedInClass = classLessons.filter(l => l.is_completed).length;
                 newModules[mIdx].classes[cIdx].completed_count = completedInClass;
-                newModules[mIdx].classes[cIdx].progress = classLessons.length > 0 
-                  ? (completedInClass / classLessons.length) * 100 
-                  : 0;
+                newModules[mIdx].classes[cIdx].progress = classLessons.length > 0 ? (completedInClass / classLessons.length) * 100 : 0;
                 
-                // Update module progress
                 const moduleClasses = newModules[mIdx].classes;
                 const completedInModule = moduleClasses.reduce((sum, c) => sum + c.completed_count, 0);
                 const totalInModule = moduleClasses.reduce((sum, c) => sum + c.total_count, 0);
                 newModules[mIdx].completed_count = completedInModule;
-                newModules[mIdx].progress = totalInModule > 0 
-                  ? (completedInModule / totalInModule) * 100 
-                  : 0;
+                newModules[mIdx].progress = totalInModule > 0 ? (completedInModule / totalInModule) * 100 : 0;
                 
-                // Update overall progress
-                let total = 0;
-                let completed = 0;
+                let total = 0, completed = 0;
                 for (const module of newModules) {
                   completed += module.completed_count;
                   total += module.total_count;
                 }
                 setOverallProgress(total > 0 ? (completed / total) * 100 : 0);
-                
                 break;
               }
             }
@@ -1640,7 +1597,6 @@ export default function CourseLearnPage() {
         return newModules;
       });
 
-      // Update current lesson if it's the one being updated
       if (currentLesson?.id === lessonId && status === "completed") {
         setCurrentLesson(prev => prev ? { ...prev, is_completed: true, progress_percent: progressPercent } : prev);
       }
@@ -1703,18 +1659,13 @@ export default function CourseLearnPage() {
     setSubmittingRating(true);
     
     try {
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      
-      const { error } = await supabase
-        .from("course_reviews")
-        .insert({
-          course_id: courseId,
-          user_id: authUser!.id,
+      await apiRequest(`/api/org-service/courses/${courseId}/reviews`, {
+        method: 'POST',
+        body: JSON.stringify({
           rating: ratingValue,
           review: reviewText.trim() || null,
-        });
-      
-      if (error) throw error;
+        })
+      });
       
       toast.success("Thank you for your rating!");
       setShowRatingModal(false);
@@ -1722,20 +1673,16 @@ export default function CourseLearnPage() {
       setReviewText("");
       
       // Refresh reviews
-      const { data: reviewsData } = await supabase
-        .from("course_reviews")
-        .select("*")
-        .eq("course_id", courseId);
-      
-      if (reviewsData) {
-        setCourseReviews(reviewsData);
-        if (reviewsData.length > 0) {
-          const avg = reviewsData.reduce((sum, r) => sum + r.rating, 0) / reviewsData.length;
-          setAverageRating(avg);
-        }
-        const userReviewData = reviewsData.find(r => r.user_id === authUser!.id);
-        setUserReview(userReviewData);
+      const courseDetail = await apiRequest(`/api/org-service/courses/${courseId}/detail`);
+      const reviews = courseDetail.reviews || [];
+      setCourseReviews(reviews);
+      if (reviews.length > 0) {
+        const avg = reviews.reduce((sum: number, r: any) => sum + r.rating, 0) / reviews.length;
+        setAverageRating(avg);
       }
+      const userProfile = await getCurrentUserProfile();
+      const userReviewData = reviews.find((r: any) => r.user?.id === userProfile.id);
+      setUserReview(userReviewData);
       
     } catch (error) {
       console.error("Error submitting rating:", error);
