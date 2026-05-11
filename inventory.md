@@ -2,16 +2,9 @@
 
 ## Files with Supabase calls:
 
-
-
-frontend/app/(main)/courses/[id]/edit/page.tsx
-
-frontend/app/(main)/courses/[id]/page.tsx
-
-frontend/app/(main)/courses/[id]/enroll/page.tsx
-
 frontend/app/(main)/invite/accept/page.tsx
-frontend/app/(main)/messages/page.tsx
+
+
 frontend/app/auth/callback/route.ts
 frontend/app/auth/confirm/route.ts
 frontend/app/auth/mfa-verify/page.tsx

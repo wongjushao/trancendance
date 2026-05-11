@@ -843,6 +843,26 @@ class CourseEnrollResource(Resource):
             if course is None:
                 return jsonify({"error": "Course not found"}), 404
 
+            # ========== NEW: Auto-add to organization if not already a member ==========
+            # Check if user is already an organization member
+            existing_org_member = session.query(OrganizationMember).filter(
+                OrganizationMember.organization_id == course.organization_id,
+                OrganizationMember.user_id == user_id
+            ).first()
+            
+            # If not an organization member, add them as a student/member
+            if not existing_org_member:
+                new_org_member = OrganizationMember(
+                    organization_id=course.organization_id,
+                    user_id=user_id,
+                    member_role="student",  # or "member" depending on your schema
+                    status="active",
+                    joined_at=datetime.now(timezone.utc)
+                )
+                session.add(new_org_member)
+                print(f"[Enroll] Added user {user_id} to organization {course.organization_id} as student")
+            # ========== END OF NEW CODE ==========
+
             offering = (
                 session.query(CourseClass)
                 .filter(
@@ -893,8 +913,7 @@ class CourseEnrollResource(Resource):
             return jsonify({"error": str(exc)}), 500
         finally:
             session.close()
-
-
+            
 @courses_ns.route("/courses/<int:course_id>/reviews")
 class CourseReviewUpsertResource(Resource):
     @courses_ns.expect(review_upsert_model, validate=False)
@@ -4263,3 +4282,33 @@ class CourseAssignmentsResource(Resource):
             return jsonify({"error": str(exc)}), 500
         finally:
             session.close()
+
+@courses_ns.route("/course-classes/<int:course_class_id>/enrollment/status")
+class CourseClassEnrollmentStatusResource(Resource):
+    @courses_ns.response(200, "Enrollment status retrieved")
+    @courses_ns.response(401, "Unauthorized")
+    def get(self, course_class_id: int):
+        """Check if current user is enrolled in a specific course offering."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        session = db_session()
+        try:
+            # Check if user is enrolled in this specific class offering
+            enrolled = session.query(ClassMember).filter(
+                ClassMember.course_class_id == course_class_id,
+                ClassMember.user_id == user_id,
+                ClassMember.role == "student"
+            ).first() is not None
+
+            return jsonify({"enrolled": enrolled}), 200
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+

@@ -244,120 +244,15 @@ export default function CourseDetailPage() {
     setEnrolling(true);
 
     try {
-      // Get user profile to get email
-      const userProfile = await apiRequest('/api/auth-service/profile');
-      
-      // Get course offerings using backend API
-      const offeringsRes = await fetch(`/api/org-service/courses/${courseId}/offerings`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      
-      if (!offeringsRes.ok) {
-        throw new Error("Failed to fetch course offerings");
-      }
-      
-      const offeringsData = await offeringsRes.json();
-      const offerings = offeringsData.offerings || [];
-      const activeOfferings = offerings.filter(
-        (o: any) => o.status === 'upcoming' || o.status === 'ongoing'
-      );
-      
-      if (activeOfferings.length === 0) {
-        toast.error("No active course offerings available");
-        return;
-      }
-      
-      const offeringId = activeOfferings[0].id;
-      
-      // Get course details from existing data
-      const courseData = course;
-      
       // For public courses - direct enrollment via backend
-      if (courseData?.visibility === 'public') {
-        const response = await fetch('/api/org-service/users/enroll', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            email: userProfile.email || userProfile.username,
-            course_class_id: offeringId,
-          }),
-        });
-        
-        const data = await response.json();
-        
-        if (!response.ok) {
-          throw new Error(data.error || "Failed to enroll in course");
-        }
-        
-        toast.success("Successfully enrolled in course!");
-        await loadCourseData();
-        return;
-      }
-
-      // For org/private courses - check organization membership via backend
-      const membershipRes = await fetch(`/api/org-service/organizations/memberships`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      
-      const membershipData = await membershipRes.json();
-      const organizations = membershipData.organizations || [];
-      const isMember = organizations.some((org: any) => org.id === courseData?.organization_id);
-      
-      if (!isMember) {
-        // Check for pending request via backend
-        const pendingRes = await fetch(`/api/org-service/organizations/memberships?status=pending`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        
-        const pendingData = await pendingRes.json();
-        const hasPending = pendingData.organizations?.some(
-          (org: any) => org.id === courseData?.organization_id && org.status === 'pending'
-        );
-        
-        if (hasPending) {
-          toast.warning(
-            `Your join request to the organization is pending approval. You'll be able to enroll once approved.`,
-            { duration: 5000 }
-          );
-        } else {
-          const wantsToJoin = confirm(
-            "This course is only available to organization members. Would you like to send a join request to the organization admin?"
-          );
-          
-          if (wantsToJoin) {
-            // Send join request via backend
-            await fetch(`/api/org-service/organizations/${courseData?.organization_id}/join-request`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`,
-              },
-              body: JSON.stringify({ user_id: userProfile.id }),
-            });
-            
-            toast.info(
-              "Join request sent! You'll be able to enroll once an admin approves your membership.",
-              { duration: 5000 }
-            );
-          }
-        }
-        return;
-      }
-      
-      // User is in organization, proceed with enrollment via backend
-      const response = await fetch('/api/org-service/users/enroll', {
+      // Use the correct endpoint: /api/org-service/courses/{courseId}/enroll
+      const response = await fetch(`/api/org-service/courses/${courseId}/enroll`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          email: userProfile.email || userProfile.username,
-          course_class_id: offeringId,
-        }),
+        body: JSON.stringify({}), // The backend doesn't require any body parameters
       });
       
       const data = await response.json();
@@ -367,16 +262,30 @@ export default function CourseDetailPage() {
       }
       
       toast.success("Successfully enrolled in course!");
-      await loadCourseData();
+      await loadCourseData(); // Refresh course data to reflect enrollment
       
     } catch (error) {
       console.error("Error enrolling:", error);
-      toast.error(error instanceof Error ? error.message : "Failed to enroll in course");
+      
+      // Handle specific error cases
+      if (error instanceof Error) {
+        if (error.message.includes("already enrolled")) {
+          toast.info("You are already enrolled in this course");
+          await loadCourseData(); // Refresh to show correct status
+        } else if (error.message.includes("full")) {
+          toast.error("This course offering is full");
+        } else if (error.message.includes("No available course offerings")) {
+          toast.error("No active course offerings available at this time");
+        } else {
+          toast.error(error.message || "Failed to enroll in course");
+        }
+      } else {
+        toast.error("Failed to enroll in course");
+      }
     } finally {
       setEnrolling(false);
     }
   };
-
   const handleContinueLearning = () => {
     for (const module of modules) {
       for (const classItem of module.classes) {
