@@ -6,7 +6,17 @@ import { useRouter } from "next/navigation";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Send, Loader2, Search, MessageCircle, User, Ban, Check, X } from "lucide-react";
+import {
+  Send,
+  Loader2,
+  Search,
+  MessageCircle,
+  User,
+  Ban,
+  Check,
+  X,
+  ChevronLeft,
+} from "lucide-react";
 import { useChat } from "@/contexts/ChatContext";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
@@ -412,18 +422,7 @@ export default function MessagesPage() {
               className="md:hidden mr-2 p-2 text-[#A0A0B5] hover:text-white rounded-lg hover:bg-white/5 active:scale-95 transition-all"
               aria-label="Back to conversations"
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-5 w-5"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z"
-                  clipRule="evenodd"
-                />
-              </svg>
+              <ChevronLeft className="h-5 w-5" aria-hidden />
             </button>
             <div className="flex items-center gap-3 min-w-0 flex-1">
               <Avatar className="h-9 w-9 sm:h-10 sm:w-10 ring-1 ring-white/5 flex-shrink-0">
