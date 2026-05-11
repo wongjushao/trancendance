@@ -304,3 +304,4 @@ class ConnectionsResource(Resource):
             return jsonify({"error": str(exc)}), 500
         finally:
             session.close()
+

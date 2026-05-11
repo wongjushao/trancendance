@@ -1485,3 +1485,43 @@ class OrganizationDeleteResource(Resource):
             return jsonify({"error": str(exc)}), 500
         finally:
             session.close()
+
+@organizations_ns.route("/organizations/<int:org_id>/join-request")
+class OrganizationJoinRequestResource(Resource):
+    def post(self, org_id: int):
+        """Send a join request to an organization."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        session = db_session()
+        try:
+            # Check if already has pending request
+            existing = session.query(OrganizationMember).filter(
+                OrganizationMember.organization_id == org_id,
+                OrganizationMember.user_id == user_id,
+                OrganizationMember.member_role == "pending"
+            ).first()
+            
+            if existing:
+                return jsonify({"message": "Join request already pending"}), 200
+            
+            # Create pending request
+            new_request = OrganizationMember(
+                organization_id=org_id,
+                user_id=user_id,
+                member_role="pending"
+            )
+            session.add(new_request)
+            session.commit()
+            
+            return jsonify({"message": "Join request sent successfully"}), 201
+        except SQLAlchemyError as exc:
+            session.rollback()
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()

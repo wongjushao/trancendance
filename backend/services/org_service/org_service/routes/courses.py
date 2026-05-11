@@ -3314,3 +3314,4 @@ class CourseOfferingsResource(Resource):
             return jsonify({"error": str(exc)}), 500
         finally:
             session.close()
+

@@ -144,6 +144,35 @@ export default function CourseDetailPage() {
   const [submittingReview, setSubmittingReview] = useState(false);
   const [activeTab, setActiveTab] = useState("overview");
 
+  // Helper to get auth token
+  const getAuthToken = async () => {
+    const supabase = getSupabaseBrowserClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token;
+  };
+
+  // Helper for API requests
+  const apiRequest = async (url: string, options: RequestInit = {}) => {
+    const token = await getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+    
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        ...options.headers,
+      },
+    });
+    
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: response.statusText }));
+      throw new Error(error.error || `Request failed: ${response.status}`);
+    }
+    
+    return response.json();
+  };
+
   useEffect(() => {
     loadCourseData();
   }, [courseId]);
@@ -152,12 +181,13 @@ export default function CourseDetailPage() {
     setLoading(true);
 
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const token = await getAuthToken();
       const headers: HeadersInit = {};
-      if (session?.access_token) {
-        headers.Authorization = `Bearer ${session.access_token}`;
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
       }
 
+      // Using existing backend API: GET /api/org-service/courses/{courseId}/detail
       const res = await fetch(`/api/org-service/courses/${courseId}/detail`, { headers });
       const payload = await res.json().catch(() => ({}));
 
@@ -203,9 +233,10 @@ export default function CourseDetailPage() {
     }
   };
 
+
   const handleEnroll = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
+    const token = await getAuthToken();
+    if (!token) {
       router.push("/login");
       return;
     }
@@ -213,40 +244,44 @@ export default function CourseDetailPage() {
     setEnrolling(true);
 
     try {
-      // First, get the course offering
-      const { data: offerings, error: offeringsError } = await supabase
-        .from("course_classes")
-        .select("id, name, max_students, status")
-        .eq("course_id", courseId)
-        .in("status", ["upcoming", "ongoing"])
-        .order("start_date", { ascending: true });
-
-      if (offeringsError) throw offeringsError;
+      // Get user profile to get email
+      const userProfile = await apiRequest('/api/auth-service/profile');
       
-      if (!offerings || offerings.length === 0) {
+      // Get course offerings using backend API
+      const offeringsRes = await fetch(`/api/org-service/courses/${courseId}/offerings`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (!offeringsRes.ok) {
+        throw new Error("Failed to fetch course offerings");
+      }
+      
+      const offeringsData = await offeringsRes.json();
+      const offerings = offeringsData.offerings || [];
+      const activeOfferings = offerings.filter(
+        (o: any) => o.status === 'upcoming' || o.status === 'ongoing'
+      );
+      
+      if (activeOfferings.length === 0) {
         toast.error("No active course offerings available");
         return;
       }
       
-      const offeringId = offerings[0].id;
+      const offeringId = activeOfferings[0].id;
       
-      // Get course details
-      const { data: courseData } = await supabase
-        .from('courses')
-        .select('visibility, organization_id')
-        .eq('id', courseId)
-        .single();
-
+      // Get course details from existing data
+      const courseData = course;
+      
       // For public courses - direct enrollment via backend
       if (courseData?.visibility === 'public') {
         const response = await fetch('/api/org-service/users/enroll', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session.access_token}`,
+            'Authorization': `Bearer ${token}`,
           },
           body: JSON.stringify({
-            email: session.user.email,
+            email: userProfile.email || userProfile.username,
             course_class_id: offeringId,
           }),
         });
@@ -262,20 +297,27 @@ export default function CourseDetailPage() {
         return;
       }
 
-      // For org/private courses - check organization membership
-      const isMember = await isUserInOrganization(session.user.id, courseData.organization_id);
+      // For org/private courses - check organization membership via backend
+      const membershipRes = await fetch(`/api/org-service/organizations/memberships`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      const membershipData = await membershipRes.json();
+      const organizations = membershipData.organizations || [];
+      const isMember = organizations.some((org: any) => org.id === courseData?.organization_id);
       
       if (!isMember) {
-        // Check for pending request
-        const { data: pendingRequest } = await supabase
-          .from("organization_members")
-          .select("id")
-          .eq("organization_id", courseData.organization_id)
-          .eq("user_id", session.user.id)
-          .eq("member_role", "pending")
-          .maybeSingle();
+        // Check for pending request via backend
+        const pendingRes = await fetch(`/api/org-service/organizations/memberships?status=pending`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
         
-        if (pendingRequest) {
+        const pendingData = await pendingRes.json();
+        const hasPending = pendingData.organizations?.some(
+          (org: any) => org.id === courseData?.organization_id && org.status === 'pending'
+        );
+        
+        if (hasPending) {
           toast.warning(
             `Your join request to the organization is pending approval. You'll be able to enroll once approved.`,
             { duration: 5000 }
@@ -286,7 +328,16 @@ export default function CourseDetailPage() {
           );
           
           if (wantsToJoin) {
-            await sendJoinOrganizationRequest(session.user.id, courseData.organization_id);
+            // Send join request via backend
+            await fetch(`/api/org-service/organizations/${courseData?.organization_id}/join-request`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+              },
+              body: JSON.stringify({ user_id: userProfile.id }),
+            });
+            
             toast.info(
               "Join request sent! You'll be able to enroll once an admin approves your membership.",
               { duration: 5000 }
@@ -301,10 +352,10 @@ export default function CourseDetailPage() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
+          'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({
-          email: session.user.email,
+          email: userProfile.email || userProfile.username,
           course_class_id: offeringId,
         }),
       });

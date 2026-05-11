@@ -110,18 +110,6 @@ interface AssignmentData {
   status: "pending" | "submitted" | "graded" | "overdue";
 }
 
-interface CourseProgress {
-  total_lessons: number;
-  completed_lessons: number;
-  progress_percent: number;
-}
-
-interface VideoProgress {
-  lesson_id: number;
-  progress_percent: number;
-  last_position: number;
-}
-
 // Video Player Component
 function VideoPlayer({ 
   url, 
@@ -148,7 +136,6 @@ function VideoPlayer({
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSavedRef = useRef<number>(0);
 
-  // Handle YouTube videos
   const isYouTube = url?.includes("youtube.com") || url?.includes("youtu.be");
   const isVimeo = url?.includes("vimeo.com");
 
@@ -203,7 +190,6 @@ function VideoPlayer({
       const percent = (time / duration) * 100;
       setCurrentTime(time);
       
-      // Only update every 2 seconds to avoid too many API calls
       if (Math.abs(percent - lastSavedRef.current) >= 2) {
         const roundedPercent = Math.floor(percent);
         setProgressPercent(roundedPercent);
@@ -211,7 +197,6 @@ function VideoPlayer({
         lastSavedRef.current = percent;
       }
       
-      // Mark as complete when 90% watched
       if (percent >= 90 && percent < 100) {
         onComplete?.();
       }
@@ -221,7 +206,6 @@ function VideoPlayer({
   const handleLoadedMetadata = () => {
     if (videoRef.current) {
       setDuration(videoRef.current.duration);
-      // Restore progress position
       if (initialProgress > 0 && initialProgress < 100) {
         const seekTime = (initialProgress / 100) * videoRef.current.duration;
         videoRef.current.currentTime = seekTime;
@@ -263,7 +247,6 @@ function VideoPlayer({
     hideControls();
   };
 
-  // YouTube embed
   if (isYouTube) {
     const videoId = url.split("v=")[1]?.split("&")[0] || url.split("youtu.be/")[1]?.split("?")[0];
     return (
@@ -279,7 +262,6 @@ function VideoPlayer({
     );
   }
 
-  // Vimeo embed
   if (isVimeo) {
     const videoId = url.split("/").pop()?.split("?")[0];
     return (
@@ -295,7 +277,6 @@ function VideoPlayer({
     );
   }
 
-  // Custom video player for direct MP4/etc
   return (
     <div 
       className="relative group bg-black rounded-lg overflow-hidden"
@@ -313,13 +294,11 @@ function VideoPlayer({
         onClick={handlePlayPause}
       />
       
-      {/* Custom Controls */}
       <div 
         className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4 transition-opacity duration-300 ${
           showControls ? "opacity-100" : "opacity-0"
         }`}
       >
-        {/* Progress Bar */}
         <div className="flex items-center gap-2 mb-3">
           <span className="text-white text-xs">{formatTime(currentTime)}</span>
           <input
@@ -333,7 +312,6 @@ function VideoPlayer({
           <span className="text-white text-xs">{formatTime(duration)}</span>
         </div>
         
-        {/* Control Buttons */}
         <div className="flex items-center gap-4">
           <button onClick={handlePlayPause} className="text-white hover:text-purple-400 transition-colors">
             {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
@@ -359,7 +337,6 @@ function VideoPlayer({
           </button>
         </div>
         
-        {/* Progress Indicator */}
         {progressPercent > 0 && progressPercent < 100 && (
           <div className="mt-2 text-xs text-purple-400">
             {progressPercent}% watched
@@ -412,7 +389,6 @@ function QuizComponent({
   const questions = quizData?.questions || [];
   const passingScore = quizData?.passing_score || 70;
 
-  // Timer effect
   useEffect(() => {
     if (!timeRemaining || submitted || timeRemaining <= 0) return;
 
@@ -473,7 +449,6 @@ function QuizComponent({
   };
 
   const handleSubmit = async () => {
-    // Check if all questions answered
     const allAnswered = questions.every((q: any) => answers[q.id]);
     if (!allAnswered) {
       toast.error("Please answer all questions before submitting");
@@ -530,7 +505,6 @@ function QuizComponent({
           <Progress value={score} className="h-3" />
         </div>
 
-        {/* Review answers */}
         <div className="space-y-4">
           <h4 className="font-semibold text-white">Review Answers</h4>
           {questions.map((question: any, idx: number) => {
@@ -577,7 +551,6 @@ function QuizComponent({
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex justify-between items-center pb-4 border-b border-gray-800">
         <div>
           <p className="text-sm text-gray-400">Quiz</p>
@@ -592,7 +565,6 @@ function QuizComponent({
         )}
       </div>
 
-      {/* Questions */}
       <div className="space-y-8">
         {questions.map((question: any, idx: number) => (
           <div key={question.id} className="space-y-4">
@@ -601,7 +573,6 @@ function QuizComponent({
               <span className="text-sm text-gray-400 ml-2">({question.points || 10} pts)</span>
             </h3>
 
-            {/* Single Choice */}
             {question.type === "single_choice" && question.options && (
               <div className="space-y-2">
                 {question.options.map((option: string, optIdx: number) => (
@@ -627,7 +598,6 @@ function QuizComponent({
               </div>
             )}
 
-            {/* Multiple Choice */}
             {question.type === "multiple_choice" && question.options && (
               <div className="space-y-2">
                 {question.options.map((option: string, optIdx: number) => (
@@ -651,7 +621,6 @@ function QuizComponent({
               </div>
             )}
 
-            {/* True/False */}
             {question.type === "true_false" && (
               <div className="flex gap-4">
                 <label
@@ -694,7 +663,6 @@ function QuizComponent({
         ))}
       </div>
 
-      {/* Submit Button */}
       <div className="flex justify-end pt-4 border-t border-gray-800">
         <GlowButton onClick={handleSubmit} isLoading={submitting}>
           Submit Quiz
@@ -704,7 +672,7 @@ function QuizComponent({
   );
 }
 
-// Assignment Submission Component
+// Assignment Submission Component - Refactored to use backend API
 function AssignmentSubmission({ 
   assignment, 
   lessonId, 
@@ -720,34 +688,43 @@ function AssignmentSubmission({
   const [file, setFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const supabase = getSupabaseBrowserClient();
+
+  const getAuthToken = async () => {
+    const supabase = getSupabaseBrowserClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token;
+  };
 
   const handleFileUpload = async (selectedFile: File) => {
     setFile(selectedFile);
     setUploading(true);
     
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not authenticated");
+      const token = await getAuthToken();
+      if (!token) throw new Error("Not authenticated");
 
-      const fileExt = selectedFile.name.split(".").pop();
-      const fileName = `${user.id}/${lessonId}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
-      const filePath = `submissions/${fileName}`;
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+      formData.append('assignment_id', assignment.id.toString());
 
-      const { error: uploadError } = await supabase.storage
-        .from("submissions")
-        .upload(filePath, selectedFile);
+      const response = await fetch('/api/auth-service/upload-submission', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+        body: formData,
+      });
 
-      if (uploadError) throw uploadError;
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Upload failed');
+      }
 
-      const { data: { publicUrl } } = supabase.storage
-        .from("submissions")
-        .getPublicUrl(filePath);
-
+      const data = await response.json();
       setFile(null);
       toast.success("File uploaded successfully!");
       
-      await submitAssignment(publicUrl, textContent);
+      await submitAssignment(data.file_url, textContent);
       
     } catch (error: any) {
       console.error("Error uploading file:", error);
@@ -764,40 +741,48 @@ function AssignmentSubmission({
     }
 
     setSubmitting(true);
+    
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not authenticated");
+      const token = await getAuthToken();
+      if (!token) throw new Error("Not authenticated");
 
-      if (assignment.submission) {
-        // Update existing submission
-        const { error } = await supabase
-          .from("submissions")
-          .update({
-            content_url: fileUrl || assignment.submission.content_url,
-            text_content: content || assignment.submission.text_content,
-            submitted_at: new Date().toISOString(),
-          })
-          .eq("id", assignment.submission.id);
-        
-        if (error) throw error;
-        toast.success("Assignment updated successfully!");
-      } else {
-        // Create new submission
-        const { error } = await supabase
-          .from("submissions")
-          .insert({
-            assignment_id: assignment.id,
-            user_id: user.id,
-            content_url: fileUrl || null,
-            text_content: content || null,
-            submitted_at: new Date().toISOString(),
-          });
-        
-        if (error) throw error;
-        toast.success("Assignment submitted successfully!");
-      }
+      let response;
       
-      onSubmitted();
+      if (assignment.submission) {
+        response = await fetch(`/api/org-service/submissions/${assignment.submission.id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            text_content: content || null,
+            content_url: fileUrl || null,
+          }),
+        });
+      } else {
+        response = await fetch('/api/org-service/submissions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            assignment_id: assignment.id,
+            text_content: content || null,
+            file_url: fileUrl || null,
+          }),
+        });
+      }
+
+      if (!response?.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Submission failed');
+      }
+
+      toast.success(assignment.submission ? "Assignment updated!" : "Assignment submitted!");
+      onSubmitted?.();
+      
     } catch (error: any) {
       console.error("Error submitting assignment:", error);
       toast.error(error.message || "Failed to submit assignment");
@@ -963,7 +948,6 @@ function AssignmentSubmission({
 }
 
 // Sidebar Component
-// Update SidebarProps interface
 interface SidebarProps {
   course: CourseData;
   modules: ModuleData[];
@@ -975,12 +959,11 @@ interface SidebarProps {
   classMemberId: number | null;
   userReview: any;
   onRateClick: () => void;
-  averageRating: number;  // Add this
-  courseReviews: any[];   // Add this for the count
-  dashboardSidebarCollapsed: boolean;  // ADD THIS
+  averageRating: number;
+  courseReviews: any[];
+  dashboardSidebarCollapsed: boolean;
 }
 
-// Sidebar Component - Updated with Course Info Footer
 function Sidebar({ 
   course, 
   modules, 
@@ -992,8 +975,8 @@ function Sidebar({
   classMemberId,
   userReview,
   onRateClick,
-  averageRating,  // Add this
-  courseReviews,  // Add this
+  averageRating,
+  courseReviews,
   dashboardSidebarCollapsed 
 }: SidebarProps) {
   const [expandedModules, setExpandedModules] = useState<Set<number>>(new Set(modules.map(m => m.id)));
@@ -1012,7 +995,6 @@ function Sidebar({
     <div className={`fixed top-16 bottom-0 z-20 bg-gray-900 border-r border-gray-800 transition-all duration-300 flex flex-col ${
       isCollapsed ? "w-16" : "w-80"
     } ${dashboardSidebarCollapsed ? "left-16" : "left-64"}`}>
-      {/* Header - Course Title & Progress */}
       <div className="p-4 border-b border-gray-800">
         {!isCollapsed && (
           <div className="mb-3">
@@ -1026,24 +1008,20 @@ function Sidebar({
             </div>
           </div>
         )}
-        <button
-          onClick={onToggleCollapse}
+        <button          onClick={onToggleCollapse}
           className={`p-2 rounded-lg hover:bg-gray-800 transition-colors ${isCollapsed ? 'mx-auto' : ''}`}
         >
           {isCollapsed ? <ChevronRight className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
         </button>
       </div>
 
-      {/* Course Content - Scrollable Area */}
       <div className="flex-1 overflow-y-auto p-2 space-y-4">
-        {/* Curriculum Section */}
         <div className="space-y-2">
           {!isCollapsed && (
             <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-2">Curriculum</h3>
           )}
           {modules.map((module) => (
             <div key={module.id} className="space-y-1">
-              {/* Module Header */}
               <button
                 onClick={() => toggleModule(module.id)}
                 className={`w-full flex items-center gap-2 p-2 rounded-lg hover:bg-gray-800 transition-colors ${
@@ -1065,7 +1043,6 @@ function Sidebar({
                 )}
               </button>
 
-              {/* Module Content */}
               {expandedModules.has(module.id) && !isCollapsed && (
                 <div className="ml-6 space-y-1">
                   {module.classes.map((classItem) => (
@@ -1114,10 +1091,8 @@ function Sidebar({
         </div>
       </div>
 
-      {/* Footer Section - Course Info & Actions */}
       {!isCollapsed && (
         <div className="border-t border-gray-800 p-4 space-y-4">
-          {/* Instructor Info */}
           <div className="flex items-center gap-3">
             <Avatar className="w-10 h-10">
               <AvatarFallback className="bg-purple-600 text-white">
@@ -1130,7 +1105,6 @@ function Sidebar({
             </div>
           </div>
 
-          {/* Rating Section */}
           <div className="space-y-2">
             {userReview ? (
               <div className="flex items-center justify-between">
@@ -1158,7 +1132,6 @@ function Sidebar({
             )}
           </div>
 
-          {/* Course Stats (Optional) */}
           {courseReviews.length > 0 && (
             <div className="pt-2 border-t border-gray-800">
               <div className="flex items-center justify-between text-xs">
@@ -1204,8 +1177,8 @@ export default function CourseLearnPage() {
   const [classMemberId, setClassMemberId] = useState<number | null>(null);
   const [overallProgress, setOverallProgress] = useState(0);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [dashboardSidebarCollapsed, setDashboardSidebarCollapsed] = useState(false); // ADD THIS - missing!
-  const [expandedModules, setExpandedModules] = useState<Set<number>>(new Set()); // ADD THIS - miss
+  const [dashboardSidebarCollapsed, setDashboardSidebarCollapsed] = useState(false);
+  const [expandedModules, setExpandedModules] = useState<Set<number>>(new Set());
   const [activeTab, setActiveTab] = useState<"content" | "assignments" | "resources" | "discussion">("content");
   const [user, setUser] = useState<any>(null);
   const [courseReviews, setCourseReviews] = useState<any[]>([]);
@@ -1218,7 +1191,232 @@ export default function CourseLearnPage() {
   const [reviewText, setReviewText] = useState("");
   const [submittingRating, setSubmittingRating] = useState(false);
 
-  // Listen for dashboard sidebar state changes
+  // ========== HELPER FUNCTIONS ==========
+  const getAuthToken = async () => {
+    const supabase = getSupabaseBrowserClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token;
+  };
+
+  const apiRequest = async (url: string, options: RequestInit = {}) => {
+    const token = await getAuthToken();
+    if (!token) throw new Error("Not authenticated");
+    
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        ...options.headers,
+      },
+    });
+    
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: response.statusText }));
+      throw new Error(error.error || `Request failed: ${response.status}`);
+    }
+    
+    return response.json();
+  };
+
+  const getCurrentUserProfile = async () => {
+    return apiRequest('/api/auth-service/profile');
+  };
+
+  // ========== LOAD DATA ==========
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const userProfile = await getCurrentUserProfile();
+      if (!userProfile) {
+        router.push("/login");
+        return;
+      }
+      setUser(userProfile);
+
+      const courseDetail = await apiRequest(`/api/org-service/courses/${courseId}/detail`);
+      
+      if (!courseDetail.course) {
+        toast.error("Course not found");
+        router.push(`/courses/${courseId}`);
+        return;
+      }
+
+      let cmId = courseDetail.class_member_id;
+
+      if (!cmId && courseDetail.course.created_by === userProfile.id) {
+        console.log("Course creator accessing without enrollment");
+        cmId = -1;
+      }
+
+      if (!cmId) {
+        toast.error("You are not enrolled in this course");
+        router.push(`/courses/${courseId}`);
+        return;
+      }
+      setClassMemberId(cmId);
+
+      const progressMap = new Map();
+      const rawModules = courseDetail.modules || [];
+
+      for (const module of rawModules) {
+        for (const classItem of module.classes || []) {
+          for (const lesson of classItem.lessons || []) {
+            try {
+              const progress = await apiRequest(`/api/org-service/lesson-progress?lesson_id=${lesson.id}&class_member_id=${cmId}`);
+              if (progress && progress.status) {
+                progressMap.set(lesson.id, {
+                  status: progress.status,
+                  progress_percent: progress.progress_percent || 0,
+                });
+              }
+            } catch (e) {
+              // No progress record yet
+            }
+          }
+        }
+      }
+
+      const reviews = courseDetail.reviews || [];
+      setCourseReviews(reviews);
+      if (reviews.length > 0) {
+        const avg = reviews.reduce((sum: number, r: any) => sum + r.rating, 0) / reviews.length;
+        setAverageRating(avg);
+      }
+      const userReviewData = reviews.find((r: any) => r.user?.id === userProfile.id);
+      setUserReview(userReviewData);
+
+      let totalLessons = 0;
+      let completedLessons = 0;
+
+      const modulesWithProgress: ModuleData[] = rawModules.map((module: any) => {
+        const classesWithProgress: ClassData[] = (module.classes || []).map((classItem: any) => {
+          const lessonsWithProgress: LessonData[] = (classItem.lessons || []).map((lesson: any) => {
+            const progress = progressMap.get(lesson.id);
+            const isCompleted = progress?.status === "completed";
+
+            totalLessons++;
+            if (isCompleted) completedLessons++;
+
+            let assignments: AssignmentData[] = [];
+            if (lesson.assignments && lesson.assignments.length > 0) {
+              assignments = lesson.assignments.map((assignment: any) => {
+                let status: AssignmentData["status"] = "pending";
+                if (assignment.submission) {
+                  status = assignment.submission.grade !== null ? "graded" : "submitted";
+                } else if (assignment.due_at && new Date(assignment.due_at) < new Date()) {
+                  status = "overdue";
+                }
+                return {
+                  id: assignment.id,
+                  title: assignment.title,
+                  description: assignment.description || "",
+                  due_at: assignment.due_at,
+                  points: assignment.points,
+                  submission: assignment.submission,
+                  status,
+                };
+              });
+            }
+
+            return {
+              id: lesson.id,
+              title: lesson.title,
+              content_type: lesson.content_type,
+              content_url: lesson.content_url,
+              content_json: lesson.content_json,
+              duration_seconds: lesson.duration_seconds,
+              order_index: lesson.order_index,
+              is_free_preview: lesson.is_free_preview,
+              is_completed: isCompleted,
+              progress_percent: progress?.progress_percent || 0,
+              assignments,
+            };
+          }).sort((a, b) => a.order_index - b.order_index);
+
+          const completedInClass = lessonsWithProgress.filter(l => l.is_completed).length;
+          const classProgress = lessonsWithProgress.length > 0 ? (completedInClass / lessonsWithProgress.length) * 100 : 0;
+
+          return {
+            id: classItem.id,
+            title: classItem.title,
+            order_index: classItem.order_index,
+            lessons: lessonsWithProgress,
+            completed_count: completedInClass,
+            total_count: lessonsWithProgress.length,
+            progress: classProgress,
+          };
+        }).sort((a, b) => a.order_index - b.order_index);
+
+        const completedInModule = classesWithProgress.reduce((sum, c) => sum + c.completed_count, 0);
+        const totalInModule = classesWithProgress.reduce((sum, c) => sum + c.total_count, 0);
+        const moduleProgress = totalInModule > 0 ? (completedInModule / totalInModule) * 100 : 0;
+
+        return {
+          id: module.id,
+          title: module.title,
+          order_index: module.order_index,
+          classes: classesWithProgress,
+          completed_count: completedInModule,
+          total_count: totalInModule,
+          progress: moduleProgress,
+        };
+      }).sort((a, b) => a.order_index - b.order_index);
+
+      setModules(modulesWithProgress);
+      setOverallProgress(totalLessons > 0 ? (completedLessons / totalLessons) * 100 : 0);
+
+      setCourse({
+        id: courseDetail.course.id,
+        title: courseDetail.course.title,
+        description: courseDetail.course.description || "",
+        thumbnail: courseDetail.course.thumbnail,
+        modules: modulesWithProgress,
+        organization_id: courseDetail.course.organization_id,
+        organization_name: courseDetail.course.organization_name,
+        instructor_name: courseDetail.course.instructor_name || "Instructor",
+        instructor_avatar: courseDetail.course.instructor_avatar,
+      });
+
+      let firstLesson: LessonData | null = null;
+      let firstLessonIndices = { moduleIndex: -1, classIndex: -1, lessonIndex: -1 };
+
+      for (let mIdx = 0; mIdx < modulesWithProgress.length; mIdx++) {
+        for (let cIdx = 0; cIdx < modulesWithProgress[mIdx].classes.length; cIdx++) {
+          for (let lIdx = 0; lIdx < modulesWithProgress[mIdx].classes[cIdx].lessons.length; lIdx++) {
+            const lesson = modulesWithProgress[mIdx].classes[cIdx].lessons[lIdx];
+            if (!lesson.is_completed) {
+              firstLesson = lesson;
+              firstLessonIndices = { moduleIndex: mIdx, classIndex: cIdx, lessonIndex: lIdx };
+              break;
+            }
+          }
+          if (firstLesson) break;
+        }
+        if (firstLesson) break;
+      }
+
+      if (firstLesson) {
+        setCurrentLesson(firstLesson);
+        setCurrentLessonIndex(firstLessonIndices);
+      } else if (modulesWithProgress[0]?.classes[0]?.lessons[0]) {
+        setCurrentLesson(modulesWithProgress[0].classes[0].lessons[0]);
+        setCurrentLessonIndex({ moduleIndex: 0, classIndex: 0, lessonIndex: 0 });
+      }
+
+    } catch (error) {
+      console.error("Error loading course:", error);
+      toast.error("Failed to load course");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ========== USE EFFECT ==========
+  useEffect(() => {
+    loadData();
+  }, [courseId, router]);
+
   useEffect(() => {
     const handleSidebarToggle = (event: CustomEvent) => {
       setDashboardSidebarCollapsed(event.detail.collapsed);
@@ -1226,7 +1424,6 @@ export default function CourseLearnPage() {
     
     window.addEventListener('sidebar-toggle', handleSidebarToggle as EventListener);
     
-    // Get initial state from localStorage
     const savedState = localStorage.getItem("sidebar_collapsed");
     if (savedState !== null) {
       setDashboardSidebarCollapsed(savedState === "true");
@@ -1237,244 +1434,7 @@ export default function CourseLearnPage() {
     };
   }, []);
 
-  // Load course data
-  useEffect(() => {
-
-    // Helper functions - add at the top after imports
-    const getAuthToken = async () => {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { session } } = await supabase.auth.getSession();
-      return session?.access_token;
-    };
-
-    const apiRequest = async (url: string, options: RequestInit = {}) => {
-      const token = await getAuthToken();
-      if (!token) throw new Error("Not authenticated");
-      
-      const response = await fetch(url, {
-        ...options,
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          ...options.headers,
-        },
-      });
-      
-      if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: response.statusText }));
-        throw new Error(error.error || `Request failed: ${response.status}`);
-      }
-      
-      return response.json();
-    };
-
-    const getCurrentUserProfile = async () => {
-      return apiRequest('/api/auth-service/profile');
-    };
-
-    // Replace the entire loadData function with this:
-    const loadData = async () => {
-      setLoading(true);
-      try {
-        // Get current user profile from backend
-        const userProfile = await getCurrentUserProfile();
-        if (!userProfile) {
-          router.push("/login");
-          return;
-        }
-        setUser(userProfile);
-
-        // Get course details from backend
-        const courseDetail = await apiRequest(`/api/org-service/courses/${courseId}/detail`);
-        
-        if (!courseDetail.course) {
-          toast.error("Course not found");
-          router.push(`/courses/${courseId}`);
-          return;
-        }
-
-        // Get class member ID directly from the API response
-        let cmId = courseDetail.class_member_id;
-
-        // If no class member found, check if user is course creator
-        if (!cmId && courseDetail.course.created_by === userProfile.id) {
-          console.log("Course creator accessing without enrollment");
-          cmId = -1; // Special value for creator
-        }
-
-        if (!cmId) {
-          toast.error("You are not enrolled in this course");
-          router.push(`/courses/${courseId}`);
-          return;
-        }
-        setClassMemberId(cmId);
-        console.log("Class member ID:", cmId);
-        console.log("Course class ID:", courseDetail.course_class_id);
-
-        // Get lesson progress for all lessons
-        const progressMap = new Map();
-        const rawModules = courseDetail.modules || [];
-
-        for (const module of rawModules) {
-          for (const classItem of module.classes || []) {
-            for (const lesson of classItem.lessons || []) {
-              try {
-                const progress = await apiRequest(`/api/org-service/lesson-progress?lesson_id=${lesson.id}&class_member_id=${cmId}`);
-                if (progress && progress.status) {
-                  progressMap.set(lesson.id, {
-                    status: progress.status,
-                    progress_percent: progress.progress_percent || 0,
-                  });
-                }
-              } catch (e) {
-                // No progress record yet
-              }
-            }
-          }
-        }
-
-        // Process course reviews
-        const reviews = courseDetail.reviews || [];
-        setCourseReviews(reviews);
-        if (reviews.length > 0) {
-          const avg = reviews.reduce((sum: number, r: any) => sum + r.rating, 0) / reviews.length;
-          setAverageRating(avg);
-        }
-        const userReviewData = reviews.find((r: any) => r.user?.id === userProfile.id);
-        setUserReview(userReviewData);
-
-        // Build module structure with progress
-        let totalLessons = 0;
-        let completedLessons = 0;
-
-        const modulesWithProgress: ModuleData[] = rawModules.map((module: any) => {
-          const classesWithProgress: ClassData[] = (module.classes || []).map((classItem: any) => {
-            const lessonsWithProgress: LessonData[] = (classItem.lessons || []).map((lesson: any) => {
-              const progress = progressMap.get(lesson.id);
-              const isCompleted = progress?.status === "completed";
-
-              totalLessons++;
-              if (isCompleted) completedLessons++;
-
-              let assignments: AssignmentData[] = [];
-              if (lesson.assignments && lesson.assignments.length > 0) {
-                assignments = lesson.assignments.map((assignment: any) => {
-                  let status: AssignmentData["status"] = "pending";
-                  if (assignment.submission) {
-                    status = assignment.submission.grade !== null ? "graded" : "submitted";
-                  } else if (assignment.due_at && new Date(assignment.due_at) < new Date()) {
-                    status = "overdue";
-                  }
-                  return {
-                    id: assignment.id,
-                    title: assignment.title,
-                    description: assignment.description || "",
-                    due_at: assignment.due_at,
-                    points: assignment.points,
-                    submission: assignment.submission,
-                    status,
-                  };
-                });
-              }
-
-              return {
-                id: lesson.id,
-                title: lesson.title,
-                content_type: lesson.content_type,
-                content_url: lesson.content_url,
-                content_json: lesson.content_json,
-                duration_seconds: lesson.duration_seconds,
-                order_index: lesson.order_index,
-                is_free_preview: lesson.is_free_preview,
-                is_completed: isCompleted,
-                progress_percent: progress?.progress_percent || 0,
-                assignments,
-              };
-            }).sort((a, b) => a.order_index - b.order_index);
-
-            const completedInClass = lessonsWithProgress.filter(l => l.is_completed).length;
-            const classProgress = lessonsWithProgress.length > 0 ? (completedInClass / lessonsWithProgress.length) * 100 : 0;
-
-            return {
-              id: classItem.id,
-              title: classItem.title,
-              order_index: classItem.order_index,
-              lessons: lessonsWithProgress,
-              completed_count: completedInClass,
-              total_count: lessonsWithProgress.length,
-              progress: classProgress,
-            };
-          }).sort((a, b) => a.order_index - b.order_index);
-
-          const completedInModule = classesWithProgress.reduce((sum, c) => sum + c.completed_count, 0);
-          const totalInModule = classesWithProgress.reduce((sum, c) => sum + c.total_count, 0);
-          const moduleProgress = totalInModule > 0 ? (completedInModule / totalInModule) * 100 : 0;
-
-          return {
-            id: module.id,
-            title: module.title,
-            order_index: module.order_index,
-            classes: classesWithProgress,
-            completed_count: completedInModule,
-            total_count: totalInModule,
-            progress: moduleProgress,
-          };
-        }).sort((a, b) => a.order_index - b.order_index);
-
-        setModules(modulesWithProgress);
-        setOverallProgress(totalLessons > 0 ? (completedLessons / totalLessons) * 100 : 0);
-
-        setCourse({
-          id: courseDetail.course.id,
-          title: courseDetail.course.title,
-          description: courseDetail.course.description || "",
-          thumbnail: courseDetail.course.thumbnail,
-          modules: modulesWithProgress,
-          organization_id: courseDetail.course.organization_id,
-          organization_name: courseDetail.course.organization_name,
-          instructor_name: courseDetail.course.instructor_name || "Instructor",
-          instructor_avatar: courseDetail.course.instructor_avatar,
-        });
-
-        // Find first incomplete lesson
-        let firstLesson: LessonData | null = null;
-        let firstLessonIndices = { moduleIndex: -1, classIndex: -1, lessonIndex: -1 };
-
-        for (let mIdx = 0; mIdx < modulesWithProgress.length; mIdx++) {
-          for (let cIdx = 0; cIdx < modulesWithProgress[mIdx].classes.length; cIdx++) {
-            for (let lIdx = 0; lIdx < modulesWithProgress[mIdx].classes[cIdx].lessons.length; lIdx++) {
-              const lesson = modulesWithProgress[mIdx].classes[cIdx].lessons[lIdx];
-              if (!lesson.is_completed) {
-                firstLesson = lesson;
-                firstLessonIndices = { moduleIndex: mIdx, classIndex: cIdx, lessonIndex: lIdx };
-                break;
-              }
-            }
-            if (firstLesson) break;
-          }
-          if (firstLesson) break;
-        }
-
-        if (firstLesson) {
-          setCurrentLesson(firstLesson);
-          setCurrentLessonIndex(firstLessonIndices);
-        } else if (modulesWithProgress[0]?.classes[0]?.lessons[0]) {
-          setCurrentLesson(modulesWithProgress[0].classes[0].lessons[0]);
-          setCurrentLessonIndex({ moduleIndex: 0, classIndex: 0, lessonIndex: 0 });
-        }
-
-      } catch (error) {
-        console.error("Error loading course:", error);
-        toast.error("Failed to load course");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadData();
-  }, [courseId, router]);
-
-  // Navigate to lesson
+  // ========== NAVIGATION FUNCTIONS ==========
   const navigateToLesson = (moduleIndex: number, classIndex: number, lessonIndex: number) => {
     const lesson = modules[moduleIndex]?.classes[classIndex]?.lessons[lessonIndex];
     if (lesson) {
@@ -1484,7 +1444,6 @@ export default function CourseLearnPage() {
     }
   };
 
-  // Navigate to next/previous lesson
   const navigateNextLesson = () => {
     if (!currentLessonIndex) return;
     
@@ -1492,25 +1451,21 @@ export default function CourseLearnPage() {
     const currentModule = modules[moduleIndex];
     const currentClass = currentModule?.classes[classIndex];
     
-    // Check next lesson in same class
     if (lessonIndex + 1 < currentClass.lessons.length) {
       navigateToLesson(moduleIndex, classIndex, lessonIndex + 1);
       return;
     }
     
-    // Check next class in same module
     if (classIndex + 1 < currentModule.classes.length) {
       navigateToLesson(moduleIndex, classIndex + 1, 0);
       return;
     }
     
-    // Check next module
     if (moduleIndex + 1 < modules.length) {
       navigateToLesson(moduleIndex + 1, 0, 0);
       return;
     }
     
-    // Course completed
     toast.success("Congratulations! You've completed all lessons in this course!");
     router.push(`/courses/${courseId}`);
   };
@@ -1522,20 +1477,17 @@ export default function CourseLearnPage() {
     const currentModule = modules[moduleIndex];
     const currentClass = currentModule?.classes[classIndex];
     
-    // Check previous lesson in same class
     if (lessonIndex - 1 >= 0) {
       navigateToLesson(moduleIndex, classIndex, lessonIndex - 1);
       return;
     }
     
-    // Check previous class in same module
     if (classIndex - 1 >= 0) {
       const prevClass = currentModule.classes[classIndex - 1];
       navigateToLesson(moduleIndex, classIndex - 1, prevClass.lessons.length - 1);
       return;
     }
     
-    // Check previous module
     if (moduleIndex - 1 >= 0) {
       const prevModule = modules[moduleIndex - 1];
       const prevClass = prevModule.classes[prevModule.classes.length - 1];
@@ -1544,7 +1496,7 @@ export default function CourseLearnPage() {
     }
   };
 
-  // Update lesson progress
+  // ========== PROGRESS UPDATE ==========
   const updateLessonProgress = async (lessonId: number, progressPercent: number, status: "not_started" | "in_progress" | "completed") => {
     if (!classMemberId || !user) return;
 
@@ -1562,7 +1514,6 @@ export default function CourseLearnPage() {
         })
       });
 
-      // Update local state (same as your existing code)
       setModules(prevModules => {
         const newModules = [...prevModules];
         for (let mIdx = 0; mIdx < newModules.length; mIdx++) {
@@ -1606,6 +1557,7 @@ export default function CourseLearnPage() {
     }
   };
 
+  // ========== EVENT HANDLERS ==========
   const handleVideoProgress = (percent: number) => {
     if (currentLesson && currentLesson.content_type === "video" && !currentLesson.is_completed) {
       const roundedPercent = Math.floor(percent);
@@ -1625,7 +1577,6 @@ export default function CourseLearnPage() {
     if (currentLesson && currentLesson.content_type === "text" && !currentLesson.is_completed) {
       updateLessonProgress(currentLesson.id, 100, "completed");
       toast.success("Lesson marked as complete!");
-      // Auto-navigate to next lesson
       setTimeout(() => navigateNextLesson(), 1500);
     }
   };
@@ -1646,7 +1597,6 @@ export default function CourseLearnPage() {
   };
 
   const handleAssignmentSubmitted = () => {
-    // Refresh course data to get updated submission status
     window.location.reload();
   };
 
@@ -1672,7 +1622,6 @@ export default function CourseLearnPage() {
       setRatingValue(0);
       setReviewText("");
       
-      // Refresh reviews
       const courseDetail = await apiRequest(`/api/org-service/courses/${courseId}/detail`);
       const reviews = courseDetail.reviews || [];
       setCourseReviews(reviews);
@@ -1692,7 +1641,7 @@ export default function CourseLearnPage() {
     }
   };
 
-  // Get content type icon
+  // ========== HELPER FUNCTIONS FOR RENDER ==========
   const getContentIcon = (type: string) => {
     switch (type) {
       case "video": return <Video className="w-5 h-5" />;
@@ -1702,7 +1651,6 @@ export default function CourseLearnPage() {
     }
   };
 
-  // Get navigation info
   const hasNextLesson = (): boolean => {
     if (!currentLessonIndex) return false;
     let { moduleIndex, classIndex, lessonIndex } = currentLessonIndex;
@@ -1747,13 +1695,11 @@ export default function CourseLearnPage() {
 
   return (
     <div className="min-h-screen bg-gray-950">
-      {/* Lesson Sidebar - using the Sidebar component */}
       <Sidebar
         course={course}
         modules={modules}
         currentLessonId={currentLesson?.id ?? null}
         onLessonSelect={(lessonId) => {
-          // Find lesson indices
           for (let mIdx = 0; mIdx < modules.length; mIdx++) {
             for (let cIdx = 0; cIdx < modules[mIdx].classes.length; cIdx++) {
               for (let lIdx = 0; lIdx < modules[mIdx].classes[cIdx].lessons.length; lIdx++) {
@@ -1776,7 +1722,6 @@ export default function CourseLearnPage() {
         dashboardSidebarCollapsed={dashboardSidebarCollapsed}
       />
 
-      {/* Main Content - adjust margin based on both sidebars */}
       <div 
         className={`transition-all duration-300 ${
           sidebarCollapsed 
@@ -1784,7 +1729,6 @@ export default function CourseLearnPage() {
             : dashboardSidebarCollapsed ? "ml-96" : "ml-[576px]"
         }`}
       >
-        {/* Top Navigation Bar */}
         <div className="sticky top-0 z-10 bg-gray-900/95 backdrop-blur-sm border-b border-gray-800">
           <div className="flex items-center justify-between px-6 py-3">
             <Link href={`/courses/${courseId}`} className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors">
@@ -1802,9 +1746,7 @@ export default function CourseLearnPage() {
           </div>
         </div>
 
-        {/* Lesson Content */}
         <div className="max-w-5xl mx-auto px-6 py-8">
-          {/* Lesson Header */}
           <div className="mb-6">
             <h1 className="text-2xl font-bold text-white mb-2">{currentLesson.title}</h1>
             <div className="flex items-center gap-3 text-sm text-gray-400">
@@ -1833,7 +1775,6 @@ export default function CourseLearnPage() {
             </div>
           </div>
 
-          {/* Tabs */}
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)} className="mb-6">
             <TabsList className="bg-gray-800/50 border border-gray-700">
               <TabsTrigger value="content">Lesson Content</TabsTrigger>
@@ -1846,7 +1787,6 @@ export default function CourseLearnPage() {
               <TabsTrigger value="discussion">Discussion</TabsTrigger>
             </TabsList>
 
-            {/* Content Tab */}
             <TabsContent value="content" className="mt-6">
               <GlowCard>
                 <div className="p-6">
@@ -1878,7 +1818,6 @@ export default function CourseLearnPage() {
                 </div>
               </GlowCard>
 
-              {/* Navigation Buttons */}
               <div className="flex justify-between gap-4 mt-6">
                 <GlowButton
                   variant="outline"
@@ -1907,7 +1846,6 @@ export default function CourseLearnPage() {
               </div>
             </TabsContent>
 
-            {/* Assignments Tab */}
             {currentLesson.assignments && currentLesson.assignments.length > 0 && (
               <TabsContent value="assignments" className="mt-6">
                 <GlowCard>
@@ -1957,7 +1895,6 @@ export default function CourseLearnPage() {
               </TabsContent>
             )}
 
-            {/* Resources Tab */}
             <TabsContent value="resources" className="mt-6">
               <GlowCard>
                 <div className="p-6">
@@ -1993,7 +1930,6 @@ export default function CourseLearnPage() {
               </GlowCard>
             </TabsContent>
 
-            {/* Discussion Tab */}
             <TabsContent value="discussion" className="mt-6">
               <GlowCard>
                 <div className="p-6">
@@ -2013,7 +1949,6 @@ export default function CourseLearnPage() {
             </TabsContent>
           </Tabs>
 
-          {/* Rating Modal */}
           {showRatingModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80">
               <div className="bg-gray-900 rounded-xl max-w-md w-full mx-4 p-6 border border-gray-700">
@@ -2025,7 +1960,6 @@ export default function CourseLearnPage() {
                 </div>
                 
                 <div className="space-y-4">
-                  {/* Star Rating */}
                   <div className="flex justify-center gap-2 py-4">
                     {[1, 2, 3, 4, 5].map((star) => (
                       <button
@@ -2046,7 +1980,6 @@ export default function CourseLearnPage() {
                     ))}
                   </div>
                   
-                  {/* Review Text */}
                   <div>
                     <Label className="text-gray-300">Your Review (Optional)</Label>
                     <Textarea
