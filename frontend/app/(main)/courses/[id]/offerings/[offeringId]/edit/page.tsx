@@ -23,7 +23,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
-import { updateCourseClass, getCourseWithDetails } from "@/lib/supabase/courses";
+
+// Helper to get auth token
+const getAuthToken = async () => {
+  const supabase = getSupabaseBrowserClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token;
+};
 
 interface OfferingFormData {
   name: string;
@@ -32,6 +38,18 @@ interface OfferingFormData {
   end_date: string;
   max_students: number;
   status: "upcoming" | "ongoing" | "completed" | "cancelled";
+}
+
+interface OfferingData {
+  id: number;
+  name: string;
+  description: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  max_students: number | null;
+  status: string;
+  instructor_id: string | null;
+  course_id: number;
 }
 
 export default function EditOfferingPage() {
@@ -43,7 +61,8 @@ export default function EditOfferingPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [courseTitle, setCourseTitle] = useState("");
-  const [offering, setOffering] = useState<any>(null);
+  const [offering, setOffering] = useState<OfferingData | null>(null);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
   
   const [formData, setFormData] = useState<OfferingFormData>({
     name: "",
@@ -54,52 +73,70 @@ export default function EditOfferingPage() {
     status: "upcoming",
   });
   
+  // Get auth token on mount
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        setLoading(true);
-        const supabase = getSupabaseBrowserClient();
-        
-        // Get course details
-        const course = await getCourseWithDetails(courseId);
-        if (course) {
-          setCourseTitle(course.title);
-        }
-        
-        // Get offering details
-        const { data: offeringData, error: offeringError } = await supabase
-          .from("course_classes")
-          .select("*")
-          .eq("id", offeringId)
-          .single();
-        
-        if (offeringError) throw offeringError;
-        if (!offeringData) {
+    const initAuth = async () => {
+      const token = await getAuthToken();
+      setAccessToken(token);
+    };
+    initAuth();
+  }, []);
+
+  useEffect(() => {
+    if (accessToken) {
+      loadData();
+    }
+  }, [courseId, offeringId, router, accessToken]);
+  
+  const loadData = async () => {
+    if (!accessToken) return;
+    
+    try {
+      setLoading(true);
+      
+      // Get course details via backend API
+      const courseResponse = await fetch(`/api/org-service/courses/${courseId}/detail`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
+      
+      if (courseResponse.ok) {
+        const courseData = await courseResponse.json();
+        setCourseTitle(courseData.course?.title || "");
+      }
+      
+      // Get offering details via backend API
+      const offeringResponse = await fetch(`/api/org-service/course-classes/${offeringId}`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
+      
+      if (!offeringResponse.ok) {
+        if (offeringResponse.status === 404) {
           toast.error("Offering not found");
           router.push(`/courses/${courseId}/edit?tab=offerings`);
           return;
         }
-        
-        setOffering(offeringData);
-        setFormData({
-          name: offeringData.name || "",
-          description: offeringData.description || "",
-          start_date: offeringData.start_date || "",
-          end_date: offeringData.end_date || "",
-          max_students: offeringData.max_students || 0,
-          status: offeringData.status || "upcoming",
-        });
-        
-      } catch (error) {
-        console.error("Error loading offering:", error);
-        toast.error("Failed to load offering data");
-      } finally {
-        setLoading(false);
+        throw new Error('Failed to fetch offering');
       }
-    };
-    
-    loadData();
-  }, [courseId, offeringId, router]);
+      
+      const offeringData = await offeringResponse.json();
+      setOffering(offeringData);
+      
+      setFormData({
+        name: offeringData.name || "",
+        description: offeringData.description || "",
+        start_date: offeringData.start_date || "",
+        end_date: offeringData.end_date || "",
+        max_students: offeringData.max_students || 0,
+        status: offeringData.status || "upcoming",
+      });
+      
+    } catch (error) {
+      console.error("Error loading offering:", error);
+      toast.error("Failed to load offering data");
+    } finally {
+      setLoading(false);
+    }
+  };
   
   const validateForm = (): boolean => {
     if (!formData.name.trim()) {
@@ -119,18 +156,34 @@ export default function EditOfferingPage() {
   
   const handleSubmit = async () => {
     if (!validateForm()) return;
+    if (!accessToken) {
+      toast.error("Please log in");
+      return;
+    }
     
     setSaving(true);
     
     try {
-      await updateCourseClass(offeringId, {
-        name: formData.name,
-        description: formData.description || null,
-        start_date: formData.start_date || null,
-        end_date: formData.end_date || null,
-        max_students: formData.max_students || null,
-        status: formData.status,
+      const response = await fetch(`/api/org-service/course-classes/${offeringId}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: formData.name,
+          description: formData.description || null,
+          start_date: formData.start_date || null,
+          end_date: formData.end_date || null,
+          max_students: formData.max_students || null,
+          status: formData.status,
+        }),
       });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to update offering');
+      }
       
       toast.success("Offering updated successfully!");
       router.push(`/courses/${courseId}/edit?tab=offerings`);
@@ -148,30 +201,25 @@ export default function EditOfferingPage() {
       return;
     }
     
+    if (!accessToken) {
+      toast.error("Please log in");
+      return;
+    }
+    
     setSaving(true);
     
     try {
-      const supabase = getSupabaseBrowserClient();
+      const response = await fetch(`/api/org-service/course-classes/${offeringId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+        },
+      });
       
-      // Delete schedules first (cascade should handle this, but explicit for safety)
-      await supabase
-        .from("class_schedules")
-        .delete()
-        .eq("course_class_id", offeringId);
-      
-      // Delete class members
-      await supabase
-        .from("class_members")
-        .delete()
-        .eq("course_class_id", offeringId);
-      
-      // Delete the offering
-      const { error } = await supabase
-        .from("course_classes")
-        .delete()
-        .eq("id", offeringId);
-      
-      if (error) throw error;
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to delete offering');
+      }
       
       toast.success("Offering deleted successfully!");
       router.push(`/courses/${courseId}/edit?tab=offerings`);

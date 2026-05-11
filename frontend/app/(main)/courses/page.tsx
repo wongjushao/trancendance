@@ -1,7 +1,7 @@
 // frontend/app/(main)/courses/page.tsx
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Search, BookOpen, Users, Plus, Clock, ChevronRight, Eye, Edit, Archive, RotateCcw, AlertCircle, BarChart3, Badge, Building2 } from "lucide-react";
@@ -10,7 +10,7 @@ import { GlowButton } from "@/components/lms/GlowButton";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
-import { fetchUserRoleFromBackend, refreshUserRole } from "@/lib/role-api";
+import { fetchUserRoleFromBackend } from "@/lib/role-api";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -21,7 +21,14 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 
-// Types based on existing schema
+// Helper to get auth token
+const getAuthToken = async () => {
+  const supabase = getSupabaseBrowserClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token;
+};
+
+// Types
 interface Course {
   id: number;
   title: string;
@@ -32,16 +39,15 @@ interface Course {
   created_by: string;
   created_at: string;
   instructor_name?: string;
-  instructor_avatar?: string;
-  enrolled?: boolean;
-  progress?: number;
-  total_lessons?: number;
-  completed_lessons?: number;
+  thumbnail?: string;
+  level?: string;
+  category?: string;
 }
 
 interface EnrolledCourse extends Course {
   progress: number;
-  last_accessed?: string;
+  total_lessons?: number;
+  completed_lessons?: number;
 }
 
 interface UserRoleInfo {
@@ -60,9 +66,8 @@ export default function CoursesPage() {
   const [discoverCourses, setDiscoverCourses] = useState<Course[]>([]);
   const [createdCourses, setCreatedCourses] = useState<Course[]>([]);
   const [archivedCourses, setArchivedCourses] = useState<Course[]>([]);
-  const [userId, setUserId] = useState<string | null>(null);
   
-  // Role state from backend API
+  // Role state
   const [userRole, setUserRole] = useState<UserRoleInfo>({
     role: "student",
     organizationId: null,
@@ -70,15 +75,26 @@ export default function CoursesPage() {
     hasOrganization: false,
   });
   const [roleLoading, setRoleLoading] = useState(true);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
 
-  // Archive/Unarchive modal states
   const [archiveModalOpen, setArchiveModalOpen] = useState(false);
   const [unarchiveModalOpen, setUnarchiveModalOpen] = useState(false);
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
 
-  // Fetch user role from backend API
+  // Get auth token
+  useEffect(() => {
+    const initAuth = async () => {
+      const token = await getAuthToken();
+      setAccessToken(token);
+    };
+    initAuth();
+  }, []);
+
+  // Fetch user role
   useEffect(() => {
     const loadUserRole = async () => {
+      if (!accessToken) return;
+      
       setRoleLoading(true);
       try {
         const roleData = await fetchUserRoleFromBackend();
@@ -89,149 +105,86 @@ export default function CoursesPage() {
             organizationName: roleData.organizationName,
             hasOrganization: roleData.organizationId !== null,
           });
-          console.log("[CoursesPage] User role loaded:", roleData);
         } else {
-          // Fallback: try to get from session
-          const supabase = getSupabaseBrowserClient();
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session?.user) {
-            // Default to student if no role found
-            setUserRole({
-              role: "student",
-              organizationId: null,
-              organizationName: null,
-              hasOrganization: false,
-            });
-          }
+          setUserRole({
+            role: "student",
+            organizationId: null,
+            organizationName: null,
+            hasOrganization: false,
+          });
         }
       } catch (error) {
-        console.error("[CoursesPage] Error loading user role:", error);
+        console.error("Error loading user role:", error);
       } finally {
         setRoleLoading(false);
       }
     };
     
-    loadUserRole();
-  }, []);
-
-  // Fetch courses data
-  useEffect(() => {
-    if (!roleLoading) {
-      fetchData();
+    if (accessToken) {
+      loadUserRole();
     }
-  }, [roleLoading]);
+  }, [accessToken]);
 
-  const fetchData = async () => {
+  // Fetch data based on active tab
+  const fetchDataForTab = useCallback(async () => {
+    if (!accessToken) return;
+    
     setLoading(true);
     try {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
+      const headers = { 'Authorization': `Bearer ${accessToken}` };
       
-      if (!user) {
-        setLoading(false);
-        return;
-      }
-      
-      setUserId(user.id);
-      
-      // ========== Use backend API for enrolled courses ==========
-      const { data: { session } } = await supabase.auth.getSession();
-      const headers = {
-        'Authorization': `Bearer ${session?.access_token}`,
-        'Content-Type': 'application/json',
-      };
-      
-      // Fetch enrolled courses from backend
-      let enrolledCoursesData: EnrolledCourse[] = [];
-      try {
-        const enrolledResponse = await fetch('/api/org-service/users/me/enrolled-courses', { headers });
-        if (enrolledResponse.ok) {
-          const data = await enrolledResponse.json();
-          enrolledCoursesData = data.courses || [];
-          console.log("[CoursesPage] Enrolled courses from API:", enrolledCoursesData.length);
-        } else {
-          console.error("Failed to fetch enrolled courses:", enrolledResponse.status);
+      // Only fetch data for the active tab
+      if (activeTab === "my") {
+        const response = await fetch('/api/org-service/users/me/enrolled-courses', { headers });
+        if (response.ok) {
+          const data = await response.json();
+          setEnrolledCourses(data.courses || []);
         }
-      } catch (error) {
-        console.error("Error fetching enrolled courses:", error);
-      }
-      setEnrolledCourses(enrolledCoursesData);
-      
-      // Fetch discoverable courses from backend
-      let discoverCoursesData: Course[] = [];
-      try {
-        const discoverResponse = await fetch(`/api/org-service/users/me/discover-courses${searchQuery ? `?q=${encodeURIComponent(searchQuery)}` : ''}`, { headers });
-        if (discoverResponse.ok) {
-          const data = await discoverResponse.json();
-          discoverCoursesData = data.courses || [];
-          console.log("[CoursesPage] Discover courses from API:", discoverCoursesData.length);
-        } else {
-          console.error("Failed to fetch discover courses:", discoverResponse.status);
-        }
-      } catch (error) {
-        console.error("Error fetching discover courses:", error);
-      }
-      setDiscoverCourses(discoverCoursesData);
-      
-      // Fetch created courses from backend (only for teachers/admins)
-      if (userRole.role === "teacher" || userRole.role === "admin") {
-        try {
-          const createdResponse = await fetch('/api/org-service/users/me/created-courses', { headers });
-          if (createdResponse.ok) {
-            const data = await createdResponse.json();
-            setCreatedCourses(data.courses || []);
-            console.log("[CoursesPage] Created courses from API:", data.courses?.length);
-          }
-        } catch (error) {
-          console.error("Error fetching created courses:", error);
-        }
-        
-        // Fetch archived courses
-        try {
-          const archivedResponse = await fetch('/api/org-service/users/me/created-courses?include_archived=true', { headers });
-          if (archivedResponse.ok) {
-            const data = await archivedResponse.json();
-            const archived = data.courses?.filter((c: Course) => c.status === "archived") || [];
-            setArchivedCourses(archived);
-          }
-        } catch (error) {
-          console.error("Error fetching archived courses:", error);
+      } 
+      else if (activeTab === "discover") {
+        const url = `/api/org-service/users/me/discover-courses${searchQuery ? `?q=${encodeURIComponent(searchQuery)}` : ''}`;
+        const response = await fetch(url, { headers });
+        if (response.ok) {
+          const data = await response.json();
+          setDiscoverCourses(data.courses || []);
         }
       }
-      
+      else if (activeTab === "created" && (userRole.role === "teacher" || userRole.role === "admin")) {
+        const response = await fetch('/api/org-service/users/me/created-courses', { headers });
+        if (response.ok) {
+          const data = await response.json();
+          setCreatedCourses(data.courses || []);
+        }
+      }
+      else if (activeTab === "archived" && (userRole.role === "teacher" || userRole.role === "admin")) {
+        const response = await fetch('/api/org-service/users/me/created-courses?include_archived=true', { headers });
+        if (response.ok) {
+          const data = await response.json();
+          const archived = data.courses?.filter((c: Course) => c.status === "archived") || [];
+          setArchivedCourses(archived);
+        }
+      }
     } catch (error) {
-      console.error("Error fetching courses:", error);
+      console.error(`Error fetching ${activeTab} courses:`, error);
       toast.error("Failed to load courses");
     } finally {
       setLoading(false);
     }
-  };
+  }, [accessToken, activeTab, searchQuery, userRole.role]);
 
-  const getInstructorName = (createdBy: string, profileMap: Map<string, any>): string => {
-    const profile = profileMap.get(createdBy);
-    if (profile) {
-      const firstName = profile.first_name || "";
-      const lastName = profile.last_name || "";
-      if (firstName || lastName) return `${firstName} ${lastName}`.trim();
+  // Fetch when tab or search changes
+  useEffect(() => {
+    if (!roleLoading && accessToken) {
+      fetchDataForTab();
     }
-    return "Instructor";
-  };
-  
-  const getInstructorAvatar = (createdBy: string, profileMap: Map<string, any>): string | undefined => {
-    return profileMap.get(createdBy)?.avatar_url;
-  };
+  }, [fetchDataForTab, roleLoading]);
 
   const filterCourses = (courses: Course[]) => {
-    let filtered = courses;
-    
-    if (searchQuery) {
-      filtered = filtered.filter(course => 
-        course.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (course.description && course.description.toLowerCase().includes(searchQuery.toLowerCase()))
-      );
-    }
-    
-    return filtered;
+    if (!searchQuery) return courses;
+    return courses.filter(course => 
+      course.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (course.description && course.description.toLowerCase().includes(searchQuery.toLowerCase()))
+    );
   };
 
   const filteredDiscoverCourses = filterCourses(discoverCourses);
@@ -239,34 +192,11 @@ export default function CoursesPage() {
   const filteredCreatedCourses = filterCourses(createdCourses);
   const filteredArchivedCourses = filterCourses(archivedCourses);
 
-  const handleCreateCourse = async () => {
-    const supabase = getSupabaseBrowserClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    
-    if (!user) {
-      router.push('/login');
-      return;
-    }
-    
-    // Use the fetched userRole instead of roleData
+  const handleCreateCourse = () => {
     if (userRole.role === "teacher" || userRole.role === "admin") {
       router.push('/courses/create');
     } else {
-      // Check if user has any organization membership
-      const { data: memberships } = await supabase
-        .from('organization_members')
-        .select('organization_id')
-        .eq('user_id', user.id)
-        .in('member_role', ['admin', 'sub_admin', 'teacher'])
-        .limit(1);
-      
-      if (memberships && memberships.length > 0) {
-        // Refresh role and try again
-        await refreshUserRole();
-        router.push('/courses/create');
-      } else {
-        router.push('/organizations/propose');
-      }
+      toast.error("You need to be a teacher or admin to create courses");
     }
   };
 
@@ -283,27 +213,28 @@ export default function CoursesPage() {
   };
 
   const handleManageStudents = async (courseId: number) => {
-    const supabase = getSupabaseBrowserClient();
-    
     try {
-      const { data: offerings, error } = await supabase
-        .from('course_classes')
-        .select('id, name, status')
-        .eq('course_id', courseId)
-        .in('status', ['ongoing', 'upcoming'])
-        .order('start_date', { ascending: true })
-        .limit(1);
+      // Get course details including offerings
+      const response = await fetch(`/api/org-service/courses/${courseId}/detail`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
       
-      if (error) throw error;
-      
-      if (offerings && offerings.length > 0) {
-        router.push(`/courses/${courseId}/offerings/${offerings[0].id}/students`);
-      } else {
-        toast.error('No active course offerings found. Please create an offering first.');
-        const shouldCreate = confirm('Would you like to create an offering for this course?');
-        if (shouldCreate) {
-          router.push(`/courses/${courseId}/edit?tab=offerings`);
+      if (response.ok) {
+        const data = await response.json();
+        const offerings = data.course_classes || [];
+        const activeOffering = offerings.find((o: any) => o.status === 'ongoing' || o.status === 'upcoming');
+        
+        if (activeOffering) {
+          router.push(`/courses/${courseId}/offerings/${activeOffering.id}/students`);
+        } else {
+          toast.error('No active course offerings found. Please create an offering first.');
+          const shouldCreate = confirm('Would you like to create an offering for this course?');
+          if (shouldCreate) {
+            router.push(`/courses/${courseId}/edit?tab=offerings`);
+          }
         }
+      } else {
+        toast.error('Failed to load course offerings');
       }
     } catch (error) {
       console.error('Error fetching course offerings:', error);
@@ -315,19 +246,21 @@ export default function CoursesPage() {
     if (!selectedCourse) return;
     
     try {
-      const supabase = getSupabaseBrowserClient();
-      const { error } = await supabase
-        .from("courses")
-        .update({ status: "archived" })
-        .eq("id", selectedCourse.id);
+      const response = await fetch(`/api/org-service/courses/${selectedCourse.id}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ status: 'archived' })
+      });
       
-      if (error) throw error;
+      if (!response.ok) throw new Error('Failed to archive course');
       
       toast.success(`"${selectedCourse.title}" has been archived`);
       setArchiveModalOpen(false);
       setSelectedCourse(null);
-      
-      await fetchData();
+      await fetchDataForTab();
     } catch (error) {
       console.error("Error archiving course:", error);
       toast.error("Failed to archive course");
@@ -338,19 +271,21 @@ export default function CoursesPage() {
     if (!selectedCourse) return;
     
     try {
-      const supabase = getSupabaseBrowserClient();
-      const { error } = await supabase
-        .from("courses")
-        .update({ status: "draft" })
-        .eq("id", selectedCourse.id);
+      const response = await fetch(`/api/org-service/courses/${selectedCourse.id}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ status: 'draft' })
+      });
       
-      if (error) throw error;
+      if (!response.ok) throw new Error('Failed to restore course');
       
       toast.success(`"${selectedCourse.title}" has been restored`);
       setUnarchiveModalOpen(false);
       setSelectedCourse(null);
-      
-      await fetchData();
+      await fetchDataForTab();
       setActiveTab("created");
     } catch (error) {
       console.error("Error unarchiving course:", error);
@@ -623,13 +558,13 @@ export default function CoursesPage() {
                               Edit
                             </GlowButton>
                             <GlowButton 
-                              size="sm" 
-                              variant="primary"
-                              onClick={() => handleManageStudents(course.id)}
-                            >
-                              <Users className="w-4 h-4 mr-1" />
-                              Students
-                            </GlowButton>
+                            size="sm" 
+                            variant="primary"
+                            onClick={() => handleManageStudents(course.id)}
+                          >
+                            <Users className="w-4 h-4 mr-1" />
+                            Students
+                          </GlowButton>
                             <GlowButton 
                               size="sm" 
                               variant="ghost"

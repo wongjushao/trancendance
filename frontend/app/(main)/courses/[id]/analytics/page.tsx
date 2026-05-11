@@ -20,6 +20,14 @@ import {
 import { GlowCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
+import { toast } from "sonner";
+
+// Helper to get auth token
+const getAuthToken = async () => {
+  const supabase = getSupabaseBrowserClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token;
+};
 
 interface CourseAnalytics {
   // Course Info
@@ -47,7 +55,7 @@ interface CourseAnalytics {
   
   // Engagement
   total_views: number;
-  average_time_spent: number; // in minutes
+  average_time_spent: number;
   last_30_days_growth: number;
   
   // Recent Activity
@@ -63,263 +71,259 @@ export default function CourseAnalyticsPage() {
   const [loading, setLoading] = useState(true);
   const [analytics, setAnalytics] = useState<CourseAnalytics | null>(null);
   const [courseTitle, setCourseTitle] = useState("");
+  const [accessToken, setAccessToken] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchAnalytics();
-  }, [courseId]);
+    const initAuth = async () => {
+      const token = await getAuthToken();
+      setAccessToken(token);
+    };
+    initAuth();
+  }, []);
+
+  useEffect(() => {
+    if (accessToken) {
+      fetchAnalytics();
+    }
+  }, [courseId, accessToken]);
 
   const fetchAnalytics = async () => {
+    if (!accessToken) return;
+    
     setLoading(true);
     try {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { user } } = await supabase.auth.getUser();
+      // 1. Get course details from backend
+      const courseResponse = await fetch(`/api/org-service/courses/${courseId}/detail`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
       
-      if (!user) return;
+      if (!courseResponse.ok) {
+        throw new Error('Failed to fetch course details');
+      }
       
-      // 1. Get course details
-      const { data: course } = await supabase
-        .from("courses")
-        .select("id, title, status")
-        .eq("id", courseId)
-        .single();
-      
-      if (!course) return;
+      const courseData = await courseResponse.json();
+      const course = courseData.course;
       setCourseTitle(course.title);
       
-      // 2. Get all course offerings for this course
-      const { data: offerings } = await supabase
-        .from("course_classes")
-        .select("id")
-        .eq("course_id", courseId);
-      
-      const offeringIds = offerings?.map(o => o.id) || [];
-      
-      // 3. Get all students enrolled in this course (from class_members)
-      let allStudents: any[] = [];
+      // 2. Get enrolled students via backend
+      let totalStudents = 0;
       let completedStudents = 0;
       let totalProgress = 0;
+      let totalLessons = 0;
+      let lessonCompletions: Record<number, number> = {};
+      let recentEnrollments: { user_name: string; enrolled_at: string }[] = [];
+      
+      // Get students from class members (offering-based enrollment)
+      const offerings = courseData.course_classes || [];
+      const offeringIds = offerings.map((o: any) => o.id);
       
       if (offeringIds.length > 0) {
-        const { data: classMembers } = await supabase
-          .from("class_members")
-          .select("user_id, enrolled_at")
-          .in("course_class_id", offeringIds)
-          .eq("role", "student");
-        
-        allStudents = classMembers || [];
-        
-        // Get unique user IDs
-        const studentIds = [...new Set(allStudents.map(s => s.user_id))];
-        
-        // Get profiles for student names
-        const { data: profiles } = await supabase
-          .from("profiles")
-          .select("id, first_name, last_name")
-          .in("id", studentIds);
-        
-        const profileMap = new Map(profiles?.map(p => [p.id, p]) || []);
-        
-        // Get lesson progress for each student
-        const { data: modules } = await supabase
-          .from("modules")
-          .select("id")
-          .eq("course_id", courseId);
-        
-        const moduleIds = modules?.map(m => m.id) || [];
-        
-        let totalLessons = 0;
-        let allLessons: any[] = [];
-        
-        if (moduleIds.length > 0) {
-          const { data: classes } = await supabase
-            .from("classes")
-            .select("id")
-            .in("module_id", moduleIds);
-          
-          const classIds = classes?.map(c => c.id) || [];
-          
-          if (classIds.length > 0) {
-            const { data: lessons } = await supabase
-              .from("lessons")
-              .select("id, title")
-              .in("class_id", classIds);
-            
-            allLessons = lessons || [];
-            totalLessons = allLessons.length;
-          }
-        }
-        
-        // Calculate student progress
-        let lessonCompletions: Record<number, number> = {};
-        
-        for (const studentId of studentIds) {
-          const { data: progress } = await supabase
-            .from("lesson_progress")
-            .select("lesson_id, status")
-            .eq("user_id", studentId)
-            .eq("status", "completed");
-          
-          const completedLessons = progress?.length || 0;
-          const studentProgress = totalLessons > 0 ? (completedLessons / totalLessons) * 100 : 0;
-          totalProgress += studentProgress;
-          
-          if (studentProgress === 100) {
-            completedStudents++;
-          }
-          
-          // Track lesson completions
-          progress?.forEach(p => {
-            lessonCompletions[p.lesson_id] = (lessonCompletions[p.lesson_id] || 0) + 1;
+        // Fetch class members for all offerings
+        let allClassMembers: any[] = [];
+        for (const offeringId of offeringIds) {
+          const membersResponse = await fetch(`/api/org-service/course-classes/${offeringId}/students`, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
           });
-        }
-        
-        // Find most and least completed lessons
-        let mostCompleted = null;
-        let leastCompleted = null;
-        
-        for (const lesson of allLessons) {
-          const completions = lessonCompletions[lesson.id] || 0;
-          if (!mostCompleted || completions > mostCompleted.completions) {
-            mostCompleted = { id: lesson.id, title: lesson.title, completions };
-          }
-          if (!leastCompleted || completions < leastCompleted.completions) {
-            leastCompleted = { id: lesson.id, title: lesson.title, completions };
+          if (membersResponse.ok) {
+            const membersData = await membersResponse.json();
+            allClassMembers = [...allClassMembers, ...(membersData.students || [])];
           }
         }
         
-        // 4. Get assignment stats
-        const { data: assignments } = await supabase
-          .from("assignments")
-          .select("id, title")
-          .eq("course_id", courseId);
+        totalStudents = allClassMembers.length;
         
-        const totalAssignments = assignments?.length || 0;
-        let totalGrade = 0;
-        let gradedCount = 0;
-        let submissionsCount = 0;
-        
-        if (assignments && assignments.length > 0) {
-          const assignmentIds = assignments.map(a => a.id);
-          
-          const { data: submissions } = await supabase
-            .from("submissions")
-            .select("grade")
-            .in("assignment_id", assignmentIds);
-          
-          submissionsCount = submissions?.length || 0;
-          
-          const gradedSubmissions = submissions?.filter(s => s.grade !== null) || [];
-          gradedCount = gradedSubmissions.length;
-          
-          totalGrade = gradedSubmissions.reduce((sum, s) => sum + (s.grade || 0), 0);
-        }
-        
-        const averageGrade = gradedCount > 0 ? totalGrade / gradedCount : 0;
-        const pendingGrading = submissionsCount - gradedCount;
-        
-        // 5. Calculate average progress
-        const averageProgress = studentIds.length > 0 ? totalProgress / studentIds.length : 0;
-        
-        // 6. Get recent enrollments (last 30 days)
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-        
-        const recentEnrollments = allStudents
-          .filter(s => new Date(s.enrolled_at) >= thirtyDaysAgo)
-          .slice(0, 5)
-          .map(s => ({
-            user_name: profileMap.get(s.user_id)?.first_name || "User",
-            enrolled_at: new Date(s.enrolled_at).toLocaleDateString(),
-          }));
-        
-        // 7. Get recent submissions
-        let recentSubmissions: any[] = [];
-        if (assignments && assignments.length > 0) {
-          const assignmentIds = assignments.map(a => a.id);
-          
-          const { data: submissions } = await supabase
-            .from("submissions")
-            .select("user_id, assignment_id, submitted_at")
-            .in("assignment_id", assignmentIds)
-            .order("submitted_at", { ascending: false })
-            .limit(5);
-          
-          if (submissions) {
-            const submissionUserIds = [...new Set(submissions.map(s => s.user_id))];
-            const { data: submissionProfiles } = await supabase
-              .from("profiles")
-              .select("id, first_name, last_name")
-              .in("id", submissionUserIds);
-            
-            const submissionProfileMap = new Map(submissionProfiles?.map(p => [p.id, p]) || []);
-            
-            recentSubmissions = submissions.map(s => {
-              const assignment = assignments.find(a => a.id === s.assignment_id);
-              return {
-                user_name: submissionProfileMap.get(s.user_id)?.first_name || "User",
-                assignment_title: assignment?.title || "Assignment",
-                submitted_at: new Date(s.submitted_at).toLocaleDateString(),
-              };
+        // Get unique student IDs and their enrollment dates
+        const studentMap = new Map();
+        for (const member of allClassMembers) {
+          if (!studentMap.has(member.user_id)) {
+            studentMap.set(member.user_id, {
+              user_id: member.user_id,
+              enrolled_at: member.enrolled_at,
+              user_name: member.user?.first_name 
+                ? `${member.user.first_name} ${member.user.last_name || ''}`.trim()
+                : member.user?.username || 'Student'
             });
           }
         }
         
-        // 8. Calculate active students (progress > 0)
-        const activeStudents = studentIds.filter(id => {
-          // Simplified - in real implementation, check last_accessed_at
-          return true;
-        }).length;
+        // Get total lessons from course modules
+        const modules = courseData.modules || [];
+        for (const module of modules) {
+          for (const classItem of module.classes || []) {
+            totalLessons += (classItem.lessons || []).length;
+          }
+        }
         
-        setAnalytics({
-          course_id: course.id,
-          course_title: course.title,
-          course_status: course.status,
-          total_students: studentIds.length,
-          active_students: activeStudents,
-          completed_course: completedStudents,
-          average_progress: Math.round(averageProgress),
-          total_lessons: totalLessons,
-          average_lessons_completed: Math.round((averageProgress / 100) * totalLessons),
-          most_completed_lesson: mostCompleted,
-          least_completed_lesson: leastCompleted,
-          total_assignments: totalAssignments,
-          average_grade: Math.round(averageGrade),
-          submissions_count: submissionsCount,
-          pending_grading: pendingGrading,
-          total_views: 0, // Would need tracking table
-          average_time_spent: 0, // Would need tracking table
-          last_30_days_growth: 0, // Compare enrollments from previous 30 days
-          recent_enrollments: recentEnrollments,
-          recent_submissions: recentSubmissions,
-        });
-      } else {
-        // No offerings yet
-        setAnalytics({
-          course_id: course.id,
-          course_title: course.title,
-          course_status: course.status,
-          total_students: 0,
-          active_students: 0,
-          completed_course: 0,
-          average_progress: 0,
-          total_lessons: 0,
-          average_lessons_completed: 0,
-          most_completed_lesson: null,
-          least_completed_lesson: null,
-          total_assignments: 0,
-          average_grade: 0,
-          submissions_count: 0,
-          pending_grading: 0,
-          total_views: 0,
-          average_time_spent: 0,
-          last_30_days_growth: 0,
-          recent_enrollments: [],
-          recent_submissions: [],
-        });
+        // Get lesson progress for all students via backend
+        const studentIds = Array.from(studentMap.keys());
+        
+        for (const studentId of studentIds) {
+          // Get class member ID for this student
+          const classMember = allClassMembers.find(m => m.user_id === studentId);
+          if (!classMember) continue;
+          
+          // Get lesson progress for this student (batch API call would be better)
+          const progressResponse = await fetch(`/api/org-service/lesson-progress?lesson_id=all&class_member_id=${classMember.id}`, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+          });
+          
+          if (progressResponse.ok) {
+            const progressData = await progressResponse.json();
+            const completedCount = progressData.filter((p: any) => p.status === 'completed').length;
+            const studentProgress = totalLessons > 0 ? (completedCount / totalLessons) * 100 : 0;
+            totalProgress += studentProgress;
+            
+            if (studentProgress === 100) {
+              completedStudents++;
+            }
+            
+            // Track lesson completions
+            progressData.forEach((p: any) => {
+              if (p.status === 'completed') {
+                lessonCompletions[p.lesson_id] = (lessonCompletions[p.lesson_id] || 0) + 1;
+              }
+            });
+          }
+        }
+        
+        // Get recent enrollments (last 30 days)
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        
+        recentEnrollments = Array.from(studentMap.values())
+          .filter(s => new Date(s.enrolled_at) >= thirtyDaysAgo)
+          .slice(0, 5)
+          .map(s => ({
+            user_name: s.user_name,
+            enrolled_at: new Date(s.enrolled_at).toLocaleDateString(),
+          }));
       }
+      
+      // Get lessons list to map IDs to titles
+      let allLessons: { id: number; title: string }[] = [];
+      const modules = (await fetch(`/api/org-service/courses/${courseId}/modules?include_lessons=true`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      }).then(res => res.ok ? res.json() : [])) || [];
+      
+      for (const module of modules) {
+        for (const classItem of module.classes || []) {
+          for (const lesson of classItem.lessons || []) {
+            allLessons.push({ id: lesson.id, title: lesson.title });
+          }
+        }
+      }
+      
+      // Find most and least completed lessons
+      let mostCompleted = null;
+      let leastCompleted = null;
+      
+      for (const lesson of allLessons) {
+        const completions = lessonCompletions[lesson.id] || 0;
+        if (!mostCompleted || completions > mostCompleted.completions) {
+          mostCompleted = { id: lesson.id, title: lesson.title, completions };
+        }
+        if (!leastCompleted || completions < leastCompleted.completions) {
+          leastCompleted = { id: lesson.id, title: lesson.title, completions };
+        }
+      }
+      
+      // 3. Get assignment stats from course detail
+      const assignments = courseData.assignments || [];
+      const totalAssignments = assignments.length;
+      
+      let submissionsCount = 0;
+      let gradedCount = 0;
+      let totalGrade = 0;
+      
+      // Fetch submissions for each assignment
+      for (const assignment of assignments) {
+        const submissionsResponse = await fetch(`/api/org-service/assignments/${assignment.id}/submissions`, {
+          headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
+        
+        if (submissionsResponse.ok) {
+          const submissionsData = await submissionsResponse.json();
+          const submissions = submissionsData.submissions || [];
+          submissionsCount += submissions.length;
+          
+          const gradedSubmissions = submissions.filter((s: any) => s.grade !== null);
+          gradedCount += gradedSubmissions.length;
+          
+          for (const sub of gradedSubmissions) {
+            totalGrade += sub.grade || 0;
+          }
+        }
+      }
+      
+      const averageGrade = gradedCount > 0 ? totalGrade / gradedCount : 0;
+      const pendingGrading = submissionsCount - gradedCount;
+      const averageProgress = totalStudents > 0 ? totalProgress / totalStudents : 0;
+      
+      // 4. Get recent submissions
+      let recentSubmissions: { user_name: string; assignment_title: string; submitted_at: string }[] = [];
+      
+      // Get all assignments with their submissions
+      for (const assignment of assignments.slice(0, 5)) {
+        const submissionsResponse = await fetch(`/api/org-service/assignments/${assignment.id}/submissions?limit=3`, {
+          headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
+        
+        if (submissionsResponse.ok) {
+          const submissionsData = await submissionsResponse.json();
+          const submissions = submissionsData.submissions || [];
+          
+          for (const submission of submissions) {
+            // Get user profile
+            const profileResponse = await fetch(`/api/auth-service/profile/public/${submission.user_id}`, {
+              headers: { 'Authorization': `Bearer ${accessToken}` }
+            });
+            
+            let userName = "Student";
+            if (profileResponse.ok) {
+              const profile = await profileResponse.json();
+              userName = profile.first_name 
+                ? `${profile.first_name} ${profile.last_name || ''}`.trim()
+                : profile.username || userName;
+            }
+            
+            recentSubmissions.push({
+              user_name: userName,
+              assignment_title: assignment.title,
+              submitted_at: new Date(submission.submitted_at).toLocaleDateString(),
+            });
+          }
+        }
+      }
+      
+      // Limit to 5 most recent
+      recentSubmissions = recentSubmissions.slice(0, 5);
+      
+      setAnalytics({
+        course_id: course.id,
+        course_title: course.title,
+        course_status: course.status,
+        total_students: totalStudents,
+        active_students: totalStudents, // Would need last_accessed_at for accurate count
+        completed_course: completedStudents,
+        average_progress: Math.round(averageProgress),
+        total_lessons: totalLessons,
+        average_lessons_completed: Math.round((averageProgress / 100) * totalLessons),
+        most_completed_lesson: mostCompleted,
+        least_completed_lesson: leastCompleted,
+        total_assignments: totalAssignments,
+        average_grade: Math.round(averageGrade),
+        submissions_count: submissionsCount,
+        pending_grading: pendingGrading,
+        total_views: 0,
+        average_time_spent: 0,
+        last_30_days_growth: 0,
+        recent_enrollments: recentEnrollments,
+        recent_submissions: recentSubmissions,
+      });
       
     } catch (error) {
       console.error("Error fetching analytics:", error);
+      toast.error("Failed to load analytics data");
     } finally {
       setLoading(false);
     }
@@ -339,7 +343,7 @@ export default function CourseAnalyticsPage() {
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-4">
-            <Link href={`/courses/`}>
+            <Link href={`/courses/${courseId}`}>
               <GlowButton variant="ghost" size="sm">
                 <ArrowLeft className="w-4 h-4 mr-2" />
                 Back to Course

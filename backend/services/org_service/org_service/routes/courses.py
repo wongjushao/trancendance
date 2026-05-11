@@ -9,6 +9,7 @@ from sqlalchemy import func, or_, and_
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from werkzeug.utils import secure_filename
 from supabase import create_client
+from backend.services.org_service.org_service.utils.supabase_jwt import extract_bearer_token, verify_supabase_jwt
 
 from backend.common.models import (
     Assignment,
@@ -25,6 +26,7 @@ from backend.common.models import (
     OrganizationMember,
     Profile,
     Submission,
+    ClassSchedule,
 )
 from backend.services.org_service.org_service.routes.organizations import get_authenticated_user
 
@@ -1056,76 +1058,6 @@ class SubmissionResource(Resource):
             return jsonify({"error": str(exc)}), 500
         finally:
             session.close()
-
-
-@courses_ns.route("/submissions/<int:submission_id>")
-class SubmissionDetailResource(Resource):
-    def get(self, submission_id: int):
-        """Get a specific submission."""
-        db_session = current_app.config.get("DB_SESSION")
-        if db_session is None:
-            return jsonify({"error": "Database is not configured"}), 503
-        
-        user_id, _email = get_authenticated_user()
-        if user_id is None:
-            return jsonify({"error": "Unauthorized"}), 401
-        
-        session = db_session()
-        try:
-            submission = session.query(Submission).filter(Submission.id == submission_id).first()
-            if not submission:
-                return jsonify({"error": "Submission not found"}), 404
-            
-            # Check if user owns this submission or is the instructor
-            assignment = session.query(Assignment).filter(Assignment.id == submission.assignment_id).first()
-            is_owner = submission.user_id == user_id
-            is_instructor = assignment and assignment.course.created_by == user_id
-            
-            if not (is_owner or is_instructor):
-                return jsonify({"error": "Access denied"}), 403
-            
-            return jsonify({
-                "id": submission.id,
-                "assignment_id": submission.assignment_id,
-                "content_url": submission.content_url,
-                "text_content": submission.text_content,
-                "grade": submission.grade,
-                "feedback": submission.feedback,
-                "submitted_at": submission.submitted_at.isoformat()
-            }), 200
-        except SQLAlchemyError as exc:
-            return jsonify({"error": str(exc)}), 500
-        finally:
-            session.close()
-    
-    def delete(self, submission_id: int):
-        """Delete a submission (for resubmit)."""
-        db_session = current_app.config.get("DB_SESSION")
-        if db_session is None:
-            return jsonify({"error": "Database is not configured"}), 503
-        
-        user_id, _email = get_authenticated_user()
-        if user_id is None:
-            return jsonify({"error": "Unauthorized"}), 401
-        
-        session = db_session()
-        try:
-            submission = session.query(Submission).filter(Submission.id == submission_id).first()
-            if not submission:
-                return jsonify({"error": "Submission not found"}), 404
-            
-            if submission.user_id != user_id:
-                return jsonify({"error": "You can only delete your own submissions"}), 403
-            
-            session.delete(submission)
-            session.commit()
-            return jsonify({"message": "Submission deleted"}), 200
-        except SQLAlchemyError as exc:
-            session.rollback()
-            return jsonify({"error": str(exc)}), 500
-        finally:
-            session.close()
-
 
 @courses_ns.route("/submissions/upload")
 class SubmissionUploadResource(Resource):
@@ -2317,6 +2249,936 @@ class OrganizationCoursesResource(Resource):
             }), 200
             
         except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+# Add this after the CourseEnrollResource and before CourseReviewUpsertResource (around line 450-500)
+
+@courses_ns.route("/course-classes/<int:course_class_id>")
+class CourseClassResource(Resource):
+    @courses_ns.response(200, "Course class retrieved")
+    @courses_ns.response(401, "Unauthorized")
+    @courses_ns.response(403, "Permission denied")
+    @courses_ns.response(404, "Course class not found")
+    def get(self, course_class_id: int):
+        """Get a specific course offering by ID."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        session = db_session()
+        try:
+            course_class = session.query(CourseClass).filter(CourseClass.id == course_class_id).first()
+            if not course_class:
+                return jsonify({"error": "Course offering not found"}), 404
+
+            # Check if user has permission to view this offering
+            course = session.query(Course).filter(Course.id == course_class.course_id).first()
+            if not course:
+                return jsonify({"error": "Course not found"}), 404
+
+            # Allow if user is instructor, course creator, org admin, or enrolled student
+            is_instructor = course_class.instructor_id == user_id
+            is_creator = course.created_by == user_id
+            is_org_admin = False
+            
+            if not is_instructor and not is_creator:
+                membership = session.query(OrganizationMember).filter(
+                    OrganizationMember.organization_id == course.organization_id,
+                    OrganizationMember.user_id == user_id,
+                    OrganizationMember.member_role.in_(['admin', 'sub_admin'])
+                ).first()
+                is_org_admin = membership is not None
+            
+            # Check if user is enrolled as student
+            is_enrolled = session.query(ClassMember).filter(
+                ClassMember.course_class_id == course_class_id,
+                ClassMember.user_id == user_id,
+                ClassMember.role == "student"
+            ).first() is not None
+
+            if not (is_instructor or is_creator or is_org_admin or is_enrolled):
+                return jsonify({"error": "Permission denied"}), 403
+
+            # Get schedules for this offering
+            schedules = session.query(ClassSchedule).filter(
+                ClassSchedule.course_class_id == course_class_id
+            ).order_by(ClassSchedule.day_of_week).all()
+
+            # Get member count
+            member_count = session.query(ClassMember).filter(
+                ClassMember.course_class_id == course_class_id
+            ).count()
+
+            return jsonify({
+                "id": course_class.id,
+                "course_id": course_class.course_id,
+                "name": course_class.name,
+                "description": course_class.description,
+                "instructor_id": str(course_class.instructor_id) if course_class.instructor_id else None,
+                "start_date": course_class.start_date.isoformat() if course_class.start_date else None,
+                "end_date": course_class.end_date.isoformat() if course_class.end_date else None,
+                "max_students": course_class.max_students,
+                "status": course_class.status,
+                "is_published": course_class.is_published,
+                "created_at": course_class.created_at.isoformat() if course_class.created_at else None,
+                "schedules": [
+                    {
+                        "id": s.id,
+                        "day_of_week": s.day_of_week,
+                        "start_time": s.start_time.isoformat() if s.start_time else None,
+                        "end_time": s.end_time.isoformat() if s.end_time else None,
+                    }
+                    for s in schedules
+                ],
+                "member_count": member_count,
+            }), 200
+
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+    @courses_ns.expect(courses_ns.model('CourseClassUpdate', {
+        'name': fields.String(required=False, description="Offering name"),
+        'description': fields.String(required=False, description="Offering description"),
+        'start_date': fields.String(required=False, description="Start date (YYYY-MM-DD)"),
+        'end_date': fields.String(required=False, description="End date (YYYY-MM-DD)"),
+        'max_students': fields.Integer(required=False, description="Maximum number of students"),
+        'status': fields.String(required=False, description="Status", enum=['upcoming', 'ongoing', 'completed', 'cancelled']),
+    }))
+    @courses_ns.response(200, "Course class updated")
+    @courses_ns.response(401, "Unauthorized")
+    @courses_ns.response(403, "Permission denied")
+    @courses_ns.response(404, "Course class not found")
+    def put(self, course_class_id: int):
+        """Update a course offering."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        payload = request.get_json(silent=True) or {}
+
+        session = db_session()
+        try:
+            course_class = session.query(CourseClass).filter(CourseClass.id == course_class_id).first()
+            if not course_class:
+                return jsonify({"error": "Course offering not found"}), 404
+
+            # Check permission
+            course = session.query(Course).filter(Course.id == course_class.course_id).first()
+            if not course:
+                return jsonify({"error": "Course not found"}), 404
+
+            is_instructor = course_class.instructor_id == user_id
+            is_creator = course.created_by == user_id
+            
+            if not is_instructor and not is_creator:
+                membership = session.query(OrganizationMember).filter(
+                    OrganizationMember.organization_id == course.organization_id,
+                    OrganizationMember.user_id == user_id,
+                    OrganizationMember.member_role.in_(['admin', 'sub_admin'])
+                ).first()
+                if not membership:
+                    return jsonify({"error": "Permission denied"}), 403
+
+            # Update fields
+            if 'name' in payload:
+                course_class.name = payload['name']
+            if 'description' in payload:
+                course_class.description = payload['description'] or None
+            if 'start_date' in payload:
+                course_class.start_date = payload['start_date'] if payload['start_date'] else None
+            if 'end_date' in payload:
+                course_class.end_date = payload['end_date'] if payload['end_date'] else None
+            if 'max_students' in payload:
+                course_class.max_students = payload['max_students'] if payload['max_students'] else None
+            if 'status' in payload:
+                if payload['status'] not in ['upcoming', 'ongoing', 'completed', 'cancelled']:
+                    return jsonify({"error": "Invalid status"}), 400
+                course_class.status = payload['status']
+
+            session.commit()
+            session.refresh(course_class)
+
+            return jsonify({
+                "id": course_class.id,
+                "course_id": course_class.course_id,
+                "name": course_class.name,
+                "description": course_class.description,
+                "instructor_id": str(course_class.instructor_id) if course_class.instructor_id else None,
+                "start_date": course_class.start_date.isoformat() if course_class.start_date else None,
+                "end_date": course_class.end_date.isoformat() if course_class.end_date else None,
+                "max_students": course_class.max_students,
+                "status": course_class.status,
+                "is_published": course_class.is_published,
+                "created_at": course_class.created_at.isoformat() if course_class.created_at else None,
+            }), 200
+
+        except SQLAlchemyError as exc:
+            session.rollback()
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+    @courses_ns.response(200, "Course class deleted")
+    @courses_ns.response(401, "Unauthorized")
+    @courses_ns.response(403, "Permission denied")
+    @courses_ns.response(404, "Course class not found")
+    def delete(self, course_class_id: int):
+        """Delete a course offering."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        session = db_session()
+        try:
+            course_class = session.query(CourseClass).filter(CourseClass.id == course_class_id).first()
+            if not course_class:
+                return jsonify({"error": "Course offering not found"}), 404
+
+            # Check permission
+            course = session.query(Course).filter(Course.id == course_class.course_id).first()
+            if not course:
+                return jsonify({"error": "Course not found"}), 404
+
+            is_instructor = course_class.instructor_id == user_id
+            is_creator = course.created_by == user_id
+            
+            if not is_instructor and not is_creator:
+                membership = session.query(OrganizationMember).filter(
+                    OrganizationMember.organization_id == course.organization_id,
+                    OrganizationMember.user_id == user_id,
+                    OrganizationMember.member_role.in_(['admin', 'sub_admin'])
+                ).first()
+                if not membership:
+                    return jsonify({"error": "Permission denied"}), 403
+
+            # Delete schedules first (cascade should handle this, but explicit for safety)
+            session.query(ClassSchedule).filter(
+                ClassSchedule.course_class_id == course_class_id
+            ).delete()
+
+            # Delete class members
+            session.query(ClassMember).filter(
+                ClassMember.course_class_id == course_class_id
+            ).delete()
+
+            # Delete the offering
+            session.delete(course_class)
+            session.commit()
+
+            return jsonify({"message": "Course offering deleted successfully"}), 200
+
+        except SQLAlchemyError as exc:
+            session.rollback()
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+# Add to backend/services/org_service/org_service/routes/courses.py
+
+@courses_ns.route("/course-classes/<int:course_class_id>/schedules")
+class CourseClassSchedulesResource(Resource):
+    @courses_ns.expect(courses_ns.model('ScheduleCreate', {
+        'day_of_week': fields.Integer(required=True, description="Day of week (0-6)", example=1),
+        'start_time': fields.String(required=True, description="Start time (HH:MM)", example="09:00"),
+        'end_time': fields.String(required=True, description="End time (HH:MM)", example="11:00"),
+    }))
+    @courses_ns.response(201, "Schedule created")
+    @courses_ns.response(401, "Unauthorized")
+    @courses_ns.response(403, "Permission denied")
+    @courses_ns.response(404, "Course class not found")
+    def post(self, course_class_id: int):
+        """Create a new schedule for a course offering."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        payload = request.get_json(silent=True) or {}
+        day_of_week = payload.get('day_of_week')
+        start_time = payload.get('start_time')
+        end_time = payload.get('end_time')
+
+        if day_of_week is None:
+            return jsonify({"error": "day_of_week is required"}), 400
+        if not start_time:
+            return jsonify({"error": "start_time is required"}), 400
+        if not end_time:
+            return jsonify({"error": "end_time is required"}), 400
+
+        try:
+            day_of_week = int(day_of_week)
+            if day_of_week < 0 or day_of_week > 6:
+                raise ValueError
+        except ValueError:
+            return jsonify({"error": "day_of_week must be between 0 and 6"}), 400
+
+        session = db_session()
+        try:
+            # Check permission
+            course_class = session.query(CourseClass).filter(CourseClass.id == course_class_id).first()
+            if not course_class:
+                return jsonify({"error": "Course offering not found"}), 404
+
+            course = session.query(Course).filter(Course.id == course_class.course_id).first()
+            if not course:
+                return jsonify({"error": "Course not found"}), 404
+
+            is_instructor = course_class.instructor_id == user_id
+            is_creator = course.created_by == user_id
+            
+            if not is_instructor and not is_creator:
+                membership = session.query(OrganizationMember).filter(
+                    OrganizationMember.organization_id == course.organization_id,
+                    OrganizationMember.user_id == user_id,
+                    OrganizationMember.member_role.in_(['admin', 'sub_admin'])
+                ).first()
+                if not membership:
+                    return jsonify({"error": "Permission denied"}), 403
+
+            # Create schedule
+            new_schedule = ClassSchedule(
+                course_class_id=course_class_id,
+                day_of_week=day_of_week,
+                start_time=start_time,
+                end_time=end_time,
+            )
+            session.add(new_schedule)
+            session.commit()
+            session.refresh(new_schedule)
+
+            return jsonify({
+                "id": new_schedule.id,
+                "course_class_id": new_schedule.course_class_id,
+                "day_of_week": new_schedule.day_of_week,
+                "start_time": new_schedule.start_time.isoformat() if new_schedule.start_time else None,
+                "end_time": new_schedule.end_time.isoformat() if new_schedule.end_time else None,
+            }), 201
+
+        except SQLAlchemyError as exc:
+            session.rollback()
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+
+@courses_ns.route("/class-schedules/<int:schedule_id>")
+class ClassScheduleResource(Resource):
+    @courses_ns.expect(courses_ns.model('ScheduleUpdate', {
+        'day_of_week': fields.Integer(required=False, description="Day of week (0-6)"),
+        'start_time': fields.String(required=False, description="Start time (HH:MM)"),
+        'end_time': fields.String(required=False, description="End time (HH:MM)"),
+    }))
+    @courses_ns.response(200, "Schedule updated")
+    @courses_ns.response(401, "Unauthorized")
+    @courses_ns.response(403, "Permission denied")
+    @courses_ns.response(404, "Schedule not found")
+    def put(self, schedule_id: int):
+        """Update a class schedule."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        payload = request.get_json(silent=True) or {}
+
+        session = db_session()
+        try:
+            schedule = session.query(ClassSchedule).filter(ClassSchedule.id == schedule_id).first()
+            if not schedule:
+                return jsonify({"error": "Schedule not found"}), 404
+
+            # Check permission
+            course_class = session.query(CourseClass).filter(CourseClass.id == schedule.course_class_id).first()
+            if not course_class:
+                return jsonify({"error": "Course offering not found"}), 404
+
+            course = session.query(Course).filter(Course.id == course_class.course_id).first()
+            if not course:
+                return jsonify({"error": "Course not found"}), 404
+
+            is_instructor = course_class.instructor_id == user_id
+            is_creator = course.created_by == user_id
+            
+            if not is_instructor and not is_creator:
+                membership = session.query(OrganizationMember).filter(
+                    OrganizationMember.organization_id == course.organization_id,
+                    OrganizationMember.user_id == user_id,
+                    OrganizationMember.member_role.in_(['admin', 'sub_admin'])
+                ).first()
+                if not membership:
+                    return jsonify({"error": "Permission denied"}), 403
+
+            # Update fields
+            if 'day_of_week' in payload:
+                day_of_week = int(payload['day_of_week'])
+                if day_of_week < 0 or day_of_week > 6:
+                    return jsonify({"error": "day_of_week must be between 0 and 6"}), 400
+                schedule.day_of_week = day_of_week
+            if 'start_time' in payload:
+                schedule.start_time = payload['start_time']
+            if 'end_time' in payload:
+                schedule.end_time = payload['end_time']
+
+            session.commit()
+            session.refresh(schedule)
+
+            return jsonify({
+                "id": schedule.id,
+                "course_class_id": schedule.course_class_id,
+                "day_of_week": schedule.day_of_week,
+                "start_time": schedule.start_time.isoformat() if schedule.start_time else None,
+                "end_time": schedule.end_time.isoformat() if schedule.end_time else None,
+            }), 200
+
+        except SQLAlchemyError as exc:
+            session.rollback()
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+    @courses_ns.response(200, "Schedule deleted")
+    @courses_ns.response(401, "Unauthorized")
+    @courses_ns.response(403, "Permission denied")
+    @courses_ns.response(404, "Schedule not found")
+    def delete(self, schedule_id: int):
+        """Delete a class schedule."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        session = db_session()
+        try:
+            schedule = session.query(ClassSchedule).filter(ClassSchedule.id == schedule_id).first()
+            if not schedule:
+                return jsonify({"error": "Schedule not found"}), 404
+
+            # Check permission
+            course_class = session.query(CourseClass).filter(CourseClass.id == schedule.course_class_id).first()
+            if not course_class:
+                return jsonify({"error": "Course offering not found"}), 404
+
+            course = session.query(Course).filter(Course.id == course_class.course_id).first()
+            if not course:
+                return jsonify({"error": "Course not found"}), 404
+
+            is_instructor = course_class.instructor_id == user_id
+            is_creator = course.created_by == user_id
+            
+            if not is_instructor and not is_creator:
+                membership = session.query(OrganizationMember).filter(
+                    OrganizationMember.organization_id == course.organization_id,
+                    OrganizationMember.user_id == user_id,
+                    OrganizationMember.member_role.in_(['admin', 'sub_admin'])
+                ).first()
+                if not membership:
+                    return jsonify({"error": "Permission denied"}), 403
+
+            session.delete(schedule)
+            session.commit()
+
+            return jsonify({"message": "Schedule deleted successfully"}), 200
+
+        except SQLAlchemyError as exc:
+            session.rollback()
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+# ========== SUBMISSIONS ENDPOINT ==========
+
+@courses_ns.route("/assignments/<int:assignment_id>/submissions")
+class AssignmentSubmissionsResource(Resource):
+    @courses_ns.response(200, "Submissions retrieved")
+    @courses_ns.response(401, "Unauthorized")
+    @courses_ns.response(403, "Permission denied")
+    def get(self, assignment_id: int):
+        """Get all submissions for an assignment."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        limit = request.args.get("limit", 50, type=int)
+
+        session = db_session()
+        try:
+            assignment = session.query(Assignment).filter(Assignment.id == assignment_id).first()
+            if not assignment:
+                return jsonify({"error": "Assignment not found"}), 404
+
+            # Check permission - user must be course creator OR instructor of the offering
+            course = session.query(Course).filter(Course.id == assignment.course_id).first()
+            if not course:
+                return jsonify({"error": "Course not found"}), 404
+                
+            is_creator = course.created_by == user_id
+            is_instructor = False
+            
+            # Check if user is instructor for this assignment's course class
+            if assignment.course_class_id:
+                course_class = session.query(CourseClass).filter(
+                    CourseClass.id == assignment.course_class_id
+                ).first()
+                if course_class and course_class.instructor_id == user_id:
+                    is_instructor = True
+            
+            # Check if user is org admin
+            is_org_admin = False
+            if not is_creator and not is_instructor:
+                membership = session.query(OrganizationMember).filter(
+                    OrganizationMember.organization_id == course.organization_id,
+                    OrganizationMember.user_id == user_id,
+                    OrganizationMember.member_role.in_(['admin', 'sub_admin'])
+                ).first()
+                if membership:
+                    is_org_admin = True
+            
+            if not (is_creator or is_instructor or is_org_admin):
+                return jsonify({"error": "Permission denied"}), 403
+
+            # Get submissions with user profiles
+            submissions = session.query(Submission).filter(
+                Submission.assignment_id == assignment_id
+            ).order_by(Submission.submitted_at.desc()).limit(limit).all()
+
+            # Get user profiles for all submissions
+            user_ids = [s.user_id for s in submissions]
+            profiles = {}
+            if user_ids:
+                for profile in session.query(Profile).filter(Profile.id.in_(user_ids)).all():
+                    profiles[profile.id] = profile
+
+            result = []
+            for submission in submissions:
+                profile = profiles.get(submission.user_id)
+                
+                # Build user info
+                user_info = {
+                    "id": str(submission.user_id),
+                    "email": "",  # Email from auth service, not stored in profiles
+                    "first_name": None,
+                    "last_name": None,
+                    "username": None,
+                    "avatar_url": None,
+                }
+                
+                if profile:
+                    user_info["first_name"] = profile.first_name
+                    user_info["last_name"] = profile.last_name
+                    user_info["username"] = profile.username
+                    user_info["avatar_url"] = profile.avatar_url
+                
+                result.append({
+                    "id": submission.id,
+                    "assignment_id": submission.assignment_id,
+                    "user_id": str(submission.user_id),
+                    "user": user_info,
+                    "content_url": submission.content_url,
+                    "text_content": submission.text_content,
+                    "grade": submission.grade,
+                    "feedback": submission.feedback,
+                    "submitted_at": submission.submitted_at.isoformat() if submission.submitted_at else None,
+                    "status": "graded" if submission.grade is not None else "submitted",
+                })
+
+            return jsonify({"submissions": result}), 200
+
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+@courses_ns.route("/course-classes")
+class CourseClassCreateResource(Resource):
+    @courses_ns.expect(courses_ns.model('CourseClassCreate', {
+        'course_id': fields.Integer(required=True, description="Course ID"),
+        'name': fields.String(required=True, description="Offering name"),
+        'description': fields.String(required=False, description="Offering description"),
+        'instructor_id': fields.String(required=False, description="Instructor user ID"),
+        'start_date': fields.String(required=False, description="Start date (YYYY-MM-DD)"),
+        'end_date': fields.String(required=False, description="End date (YYYY-MM-DD)"),
+        'max_students': fields.Integer(required=False, description="Maximum number of students"),
+        'status': fields.String(required=False, description="Status", enum=['upcoming', 'ongoing', 'completed', 'cancelled']),
+    }))
+    @courses_ns.response(201, "Course class created")
+    @courses_ns.response(400, "Invalid request")
+    @courses_ns.response(401, "Unauthorized")
+    @courses_ns.response(403, "Permission denied")
+    @courses_ns.response(404, "Course not found")
+    def post(self):
+        """Create a new course offering."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        payload = request.get_json(silent=True) or {}
+        
+        course_id = payload.get('course_id')
+        name = payload.get('name')
+        description = payload.get('description')
+        instructor_id = payload.get('instructor_id')
+        start_date = payload.get('start_date')
+        end_date = payload.get('end_date')
+        max_students = payload.get('max_students')
+        status = payload.get('status', 'upcoming')
+
+        if not course_id:
+            return jsonify({"error": "course_id is required"}), 400
+        if not name:
+            return jsonify({"error": "name is required"}), 400
+
+        session = db_session()
+        try:
+            # Check if course exists and user has permission
+            course = session.query(Course).filter(Course.id == course_id).first()
+            if not course:
+                return jsonify({"error": "Course not found"}), 404
+
+            # Check permission
+            is_creator = course.created_by == user_id
+            if not is_creator:
+                membership = session.query(OrganizationMember).filter(
+                    OrganizationMember.organization_id == course.organization_id,
+                    OrganizationMember.user_id == user_id,
+                    OrganizationMember.member_role.in_(['admin', 'sub_admin', 'teacher'])
+                ).first()
+                if not membership:
+                    return jsonify({"error": "You do not have permission to create offerings for this course"}), 403
+
+            # Validate instructor_id if provided
+            if instructor_id:
+                instructor = session.query(Profile).filter(Profile.id == instructor_id).first()
+                if not instructor:
+                    return jsonify({"error": "Instructor not found"}), 404
+
+            # Create the offering
+            new_class = CourseClass(
+                course_id=course_id,
+                name=name,
+                description=description or None,
+                instructor_id=instructor_id or None,
+                start_date=start_date if start_date else None,
+                end_date=end_date if end_date else None,
+                max_students=max_students if max_students else None,
+                status=status,
+                is_published=False,
+            )
+            session.add(new_class)
+            session.commit()
+            session.refresh(new_class)
+
+            return jsonify({
+                "id": new_class.id,
+                "course_id": new_class.course_id,
+                "name": new_class.name,
+                "description": new_class.description,
+                "instructor_id": str(new_class.instructor_id) if new_class.instructor_id else None,
+                "start_date": new_class.start_date.isoformat() if new_class.start_date else None,
+                "end_date": new_class.end_date.isoformat() if new_class.end_date else None,
+                "max_students": new_class.max_students,
+                "status": new_class.status,
+                "is_published": new_class.is_published,
+                "created_at": new_class.created_at.isoformat() if new_class.created_at else None,
+            }), 201
+
+        except SQLAlchemyError as exc:
+            session.rollback()
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+@courses_ns.route("/assignments/<int:assignment_id>")
+class AssignmentResource(Resource):
+    @courses_ns.response(200, "Assignment retrieved")
+    @courses_ns.response(401, "Unauthorized")
+    @courses_ns.response(404, "Assignment not found")
+    def get(self, assignment_id: int):
+        """Get a specific assignment by ID."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        session = db_session()
+        try:
+            assignment = session.query(Assignment).filter(Assignment.id == assignment_id).first()
+            if not assignment:
+                return jsonify({"error": "Assignment not found"}), 404
+
+            # Check if user has access (instructor, creator, or enrolled student)
+            course = session.query(Course).filter(Course.id == assignment.course_id).first()
+            
+            is_creator = course and course.created_by == user_id
+            is_instructor = False
+            is_enrolled = False
+            
+            if assignment.course_class_id:
+                course_class = session.query(CourseClass).filter(CourseClass.id == assignment.course_class_id).first()
+                if course_class:
+                    is_instructor = course_class.instructor_id == user_id
+                    is_enrolled = session.query(ClassMember).filter(
+                        ClassMember.course_class_id == assignment.course_class_id,
+                        ClassMember.user_id == user_id,
+                        ClassMember.role == "student"
+                    ).first() is not None
+            
+            if not is_creator and not is_instructor and not is_enrolled:
+                return jsonify({"error": "Permission denied"}), 403
+
+            return jsonify({
+                "id": assignment.id,
+                "title": assignment.title,
+                "description": assignment.description,
+                "course_id": assignment.course_id,
+                "course_class_id": assignment.course_class_id,
+                "lesson_id": assignment.lesson_id,
+                "due_at": assignment.due_at.isoformat() if assignment.due_at else None,
+                "points": assignment.points,
+                "created_at": assignment.created_at.isoformat() if assignment.created_at else None,
+            }), 200
+
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+@courses_ns.route("/submissions/<int:submission_id>")
+class SubmissionDetailResource(Resource):
+    def get(self, submission_id: int):
+        """Get a specific submission."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        session = db_session()
+        try:
+            submission = session.query(Submission).filter(Submission.id == submission_id).first()
+            if not submission:
+                return jsonify({"error": "Submission not found"}), 404
+
+            # Check if user owns this submission or is the instructor
+            assignment = session.query(Assignment).filter(Assignment.id == submission.assignment_id).first()
+            if not assignment:
+                return jsonify({"error": "Assignment not found"}), 404
+
+            course = session.query(Course).filter(Course.id == assignment.course_id).first()
+            is_owner = submission.user_id == user_id
+            is_instructor = course and course.created_by == user_id
+
+            # Check if user is instructor for the course offering
+            if assignment.course_class_id and not is_instructor:
+                course_class = session.query(CourseClass).filter(
+                    CourseClass.id == assignment.course_class_id
+                ).first()
+                if course_class and course_class.instructor_id == user_id:
+                    is_instructor = True
+
+            # Check if user is org admin
+            is_org_admin = False
+            if not is_owner and not is_instructor and course:
+                membership = session.query(OrganizationMember).filter(
+                    OrganizationMember.organization_id == course.organization_id,
+                    OrganizationMember.user_id == user_id,
+                    OrganizationMember.member_role.in_(['admin', 'sub_admin'])
+                ).first()
+                if membership:
+                    is_org_admin = True
+
+            if not (is_owner or is_instructor or is_org_admin):
+                return jsonify({"error": "Access denied"}), 403
+
+            # Get user profile for response
+            profile = session.query(Profile).filter(Profile.id == submission.user_id).first()
+            user_info = {
+                "id": str(submission.user_id),
+                "first_name": profile.first_name if profile else None,
+                "last_name": profile.last_name if profile else None,
+                "username": profile.username if profile else None,
+                "avatar_url": profile.avatar_url if profile else None,
+            }
+
+            return jsonify({
+                "id": submission.id,
+                "assignment_id": submission.assignment_id,
+                "user_id": str(submission.user_id),
+                "user": user_info,
+                "content_url": submission.content_url,
+                "text_content": submission.text_content,
+                "grade": submission.grade,
+                "feedback": submission.feedback,
+                "submitted_at": submission.submitted_at.isoformat() if submission.submitted_at else None,
+            }), 200
+
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+    @courses_ns.expect(courses_ns.model('SubmissionUpdate', {
+        'grade': fields.Integer(required=False, description="Grade for the submission"),
+        'feedback': fields.String(required=False, description="Feedback for the student"),
+        'text_content': fields.String(required=False, description="Text content"),
+        'content_url': fields.String(required=False, description="File URL"),
+    }))
+    @courses_ns.response(200, "Submission updated")
+    @courses_ns.response(401, "Unauthorized")
+    @courses_ns.response(403, "Permission denied")
+    @courses_ns.response(404, "Submission not found")
+    def put(self, submission_id: int):
+        """Update a submission (for grading or resubmission)."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        payload = request.get_json(silent=True) or {}
+
+        session = db_session()
+        try:
+            submission = session.query(Submission).filter(Submission.id == submission_id).first()
+            if not submission:
+                return jsonify({"error": "Submission not found"}), 404
+
+            # Check permissions
+            assignment = session.query(Assignment).filter(Assignment.id == submission.assignment_id).first()
+            if not assignment:
+                return jsonify({"error": "Assignment not found"}), 404
+
+            course = session.query(Course).filter(Course.id == assignment.course_id).first()
+            if not course:
+                return jsonify({"error": "Course not found"}), 404
+
+            is_owner = submission.user_id == user_id
+            is_instructor = course.created_by == user_id
+
+            # Check if user is instructor for the course offering
+            if assignment.course_class_id and not is_instructor:
+                course_class = session.query(CourseClass).filter(
+                    CourseClass.id == assignment.course_class_id
+                ).first()
+                if course_class and course_class.instructor_id == user_id:
+                    is_instructor = True
+
+            # Check if user is org admin
+            is_org_admin = False
+            if not is_owner and not is_instructor:
+                membership = session.query(OrganizationMember).filter(
+                    OrganizationMember.organization_id == course.organization_id,
+                    OrganizationMember.user_id == user_id,
+                    OrganizationMember.member_role.in_(['admin', 'sub_admin'])
+                ).first()
+                if membership:
+                    is_org_admin = True
+
+            if not (is_owner or is_instructor or is_org_admin):
+                return jsonify({"error": "Permission denied"}), 403
+
+            # Update fields based on user role
+            if is_instructor or is_org_admin:
+                # Instructors and admins can update grade and feedback
+                if 'grade' in payload:
+                    submission.grade = payload['grade']
+                if 'feedback' in payload:
+                    submission.feedback = payload['feedback']
+
+            if is_owner:
+                # Students can update content (for resubmission)
+                if 'text_content' in payload:
+                    submission.text_content = payload['text_content'] or None
+                if 'content_url' in payload:
+                    submission.content_url = payload['content_url'] or None
+                submission.submitted_at = datetime.now(timezone.utc)
+                # Clear grade when resubmitting (only if not being graded in same request)
+                if 'grade' not in payload and 'feedback' not in payload:
+                    submission.grade = None
+                    submission.feedback = None
+
+            session.commit()
+            session.refresh(submission)
+
+            return jsonify({
+                "id": submission.id,
+                "assignment_id": submission.assignment_id,
+                "content_url": submission.content_url,
+                "text_content": submission.text_content,
+                "grade": submission.grade,
+                "feedback": submission.feedback,
+                "submitted_at": submission.submitted_at.isoformat() if submission.submitted_at else None,
+            }), 200
+
+        except SQLAlchemyError as exc:
+            session.rollback()
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+    def delete(self, submission_id: int):
+        """Delete a submission (for resubmit)."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        session = db_session()
+        try:
+            submission = session.query(Submission).filter(Submission.id == submission_id).first()
+            if not submission:
+                return jsonify({"error": "Submission not found"}), 404
+
+            if submission.user_id != user_id:
+                return jsonify({"error": "You can only delete your own submissions"}), 403
+
+            session.delete(submission)
+            session.commit()
+            return jsonify({"message": "Submission deleted"}), 200
+        except SQLAlchemyError as exc:
+            session.rollback()
             return jsonify({"error": str(exc)}), 500
         finally:
             session.close()

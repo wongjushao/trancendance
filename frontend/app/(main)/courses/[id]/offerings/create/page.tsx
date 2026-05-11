@@ -1,8 +1,7 @@
-// frontend/app/(main)/courses/[id]/offerings/create/page.tsx
 "use client";
 
 import { useState, useEffect } from "react";
-import { useParams, useRouter }from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -27,7 +26,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
-import { addCourseClass, addClassSchedule, getCourseWithDetails } from "@/lib/supabase/courses";
+
+// Helper to get auth token
+const getAuthToken = async () => {
+  const supabase = getSupabaseBrowserClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token;
+};
 
 interface ScheduleForm {
   day_of_week: number;
@@ -52,7 +57,8 @@ export default function CreateOfferingPage() {
   
   const [loading, setLoading] = useState(false);
   const [courseTitle, setCourseTitle] = useState("");
-  const [user, setUser] = useState<any>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
   
   const [formData, setFormData] = useState<OfferingFormData>({
     name: "",
@@ -66,21 +72,40 @@ export default function CreateOfferingPage() {
     ],
   });
   
+  // Get auth token on mount
+  useEffect(() => {
+    const initAuth = async () => {
+      const token = await getAuthToken();
+      setAccessToken(token);
+    };
+    initAuth();
+  }, []);
+
   useEffect(() => {
     const loadData = async () => {
+      if (!accessToken) return;
+      
       try {
-        const supabase = getSupabaseBrowserClient();
+        // Get current user info
+        const userResponse = await fetch('/api/auth-service/auth/me', {
+          headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
         
-        // Get current user
-        const { data: { user: authUser } } = await supabase.auth.getUser();
-        if (authUser) {
-          setUser(authUser);
+        if (userResponse.ok) {
+          const userData = await userResponse.json();
+          setCurrentUserId(userData.id);
         }
         
         // Get course details
-        const course = await getCourseWithDetails(courseId);
-        if (course) {
-          setCourseTitle(course.title);
+        const courseResponse = await fetch(`/api/org-service/courses/${courseId}/detail`, {
+          headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
+        
+        if (courseResponse.ok) {
+          const courseData = await courseResponse.json();
+          setCourseTitle(courseData.course?.title || `Course #${courseId}`);
+        } else {
+          setCourseTitle(`Course #${courseId}`);
         }
       } catch (error) {
         console.error("Error loading data:", error);
@@ -88,8 +113,10 @@ export default function CreateOfferingPage() {
       }
     };
     
-    loadData();
-  }, [courseId]);
+    if (accessToken) {
+      loadData();
+    }
+  }, [courseId, accessToken]);
   
   const addSchedule = () => {
     setFormData({
@@ -142,29 +169,66 @@ export default function CreateOfferingPage() {
   const handleSubmit = async () => {
     if (!validateForm()) return;
     
-    if (!user) {
-      toast.error("Please login to create an offering");
+    if (!accessToken) {
+      toast.error("Please log in to create an offering");
       router.push("/login");
+      return;
+    }
+    
+    if (!currentUserId) {
+      toast.error("Unable to identify current user. Please refresh and try again.");
       return;
     }
     
     setLoading(true);
     
     try {
-      // Step 1: Create the course offering
-      const offering = await addCourseClass(courseId, {
-        name: formData.name,
-        description: formData.description || undefined,
-        instructor_id: user.id,
-        start_date: formData.start_date || undefined,
-        end_date: formData.end_date || undefined,
-        max_students: formData.max_students || undefined,
-        status: formData.status,
+      // Step 1: Create the course offering via backend API
+      const offeringResponse = await fetch('/api/org-service/course-classes', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          course_id: courseId,
+          name: formData.name,
+          description: formData.description || null,
+          instructor_id: currentUserId,
+          start_date: formData.start_date || null,
+          end_date: formData.end_date || null,
+          max_students: formData.max_students || null,
+          status: formData.status,
+        }),
       });
       
-      // Step 2: Add all schedules
+      if (!offeringResponse.ok) {
+        const error = await offeringResponse.json();
+        throw new Error(error.error || 'Failed to create offering');
+      }
+      
+      const offering = await offeringResponse.json();
+      
+      // Step 2: Add all schedules via backend API
       for (const schedule of formData.schedules) {
-        await addClassSchedule(offering.id, schedule);
+        const scheduleResponse = await fetch(`/api/org-service/course-classes/${offering.id}/schedules`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            day_of_week: schedule.day_of_week,
+            start_time: schedule.start_time,
+            end_time: schedule.end_time,
+          }),
+        });
+        
+        if (!scheduleResponse.ok) {
+          const error = await scheduleResponse.json();
+          console.error('Error adding schedule:', error);
+          toast.warning("Offering created but some schedules failed to save");
+        }
       }
       
       toast.success("Course offering created successfully!");

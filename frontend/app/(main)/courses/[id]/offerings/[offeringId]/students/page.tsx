@@ -62,16 +62,13 @@ import {
 import { useRole } from "@/components/providers/RoleProvider";
 import { toast } from "sonner";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
-import { Database } from "@/types/supabase";
-import { addUserToOrganization } from '@/lib/supabase/organization';
 
-type ClassMember = Database['public']['Tables']['class_members']['Row'];
-type Profile = Database['public']['Tables']['profiles']['Row'];
-type LessonProgress = Database['public']['Tables']['lesson_progress']['Row'];
-type Assignment = Database['public']['Tables']['assignments']['Row'];
-type Submission = Database['public']['Tables']['submissions']['Row'];
-type CourseClass = Database['public']['Tables']['course_classes']['Row'];
-type Course = Database['public']['Tables']['courses']['Row'];
+// Helper to get auth token
+const getAuthToken = async () => {
+  const supabase = getSupabaseBrowserClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token;
+};
 
 interface Student {
   id: string;
@@ -108,15 +105,19 @@ interface StudentStats {
   completion_rate: number;
 }
 
-interface EnrollStudentData {
-  email: string;
-  offeringId: number;
+interface Offering {
+  id: number;
+  name: string;
+  status: string;
+  max_students: number | null;
+  start_date: string | null;
+  end_date: string | null;
 }
 
 export default function CourseStudentsPage() {
   const params = useParams();
   const router = useRouter();
-  const courseId = params.id as string;
+  const courseId = parseInt(params.id as string);
   const { roleData } = useRole();
   const isTeacher = roleData.role === "teacher" || roleData.role === "admin";
   const isAdmin = roleData.role === "admin";
@@ -130,16 +131,25 @@ export default function CourseStudentsPage() {
   const [showEnrollModal, setShowEnrollModal] = useState(false);
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
-  const [enrollData, setEnrollData] = useState<EnrollStudentData>({
+  const [enrollData, setEnrollData] = useState({
     email: "",
     offeringId: 0,
   });
   const [enrolling, setEnrolling] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
-  const [showBulkActions, setShowBulkActions] = useState(false);
-  const [courseOfferings, setCourseOfferings] = useState<CourseClass[]>([]);
+  const [courseOfferings, setCourseOfferings] = useState<Offering[]>([]);
   const [loadingOfferings, setLoadingOfferings] = useState(false);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+
+  // Get auth token on mount
+  useEffect(() => {
+    const initAuth = async () => {
+      const token = await getAuthToken();
+      setAccessToken(token);
+    };
+    initAuth();
+  }, []);
 
   useEffect(() => {
     if (!isTeacher && !isAdmin) {
@@ -147,29 +157,36 @@ export default function CourseStudentsPage() {
       router.push(`/courses/${courseId}`);
       return;
     }
-    fetchCourseData();
-    fetchStudents();
-    fetchCourseOfferings();
-  }, [courseId]);
+    if (accessToken) {
+      fetchCourseData();
+      fetchStudents();
+      fetchCourseOfferings();
+    }
+  }, [courseId, accessToken]);
 
   const fetchCourseOfferings = async () => {
-    const supabase = getSupabaseBrowserClient();
+    if (!accessToken) return;
+    
     setLoadingOfferings(true);
     
     try {
-      const { data, error } = await supabase
-        .from('course_classes')
-        .select('id, name, status, max_students, start_date, end_date')
-        .eq('course_id', parseInt(courseId))
-        .in('status', ['upcoming', 'ongoing'])
-        .order('start_date', { ascending: true });
+      const response = await fetch(`/api/org-service/courses/${courseId}/detail`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
       
-      if (error) throw error;
-      setCourseOfferings(data || []);
-      
-      // Auto-select first offering if available
-      if (data && data.length > 0 && enrollData.offeringId === 0) {
-        setEnrollData(prev => ({ ...prev, offeringId: data[0].id }));
+      if (response.ok) {
+        const data = await response.json();
+        const offerings = data.course_classes || [];
+        const activeOfferings = offerings.filter((o: any) => 
+          o.status === 'upcoming' || o.status === 'ongoing'
+        );
+        
+        setCourseOfferings(activeOfferings);
+        
+        // Auto-select first offering if available
+        if (activeOfferings.length > 0 && enrollData.offeringId === 0) {
+          setEnrollData(prev => ({ ...prev, offeringId: activeOfferings[0].id }));
+        }
       }
     } catch (error) {
       console.error('Error fetching course offerings:', error);
@@ -179,86 +196,47 @@ export default function CourseStudentsPage() {
   };
 
   const fetchCourseData = async () => {
-    const supabase = getSupabaseBrowserClient();
+    if (!accessToken) return;
     
     try {
-      // Get course details
-      const { data: courseData, error: courseError } = await supabase
-        .from('courses')
-        .select(`
-          id,
-          title,
-          description,
-          created_by,
-          profiles:created_by (
-            first_name,
-            last_name
-          )
-        `)
-        .eq('id', parseInt(courseId))
-        .single();
-
-      if (courseError) throw courseError;
-
+      const response = await fetch(`/api/org-service/courses/${courseId}/detail`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
+      
+      if (!response.ok) throw new Error('Failed to fetch course');
+      
+      const data = await response.json();
+      const courseData = data.course;
+      
       // Get instructor name
-      const instructorName = courseData.profiles 
-        ? `${courseData.profiles.first_name || ''} ${courseData.profiles.last_name || ''}`.trim() || 'Unknown Instructor'
-        : 'Unknown Instructor';
-
-      // Get course classes for this course
-      const { data: courseClasses, error: classesError } = await supabase
-        .from('course_classes')
-        .select('id')
-        .eq('course_id', parseInt(courseId));
-
-      if (classesError) throw classesError;
-
-      const courseClassIds = courseClasses?.map(cc => cc.id) || [];
-
-      // Get total lessons count
+      let instructorName = "Unknown Instructor";
+      if (courseData.instructor_id) {
+        const profileResponse = await fetch(`/api/auth-service/profile/public/${courseData.instructor_id}`, {
+          headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
+        if (profileResponse.ok) {
+          const profile = await profileResponse.json();
+          instructorName = profile.first_name 
+            ? `${profile.first_name} ${profile.last_name || ''}`.trim()
+            : profile.username || instructorName;
+        }
+      }
+      
+      // Count total lessons from modules
       let totalLessons = 0;
-      const { data: modules, error: modulesError } = await supabase
-        .from('modules')
-        .select(`
-          id,
-          classes (
-            id,
-            lessons (id)
-          )
-        `)
-        .eq('course_id', parseInt(courseId));
-
-      if (!modulesError && modules) {
-        for (const module of modules) {
-          if (module.classes) {
-            for (const classItem of module.classes) {
-              if (classItem.lessons) {
-                totalLessons += classItem.lessons.length;
-              }
-            }
-          }
+      const modules = data.modules || [];
+      for (const module of modules) {
+        for (const classItem of module.classes || []) {
+          totalLessons += (classItem.lessons || []).length;
         }
       }
-
-      // Get total students count
-      let totalStudents = 0;
-      if (courseClassIds.length > 0) {
-        const { count, error: countError } = await supabase
-          .from('class_members')
-          .select('*', { count: 'exact', head: true })
-          .in('course_class_id', courseClassIds);
-
-        if (!countError) {
-          totalStudents = count || 0;
-        }
-      }
-
+      
       setCourse({
-        id: parseInt(courseId),
+        id: courseData.id,
         title: courseData.title,
         description: courseData.description || '',
         instructor: instructorName,
-        total_students: totalStudents,
+        total_students: courseData.students_count || 0,
         total_lessons: totalLessons,
         average_progress: 0,
         completion_rate: 0,
@@ -270,207 +248,158 @@ export default function CourseStudentsPage() {
   };
 
   const fetchStudents = async () => {
-    const supabase = getSupabaseBrowserClient();
+    if (!accessToken) return;
+    
     setLoading(true);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
-
-      const { data: courseClasses, error: classesError } = await supabase
-        .from('course_classes')
-        .select('id')
-        .eq('course_id', parseInt(courseId));
-
-      if (classesError) throw classesError;
-
-      const courseClassIds = courseClasses?.map(cc => cc.id) || [];
-
-      if (courseClassIds.length === 0) {
-        setStudents([]);
-        setStats({
-          total_students: 0,
-          active_students: 0,
-          average_progress: 0,
-          average_grade: 0,
-          completion_rate: 0,
-        });
-        setLoading(false);
-        return;
-      }
-
-      const { data: classMembers, error: membersError } = await supabase
-        .from('class_members')
-        .select(`
-          id,
-          user_id,
-          enrolled_at,
-          role,
-          profiles:user_id (
-            id,
-            first_name,
-            last_name,
-            username,
-            avatar_url
-          )
-        `)
-        .in('course_class_id', courseClassIds)
-        .eq('role', 'student');
-
-      if (membersError) throw membersError;
-
-      if (!classMembers || classMembers.length === 0) {
-        setStudents([]);
-        setStats({
-          total_students: 0,
-          active_students: 0,
-          average_progress: 0,
-          average_grade: 0,
-          completion_rate: 0,
-        });
-        setLoading(false);
-        return;
-      }
-
-      // Get all lessons for this course
-      const { data: modules, error: modulesError } = await supabase
-        .from('modules')
-        .select(`
-          id,
-          classes (
-            id,
-            lessons (id)
-          )
-        `)
-        .eq('course_id', parseInt(courseId));
-
-      let totalLessons = 0;
-      const lessonIds: number[] = [];
+      // First, get all offerings for this course
+      const courseResponse = await fetch(`/api/org-service/courses/${courseId}/detail`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
       
-      if (!modulesError && modules) {
-        for (const module of modules) {
-          if (module.classes) {
-            for (const classItem of module.classes) {
-              if (classItem.lessons) {
-                for (const lesson of classItem.lessons) {
-                  totalLessons++;
-                  lessonIds.push(lesson.id);
-                }
+      if (!courseResponse.ok) throw new Error('Failed to fetch course');
+      
+      const courseData = await courseResponse.json();
+      const offerings = courseData.course_classes || [];
+      const offeringIds = offerings.map((o: any) => o.id);
+      
+      if (offeringIds.length === 0) {
+        setStudents([]);
+        setStats({
+          total_students: 0,
+          active_students: 0,
+          average_progress: 0,
+          average_grade: 0,
+          completion_rate: 0,
+        });
+        setLoading(false);
+        return;
+      }
+      
+      // Fetch students for each offering
+      let allStudents: any[] = [];
+      let emailMap: Record<string, string> = {};
+      let userIds: string[] = [];
+      
+      for (const offeringId of offeringIds) {
+        const studentsResponse = await fetch(`/api/org-service/course-classes/${offeringId}/students`, {
+          headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
+        
+        if (studentsResponse.ok) {
+          const data = await studentsResponse.json();
+          const newStudents = data.students || [];
+          allStudents = [...allStudents, ...newStudents];
+          
+          // Collect user IDs for email fetching
+          for (const student of newStudents) {
+            if (student.user_id && !userIds.includes(student.user_id)) {
+              userIds.push(student.user_id);
+            }
+          }
+        }
+      }
+      
+      // Fetch emails for all students
+      if (userIds.length > 0) {
+        try {
+          const emailResponse = await fetch('/api/org-service/users/batch-emails', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify({ user_ids: userIds }),
+          });
+          
+          if (emailResponse.ok) {
+            const emailData = await emailResponse.json();
+            emailMap = emailData.users || {};
+          }
+        } catch (emailError) {
+          console.error('Error fetching emails:', emailError);
+        }
+      }
+      
+      // Get total lessons from course modules
+      const modules = courseData.modules || [];
+      let totalLessons = 0;
+      for (const module of modules) {
+        for (const classItem of module.classes || []) {
+          totalLessons += (classItem.lessons || []).length;
+        }
+      }
+      
+      // Get assignments for this course
+      const assignments = courseData.assignments || [];
+      const assignmentIds = assignments.map((a: any) => a.id);
+      
+      // Get submissions for all assignments (batch)
+      let submissionsByStudent: Record<string, { grade: number; count: number }> = {};
+      
+      if (assignmentIds.length > 0) {
+        for (const student of allStudents) {
+          submissionsByStudent[student.user_id] = { grade: 0, count: 0 };
+        }
+        
+        for (const assignmentId of assignmentIds) {
+          const submissionsResponse = await fetch(`/api/org-service/assignments/${assignmentId}/submissions`, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+          });
+          
+          if (submissionsResponse.ok) {
+            const data = await submissionsResponse.json();
+            const submissions = data.submissions || [];
+            
+            for (const sub of submissions) {
+              if (submissionsByStudent[sub.user_id]) {
+                submissionsByStudent[sub.user_id].grade += sub.grade || 0;
+                submissionsByStudent[sub.user_id].count++;
               }
             }
           }
         }
       }
-
-      // Get all assignments for this course
-      const { data: assignments, error: assignmentsError } = await supabase
-        .from('assignments')
-        .select('id, points')
-        .eq('course_id', parseInt(courseId));
-
-      const assignmentIds = assignments?.map(a => a.id) || [];
-
-      // Get all submissions for these assignments
-      const { data: submissions, error: submissionsError } = await supabase
-        .from('submissions')
-        .select('assignment_id, user_id, grade')
-        .in('assignment_id', assignmentIds);
-
-      const submissionsByUser: Record<string, { grade: number; assignment_id: number }[]> = {};
-      if (submissions && !submissionsError) {
-        for (const sub of submissions) {
-          if (!submissionsByUser[sub.user_id]) {
-            submissionsByUser[sub.user_id] = [];
-          }
-          submissionsByUser[sub.user_id].push({
-            grade: sub.grade || 0,
-            assignment_id: sub.assignment_id,
-          });
-        }
-      }
-
-      // Get lesson progress for all students
-      const userIds = classMembers.map(cm => cm.user_id);
-      const { data: lessonProgress, error: progressError } = await supabase
-        .from('lesson_progress')
-        .select('user_id, lesson_id, status')
-        .in('user_id', userIds)
-        .in('lesson_id', lessonIds);
-
-      const progressByUser: Record<string, { completed: number; total: number }> = {};
-      for (const userId of userIds) {
-        progressByUser[userId] = { completed: 0, total: totalLessons };
-      }
-
-      if (lessonProgress && !progressError) {
-        for (const prog of lessonProgress) {
-          if (prog.status === 'completed') {
-            progressByUser[prog.user_id].completed++;
-          }
-        }
-      }
-
-      // NEW: Fetch real emails from backend
-      const { data: { session } } = await supabase.auth.getSession();
-      let emailMap: Record<string, string> = {};
       
-      try {
-        const emailResponse = await fetch('/api/org/users/batch-emails', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session?.access_token}`,
-          },
-          body: JSON.stringify({ user_ids: userIds }),
-        });
-        
-        if (emailResponse.ok) {
-          const emailData = await emailResponse.json();
-          emailMap = emailData.users || {};
-        }
-      } catch (emailError) {
-        console.error('Error fetching emails:', emailError);
-      }
-
-      // Build student list with real emails
-      const studentList: Student[] = classMembers.map(cm => {
-        const profile = cm.profiles as unknown as Profile;
-        const progress = progressByUser[cm.user_id] || { completed: 0, total: totalLessons };
-        const progressPercent = progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0;
-        
-        const userSubmissions = submissionsByUser[cm.user_id] || [];
-        const avgGrade = userSubmissions.length > 0
-          ? Math.round(userSubmissions.reduce((sum, s) => sum + s.grade, 0) / userSubmissions.length)
+      // Build student list
+      const studentList: Student[] = allStudents.map((student: any) => {
+        const userSubmissions = submissionsByStudent[student.user_id] || { grade: 0, count: 0 };
+        const avgGrade = userSubmissions.count > 0 
+          ? Math.round(userSubmissions.grade / userSubmissions.count)
           : 0;
-
-        const displayName = profile?.first_name 
-          ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() 
-          : profile?.username || 'Unknown';
-
-        // Use real email from auth.users, fallback to username
-        const userEmail = emailMap[cm.user_id] || profile?.username || '';
-
+        
+        const displayName = student.user?.first_name 
+          ? `${student.user.first_name || ''} ${student.user.last_name || ''}`.trim()
+          : student.user?.username || 'Unknown';
+        
+        // Get progress from student data (if available)
+        const progress = student.progress || 0;
+        const completedLessons = Math.round((progress / 100) * totalLessons);
+        
         return {
-          id: cm.user_id,
+          id: student.user_id,
           name: displayName,
-          email: userEmail,  // Now this will be the full email!
-          avatar: profile?.avatar_url || undefined,
-          enrolled_at: cm.enrolled_at,
-          progress: progressPercent,
-          completed_lessons: progress.completed,
-          total_lessons: progress.total,
+          email: emailMap[student.user_id] || student.user?.email || '',
+          avatar: student.user?.avatar_url,
+          enrolled_at: student.enrolled_at,
+          progress: progress,
+          completed_lessons: completedLessons,
+          total_lessons: totalLessons,
           average_grade: avgGrade,
-          last_active: cm.enrolled_at,
+          last_active: student.enrolled_at,
           status: "active",
-          assignments_completed: userSubmissions.length,
+          assignments_completed: userSubmissions.count,
           assignments_total: assignmentIds.length,
         };
       });
-
+      
+      // Sort by enrollment date
       studentList.sort((a, b) => new Date(b.enrolled_at).getTime() - new Date(a.enrolled_at).getTime());
-
+      
       setStudents(studentList);
-
+      
+      // Calculate stats
       const activeStudents = studentList.filter(s => s.status === "active").length;
       const avgProgress = studentList.length > 0 
         ? Math.round(studentList.reduce((sum, s) => sum + s.progress, 0) / studentList.length)
@@ -481,7 +410,7 @@ export default function CourseStudentsPage() {
       const completionRate = studentList.length > 0
         ? Math.round((studentList.filter(s => s.progress >= 80).length / studentList.length) * 100)
         : 0;
-
+      
       setStats({
         total_students: studentList.length,
         active_students: activeStudents,
@@ -489,14 +418,14 @@ export default function CourseStudentsPage() {
         average_grade: avgGrade,
         completion_rate: completionRate,
       });
-
+      
       setCourse(prev => prev ? {
         ...prev,
         total_students: studentList.length,
         average_progress: avgProgress,
         completion_rate: completionRate,
       } : null);
-
+      
     } catch (error) {
       console.error('Error fetching students:', error);
       toast.error('Failed to load students');
@@ -505,30 +434,25 @@ export default function CourseStudentsPage() {
     }
   };
 
-  // Replace the handleEnrollStudent function with this:
   const handleEnrollStudent = async () => {
     if (!enrollData.email) {
       toast.error("Please enter an email address");
+      return;
+    }
+    
+    if (!accessToken) {
+      toast.error("Please log in");
       return;
     }
 
     setEnrolling(true);
 
     try {
-      const supabase = getSupabaseBrowserClient();
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session) {
-        toast.error("You must be logged in");
-        return;
-      }
-
-      // First, find the user by email via backend
       const response = await fetch('/api/org-service/users/enroll', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
+          'Authorization': `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
           email: enrollData.email.trim(),
@@ -543,7 +467,6 @@ export default function CourseStudentsPage() {
       }
 
       if (data.success) {
-        // The backend handles adding to organization automatically
         if (data.user?.added_to_organization) {
           toast.success(`${data.user.first_name || data.user.username || data.user.email} has been added to the organization and enrolled in the course!`);
         } else {
@@ -567,35 +490,40 @@ export default function CourseStudentsPage() {
 
   const handleRemoveStudent = async () => {
     if (!selectedStudent) return;
+    if (!accessToken) return;
     
     setRemoving(true);
-    const supabase = getSupabaseBrowserClient();
 
     try {
-      // Get course classes for this course
-      const { data: courseClasses, error: classesError } = await supabase
-        .from('course_classes')
-        .select('id')
-        .eq('course_id', parseInt(courseId));
-
-      if (classesError) throw classesError;
-
-      const courseClassIds = courseClasses?.map(cc => cc.id) || [];
-
-      // Delete class members records
-      const { error: deleteError } = await supabase
-        .from('class_members')
-        .delete()
-        .in('course_class_id', courseClassIds)
-        .eq('user_id', selectedStudent.id);
-
-      if (deleteError) throw deleteError;
+      // Get offerings for this course
+      const courseResponse = await fetch(`/api/org-service/courses/${courseId}/detail`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
+      
+      if (!courseResponse.ok) throw new Error('Failed to fetch course');
+      
+      const courseData = await courseResponse.json();
+      const offerings = courseData.course_classes || [];
+      const offeringIds = offerings.map((o: any) => o.id);
+      
+      // Remove student from each offering (backend handles cascade)
+      for (const offeringId of offeringIds) {
+        const response = await fetch(`/api/org-service/course-classes/${offeringId}/students/${selectedStudent.id}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+          },
+        });
+        
+        if (!response.ok) {
+          console.error(`Failed to remove from offering ${offeringId}`);
+        }
+      }
 
       toast.success(`${selectedStudent.name} has been removed from the course`);
       setShowRemoveConfirm(false);
       setSelectedStudent(null);
       
-      // Refresh student list
       await fetchStudents();
       
     } catch (error) {
@@ -613,33 +541,35 @@ export default function CourseStudentsPage() {
       return;
     }
     
-    const supabase = getSupabaseBrowserClient();
+    if (!accessToken) return;
 
     try {
-      // Get course classes for this course
-      const { data: courseClasses, error: classesError } = await supabase
-        .from('course_classes')
-        .select('id')
-        .eq('course_id', parseInt(courseId));
-
-      if (classesError) throw classesError;
-
-      const courseClassIds = courseClasses?.map(cc => cc.id) || [];
-
-      // Delete class members records for all selected students
-      const { error: deleteError } = await supabase
-        .from('class_members')
-        .delete()
-        .in('course_class_id', courseClassIds)
-        .in('user_id', selectedStudents);
-
-      if (deleteError) throw deleteError;
+      // Get offerings for this course
+      const courseResponse = await fetch(`/api/org-service/courses/${courseId}/detail`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
+      
+      if (!courseResponse.ok) throw new Error('Failed to fetch course');
+      
+      const courseData = await courseResponse.json();
+      const offerings = courseData.course_classes || [];
+      const offeringIds = offerings.map((o: any) => o.id);
+      
+      // Remove each student from each offering
+      for (const studentId of selectedStudents) {
+        for (const offeringId of offeringIds) {
+          await fetch(`/api/org-service/course-classes/${offeringId}/students/${studentId}`, {
+            method: 'DELETE',
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+            },
+          }).catch(err => console.error(`Failed to remove student ${studentId}:`, err));
+        }
+      }
 
       toast.success(`${selectedStudents.length} students have been removed`);
       setSelectedStudents([]);
-      setShowBulkActions(false);
       
-      // Refresh student list
       await fetchStudents();
       
     } catch (error) {
@@ -649,7 +579,6 @@ export default function CourseStudentsPage() {
   };
 
   const handleSendReminder = async (student: Student) => {
-    // This would integrate with a real email service in production
     toast.info(`Reminder functionality would send an email to ${student.email}. This requires email service integration.`);
   };
 
@@ -699,14 +628,6 @@ export default function CourseStudentsPage() {
         ? prev.filter(id => id !== studentId)
         : [...prev, studentId]
     );
-  };
-
-  const toggleAllStudents = () => {
-    if (selectedStudents.length === filteredStudents.length) {
-      setSelectedStudents([]);
-    } else {
-      setSelectedStudents(filteredStudents.map(s => s.id));
-    }
   };
 
   if (!isTeacher && !isAdmin) {
@@ -845,7 +766,7 @@ export default function CourseStudentsPage() {
       <div className="space-y-4">
         {loading ? (
           <div className="flex justify-center py-12">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500"></div>
+            <Loader2 className="w-12 h-12 animate-spin text-purple-500" />
           </div>
         ) : filteredStudents.length === 0 ? (
           <GlowCard>
@@ -866,153 +787,150 @@ export default function CourseStudentsPage() {
             </div>
           </GlowCard>
         ) : (
-          <>
-            {/* Student Cards */}
-            {filteredStudents.map((student) => (
-              <GlowCard key={student.id}>
-                <div className="p-6">
-                  <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-                    {/* Selection Checkbox */}
-                    <div className="flex items-start gap-4">
-                      <input
-                        type="checkbox"
-                        checked={selectedStudents.includes(student.id)}
-                        onChange={() => toggleStudentSelection(student.id)}
-                        className="mt-1 w-4 h-4 rounded border-gray-700 bg-gray-800 text-purple-600 focus:ring-purple-500"
-                      />
-                      
-                      {/* Student Info */}
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2 flex-wrap">
-                          <h3 className="text-lg font-semibold text-white">
-                            {student.name}
-                          </h3>
-                          <Badge className={getStatusColor(student.status)}>
-                            {student.status}
-                          </Badge>
-                        </div>
-                        
-                        <div className="space-y-2">
-                          <p className="text-sm text-gray-400 flex items-center gap-2">
-                            <Mail className="w-4 h-4" />
-                            {student.email}
-                          </p>
-                          <p className="text-sm text-gray-400 flex items-center gap-2">
-                            <Calendar className="w-4 h-4" />
-                            Enrolled: {new Date(student.enrolled_at).toLocaleDateString()}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
+          filteredStudents.map((student) => (
+            <GlowCard key={student.id}>
+              <div className="p-6">
+                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                  {/* Selection Checkbox */}
+                  <div className="flex items-start gap-4">
+                    <input
+                      type="checkbox"
+                      checked={selectedStudents.includes(student.id)}
+                      onChange={() => toggleStudentSelection(student.id)}
+                      className="mt-1 w-4 h-4 rounded border-gray-700 bg-gray-800 text-purple-600 focus:ring-purple-500"
+                    />
                     
-                    {/* Progress Stats */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 flex-1">
-                      <div className="text-center">
-                        <p className="text-xs text-gray-400 mb-1">Progress</p>
-                        <p className={`text-xl font-bold ${getProgressColor(student.progress)}`}>
-                          {student.progress}%
-                        </p>
-                        <p className="text-xs text-gray-500">
-                          {student.completed_lessons}/{student.total_lessons} lessons
-                        </p>
+                    {/* Student Info */}
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-2 flex-wrap">
+                        <h3 className="text-lg font-semibold text-white">
+                          {student.name}
+                        </h3>
+                        <Badge className={getStatusColor(student.status)}>
+                          {student.status}
+                        </Badge>
                       </div>
                       
-                      <div className="text-center">
-                        <p className="text-xs text-gray-400 mb-1">Avg. Grade</p>
-                        <p className={`text-xl font-bold ${getGradeColor(student.average_grade)}`}>
-                          {student.average_grade}%
+                      <div className="space-y-2">
+                        <p className="text-sm text-gray-400 flex items-center gap-2">
+                          <Mail className="w-4 h-4" />
+                          {student.email}
+                        </p>
+                        <p className="text-sm text-gray-400 flex items-center gap-2">
+                          <Calendar className="w-4 h-4" />
+                          Enrolled: {new Date(student.enrolled_at).toLocaleDateString()}
                         </p>
                       </div>
-                      
-                      <div className="text-center">
-                        <p className="text-xs text-gray-400 mb-1">Assignments</p>
-                        <p className="text-xl font-bold text-white">
-                          {student.assignments_completed}/{student.assignments_total}
-                        </p>
-                        <p className="text-xs text-gray-500">completed</p>
-                      </div>
-                      
-                      <div className="text-center">
-                        <div className="w-full bg-gray-800 rounded-full h-2 mb-1">
-                          <div
-                            className="bg-purple-500 h-2 rounded-full transition-all"
-                            style={{ width: `${student.progress}%` }}
-                          />
-                        </div>
-                        <p className="text-xs text-gray-400">Course Progress</p>
-                      </div>
-                    </div>
-                    
-                    {/* Actions */}
-                    <div className="flex gap-2">
-                      <GlowButton
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleSendReminder(student)}
-                        title="Send reminder email"
-                      >
-                        <Send className="w-4 h-4" />
-                      </GlowButton>
-                      <GlowButton
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleMessageStudent(student)}
-                      >
-                        <MessageSquare className="w-4 h-4" />
-                      </GlowButton>
-                      <GlowButton
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleViewProgress(student)}
-                      >
-                        <BarChart3 className="w-4 h-4" />
-                      </GlowButton>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <GlowButton variant="ghost" size="sm">
-                            <MoreVertical className="w-4 h-4" />
-                          </GlowButton>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem
-                            onClick={() => handleViewProgress(student)}
-                            className="cursor-pointer"
-                          >
-                            <BarChart3 className="w-4 h-4 mr-2" />
-                            View Detailed Progress
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => handleMessageStudent(student)}
-                            className="cursor-pointer"
-                          >
-                            <MessageSquare className="w-4 h-4 mr-2" />
-                            Send Message
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => handleSendReminder(student)}
-                            className="cursor-pointer"
-                          >
-                            <Send className="w-4 h-4 mr-2" />
-                            Send Reminder
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => {
-                              setSelectedStudent(student);
-                              setShowRemoveConfirm(true);
-                            }}
-                            className="cursor-pointer text-red-400"
-                          >
-                            <UserX className="w-4 h-4 mr-2" />
-                            Remove from Course
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
                     </div>
                   </div>
+                  
+                  {/* Progress Stats */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 flex-1">
+                    <div className="text-center">
+                      <p className="text-xs text-gray-400 mb-1">Progress</p>
+                      <p className={`text-xl font-bold ${getProgressColor(student.progress)}`}>
+                        {student.progress}%
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {student.completed_lessons}/{student.total_lessons} lessons
+                      </p>
+                    </div>
+                    
+                    <div className="text-center">
+                      <p className="text-xs text-gray-400 mb-1">Avg. Grade</p>
+                      <p className={`text-xl font-bold ${getGradeColor(student.average_grade)}`}>
+                        {student.average_grade}%
+                      </p>
+                    </div>
+                    
+                    <div className="text-center">
+                      <p className="text-xs text-gray-400 mb-1">Assignments</p>
+                      <p className="text-xl font-bold text-white">
+                        {student.assignments_completed}/{student.assignments_total}
+                      </p>
+                      <p className="text-xs text-gray-500">completed</p>
+                    </div>
+                    
+                    <div className="text-center">
+                      <div className="w-full bg-gray-800 rounded-full h-2 mb-1">
+                        <div
+                          className="bg-purple-500 h-2 rounded-full transition-all"
+                          style={{ width: `${student.progress}%` }}
+                        />
+                      </div>
+                      <p className="text-xs text-gray-400">Course Progress</p>
+                    </div>
+                  </div>
+                  
+                  {/* Actions */}
+                  <div className="flex gap-2">
+                    <GlowButton
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleSendReminder(student)}
+                      title="Send reminder email"
+                    >
+                      <Send className="w-4 h-4" />
+                    </GlowButton>
+                    <GlowButton
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleMessageStudent(student)}
+                    >
+                      <MessageSquare className="w-4 h-4" />
+                    </GlowButton>
+                    <GlowButton
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleViewProgress(student)}
+                    >
+                      <BarChart3 className="w-4 h-4" />
+                    </GlowButton>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <GlowButton variant="ghost" size="sm">
+                          <MoreVertical className="w-4 h-4" />
+                        </GlowButton>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          onClick={() => handleViewProgress(student)}
+                          className="cursor-pointer"
+                        >
+                          <BarChart3 className="w-4 h-4 mr-2" />
+                          View Detailed Progress
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => handleMessageStudent(student)}
+                          className="cursor-pointer"
+                        >
+                          <MessageSquare className="w-4 h-4 mr-2" />
+                          Send Message
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => handleSendReminder(student)}
+                          className="cursor-pointer"
+                        >
+                          <Send className="w-4 h-4 mr-2" />
+                          Send Reminder
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => {
+                            setSelectedStudent(student);
+                            setShowRemoveConfirm(true);
+                          }}
+                          className="cursor-pointer text-red-400"
+                        >
+                          <UserX className="w-4 h-4 mr-2" />
+                          Remove from Course
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
                 </div>
-              </GlowCard>
-            ))}
-          </>
+              </div>
+            </GlowCard>
+          ))
         )}
       </div>
 
@@ -1022,7 +940,7 @@ export default function CourseStudentsPage() {
           <DialogHeader>
             <DialogTitle className="text-white">Enroll Student</DialogTitle>
             <DialogDescription>
-              Enroll Student.
+              Enter the student's email address to enroll them in this course.
             </DialogDescription>
           </DialogHeader>
           
@@ -1107,7 +1025,7 @@ export default function CourseStudentsPage() {
           <DialogHeader>
             <DialogTitle className="text-white">Remove Student</DialogTitle>
             <DialogDescription>
-              Remove Student.
+              Are you sure you want to remove this student from the course?
             </DialogDescription>
           </DialogHeader>
           

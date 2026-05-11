@@ -22,12 +22,29 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 
+// Helper to get auth token
+const getAuthToken = async () => {
+  const supabase = getSupabaseBrowserClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token;
+};
+
 interface Schedule {
   id: number;
   course_class_id: number;
   day_of_week: number;
   start_time: string;
   end_time: string;
+}
+
+interface OfferingData {
+  id: number;
+  name: string;
+  course_id: number;
+  course?: {
+    id: number;
+    title: string;
+  };
 }
 
 export default function ManageSchedulesPage() {
@@ -38,42 +55,73 @@ export default function ManageSchedulesPage() {
   
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [offering, setOffering] = useState<any>(null);
+  const [offering, setOffering] = useState<OfferingData | null>(null);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
   
+  // Get auth token on mount
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        setLoading(true);
-        const supabase = getSupabaseBrowserClient();
-        
-        // Get offering details
-        const { data: offeringData } = await supabase
-          .from("course_classes")
-          .select("*, course:courses(id, title)")
-          .eq("id", offeringId)
-          .single();
-        setOffering(offeringData);
-        
-        // Get schedules
-        const { data: schedulesData } = await supabase
-          .from("class_schedules")
-          .select("*")
-          .eq("course_class_id", offeringId)
-          .order("day_of_week", { ascending: true });
-        
-        setSchedules(schedulesData || []);
-        
-      } catch (error) {
-        console.error("Error loading schedules:", error);
-        toast.error("Failed to load schedule data");
-      } finally {
-        setLoading(false);
-      }
+    const initAuth = async () => {
+      const token = await getAuthToken();
+      setAccessToken(token);
     };
+    initAuth();
+  }, []);
+
+  useEffect(() => {
+    if (accessToken) {
+      loadData();
+    }
+  }, [offeringId, accessToken]);
+  
+  const loadData = async () => {
+    if (!accessToken) return;
     
-    loadData();
-  }, [offeringId]);
+    try {
+      setLoading(true);
+      
+      // Get offering details via backend API
+      const offeringResponse = await fetch(`/api/org-service/course-classes/${offeringId}`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
+      
+      if (!offeringResponse.ok) {
+        throw new Error('Failed to fetch offering');
+      }
+      
+      const offeringData = await offeringResponse.json();
+      
+      // Get course title
+      const courseResponse = await fetch(`/api/org-service/courses/${offeringData.course_id}/detail`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
+      
+      let courseTitle = "";
+      if (courseResponse.ok) {
+        const courseData = await courseResponse.json();
+        courseTitle = courseData.course?.title || "";
+      }
+      
+      setOffering({
+        id: offeringData.id,
+        name: offeringData.name,
+        course_id: offeringData.course_id,
+        course: {
+          id: offeringData.course_id,
+          title: courseTitle,
+        }
+      });
+      
+      // Get schedules from the offering data (already included in the response)
+      setSchedules(offeringData.schedules || []);
+      
+    } catch (error) {
+      console.error("Error loading schedules:", error);
+      toast.error("Failed to load schedule data");
+    } finally {
+      setLoading(false);
+    }
+  };
   
   const addSchedule = () => {
     setSchedules([
@@ -84,7 +132,7 @@ export default function ManageSchedulesPage() {
         day_of_week: 1,
         start_time: "09:00",
         end_time: "11:00",
-      } as Schedule,
+      },
     ]);
   };
   
@@ -104,59 +152,102 @@ export default function ManageSchedulesPage() {
   };
   
   const saveSchedule = async (schedule: Schedule, index: number) => {
-    const supabase = getSupabaseBrowserClient();
+    if (!accessToken) {
+      toast.error("Please log in");
+      return;
+    }
     
     if (schedule.id === 0) {
-      // Create new
-      const { data, error } = await supabase
-        .from("class_schedules")
-        .insert({
-          course_class_id: offeringId,
-          day_of_week: schedule.day_of_week,
-          start_time: schedule.start_time,
-          end_time: schedule.end_time,
-        })
-        .select()
-        .single();
-      
-      if (error) throw error;
-      
-      const updated = [...schedules];
-      updated[index] = data;
-      setSchedules(updated);
-      toast.success("Schedule added");
+      // Create new schedule
+      try {
+        const response = await fetch(`/api/org-service/course-classes/${offeringId}/schedules`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            day_of_week: schedule.day_of_week,
+            start_time: schedule.start_time,
+            end_time: schedule.end_time,
+          }),
+        });
+        
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'Failed to add schedule');
+        }
+        
+        const data = await response.json();
+        
+        const updated = [...schedules];
+        updated[index] = data;
+        setSchedules(updated);
+        toast.success("Schedule added");
+      } catch (error: any) {
+        console.error("Error adding schedule:", error);
+        toast.error(error.message || "Failed to add schedule");
+      }
     } else {
-      // Update existing
-      const { error } = await supabase
-        .from("class_schedules")
-        .update({
-          day_of_week: schedule.day_of_week,
-          start_time: schedule.start_time,
-          end_time: schedule.end_time,
-        })
-        .eq("id", schedule.id);
-      
-      if (error) throw error;
-      toast.success("Schedule updated");
+      // Update existing schedule
+      try {
+        const response = await fetch(`/api/org-service/class-schedules/${schedule.id}`, {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            day_of_week: schedule.day_of_week,
+            start_time: schedule.start_time,
+            end_time: schedule.end_time,
+          }),
+        });
+        
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'Failed to update schedule');
+        }
+        
+        toast.success("Schedule updated");
+      } catch (error: any) {
+        console.error("Error updating schedule:", error);
+        toast.error(error.message || "Failed to update schedule");
+      }
     }
   };
   
   const deleteSchedule = async (schedule: Schedule, index: number) => {
-    if (confirm("Are you sure you want to delete this schedule?")) {
-      const supabase = getSupabaseBrowserClient();
-      
+    if (!confirm("Are you sure you want to delete this schedule?")) {
+      return;
+    }
+    
+    if (!accessToken) {
+      toast.error("Please log in");
+      return;
+    }
+    
+    try {
       if (schedule.id !== 0) {
-        const { error } = await supabase
-          .from("class_schedules")
-          .delete()
-          .eq("id", schedule.id);
+        const response = await fetch(`/api/org-service/class-schedules/${schedule.id}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+          },
+        });
         
-        if (error) throw error;
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'Failed to delete schedule');
+        }
       }
       
       const updated = schedules.filter((_, i) => i !== index);
       setSchedules(updated);
       toast.success("Schedule deleted");
+    } catch (error: any) {
+      console.error("Error deleting schedule:", error);
+      toast.error(error.message || "Failed to delete schedule");
     }
   };
   

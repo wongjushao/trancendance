@@ -532,3 +532,43 @@ class UserCreatedCoursesCountResource(Resource):
             return jsonify({"error": str(exc)}), 500
         finally:
             session.close()
+
+@users_ns.route("/users/<string:user_id>/organizations")
+class UserOrganizationsResource(Resource):
+    def get(self, user_id: str):
+        """Get all organizations a user belongs to."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database not configured"}), 503
+        
+        current_user_id, _email = get_authenticated_user()
+        if current_user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+        
+        session = db_session()
+        try:
+            # Get organization memberships
+            memberships = session.query(OrganizationMember).filter(
+                OrganizationMember.user_id == user_id
+            ).all()
+            
+            organizations = []
+            for membership in memberships:
+                org = session.query(Organization).filter(
+                    Organization.id == membership.organization_id
+                ).first()
+                if org:
+                    organizations.append({
+                        "id": org.id,
+                        "name": org.name,
+                        "description": org.description,
+                        "slug": org.slug,
+                        "role": membership.member_role,
+                        "joined_at": membership.created_at.isoformat() if membership.created_at else None,
+                    })
+            
+            return jsonify({"organizations": organizations}), 200
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()

@@ -1,4 +1,3 @@
-// frontend/app/(main)/courses/[id]/assignments/[assignmentId]/submissions/page.tsx
 "use client";
 
 import { useState, useEffect } from "react";
@@ -45,6 +44,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
+
+// Helper to get auth token
+const getAuthToken = async () => {
+  const supabase = getSupabaseBrowserClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token;
+};
 
 interface Submission {
   id: number;
@@ -95,70 +101,80 @@ export default function AssignmentSubmissionsPage() {
   const [feedbackValue, setFeedbackValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
   const itemsPerPage = 10;
   
+  // Get auth token on mount
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        setLoading(true);
-        const supabase = getSupabaseBrowserClient();
-        
-        // Get assignment details
-        const { data: assignmentData, error: assignmentError } = await supabase
-          .from("assignments")
-          .select(`
-            *,
-            lesson:lessons!lesson_id (
-              title
-            ),
-            course:courses!course_id (
-              title
-            )
-          `)
-          .eq("id", assignmentId)
-          .single();
-        
-        if (assignmentError) throw assignmentError;
-        
-        setAssignment({
-          ...assignmentData,
-          lesson_title: assignmentData.lesson?.title,
-          course_title: assignmentData.course?.title,
-        });
-        
-        // Get submissions with user profiles
-        const { data: submissionsData, error: submissionsError } = await supabase
-          .from("submissions")
-          .select(`
-            *,
-            user:profiles!user_id (
-              id,
-              first_name,
-              last_name,
-              username,
-              email,
-              avatar_url
-            )
-          `)
-          .eq("assignment_id", assignmentId)
-          .order("submitted_at", { ascending: false });
-        
-        if (submissionsError) throw submissionsError;
-        
-        setSubmissions(submissionsData || []);
-        setFilteredSubmissions(submissionsData || []);
-        
-      } catch (error) {
-        console.error("Error loading submissions:", error);
-        toast.error("Failed to load submissions");
-      } finally {
-        setLoading(false);
-      }
+    const initAuth = async () => {
+      const token = await getAuthToken();
+      setAccessToken(token);
     };
-    
-    loadData();
-  }, [assignmentId]);
+    initAuth();
+  }, []);
+
+  useEffect(() => {
+    if (accessToken) {
+      loadData();
+    }
+  }, [assignmentId, accessToken]);
   
+  const loadData = async () => {
+    if (!accessToken) return;
+    
+    try {
+      setLoading(true);
+      
+      // Fetch both course details and submissions in parallel
+      const [courseResponse, submissionsResponse] = await Promise.all([
+        fetch(`/api/org-service/courses/${courseId}/detail`, {
+          headers: { 'Authorization': `Bearer ${accessToken}` }
+        }),
+        fetch(`/api/org-service/courses/assignments/${assignmentId}/submissions`, {
+          headers: { 'Authorization': `Bearer ${accessToken}` }
+        })
+      ]);
+      
+      if (!courseResponse.ok) {
+        throw new Error('Failed to fetch course details');
+      }
+      
+      const courseData = await courseResponse.json();
+      const assignments = courseData.assignments || [];
+      const foundAssignment = assignments.find((a: any) => a.id === assignmentId);
+      
+      if (foundAssignment) {
+        setAssignment({
+          id: foundAssignment.id,
+          title: foundAssignment.title,
+          description: foundAssignment.description || "",
+          due_at: foundAssignment.due_at,
+          points: foundAssignment.points,
+          course_id: courseId,
+          lesson_id: foundAssignment.lesson_id || 0,
+          lesson_title: foundAssignment.lesson_title,
+          course_title: courseData.course?.title,
+        });
+      }
+      
+      if (!submissionsResponse.ok) {
+        throw new Error(`Failed to fetch submissions: ${submissionsResponse.status}`);
+      }
+      
+      const submissionsData = await submissionsResponse.json();
+      const submissionsList = submissionsData.submissions || [];
+      
+      setSubmissions(submissionsList);
+      setFilteredSubmissions(submissionsList);
+      
+    } catch (error) {
+      console.error("Error loading submissions:", error);
+      toast.error("Failed to load submissions");
+    } finally {
+      setLoading(false);
+    }
+  };
+    
   useEffect(() => {
     let filtered = [...submissions];
     
@@ -202,6 +218,10 @@ export default function AssignmentSubmissionsPage() {
   
   const handleSubmitGrade = async () => {
     if (!selectedSubmission) return;
+    if (!accessToken) {
+      toast.error("Please log in");
+      return;
+    }
     
     if (gradeValue < 0 || gradeValue > (assignment?.points || 100)) {
       toast.error(`Grade must be between 0 and ${assignment?.points || 100}`);
@@ -211,20 +231,32 @@ export default function AssignmentSubmissionsPage() {
     setSubmitting(true);
     
     try {
-      const supabase = getSupabaseBrowserClient();
-      
-      const { error } = await supabase
-        .from("submissions")
-        .update({
+      const response = await fetch(`/api/org-service/submissions/${selectedSubmission.id}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
           grade: gradeValue,
           feedback: feedbackValue || null,
-        })
-        .eq("id", selectedSubmission.id);
+        }),
+      });
       
-      if (error) throw error;
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to update grade');
+      }
       
       // Update local state
       setSubmissions(prev => prev.map(sub => 
+        sub.id === selectedSubmission.id 
+          ? { ...sub, grade: gradeValue, feedback: feedbackValue }
+          : sub
+      ));
+      
+      // Also update filteredSubmissions to keep them in sync
+      setFilteredSubmissions(prev => prev.map(sub => 
         sub.id === selectedSubmission.id 
           ? { ...sub, grade: gradeValue, feedback: feedbackValue }
           : sub
@@ -241,7 +273,7 @@ export default function AssignmentSubmissionsPage() {
       setSubmitting(false);
     }
   };
-  
+
   const getInitials = (firstName: string, lastName: string, username: string) => {
     if (firstName) return firstName[0];
     if (lastName) return lastName[0];
@@ -348,7 +380,12 @@ export default function AssignmentSubmissionsPage() {
             <div className="flex justify-between items-start flex-wrap gap-4">
               <div>
                 <h3 className="font-semibold text-white">{assignment?.title}</h3>
-                <p className="text-sm text-gray-400 mt-1">{assignment?.description}</p>
+                {assignment?.description && (
+                  <div 
+                    className="text-sm text-gray-400 mt-1 prose prose-invert prose-sm max-w-none"
+                    dangerouslySetInnerHTML={{ __html: assignment.description }}
+                  />
+                )}
               </div>
               <Badge className="bg-purple-500/20 text-purple-300">
                 Due: {assignment?.due_at ? new Date(assignment.due_at).toLocaleDateString() : "No due date"}

@@ -786,60 +786,68 @@ export default function AssignmentsPage() {
     setSelectedTeacherAssignment(assignment);
     setGradingPanelOpen(true);
     setLoadingSubmissions(true);
-    
+
     try {
       const token = await getAuthToken();
       if (!token) throw new Error("Not authenticated");
       
-      const response = await fetch(`/api/org-service/course-classes/${assignment.id}/students`, {
+      // CORRECTED: Use the exact endpoint from your backend
+      const submissionsResponse = await fetch(`/api/org-service/assignments/${assignment.id}/submissions`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       
-      if (!response.ok) throw new Error("Failed to load submissions");
-      
-      const data = await response.json();
-      const students = data.students || [];
-      
-      // Get submissions for each student
-      const formattedSubmissions: Submission[] = [];
-      
-      for (const student of students) {
-        try {
-          const subResponse = await fetch(`/api/org-service/submissions/${assignment.id}/user/${student.user_id}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-          });
-          
-          if (subResponse.ok) {
-            const submission = await subResponse.json();
-            formattedSubmissions.push({
-              id: submission.id,
-              assignment_id: assignment.id,
-              user_id: student.user_id,
-              user_name: student.user?.first_name ? `${student.user.first_name} ${student.user.last_name || ''}`.trim() : student.user?.username || 'Student',
-              user_email: student.user?.email || '',
-              content_url: submission.content_url,
-              text_content: submission.text_content,
-              grade: submission.grade,
-              feedback: submission.feedback,
-              submitted_at: submission.submitted_at,
-              status: submission.grade !== null ? "graded" : "submitted",
-            });
-          }
-        } catch (err) {
-          // No submission for this student
-        }
+      if (!submissionsResponse.ok) {
+        const errorData = await submissionsResponse.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to load submissions");
       }
+      
+      const submissionsData = await submissionsResponse.json();
+      const submissionsList = submissionsData.submissions || [];
+      
+      console.log('Submissions loaded:', submissionsList.length); // Debug log
+      
+      // Format submissions - ensure user data is properly structured
+      const formattedSubmissions: Submission[] = submissionsList.map((sub: any) => ({
+        id: sub.id,
+        assignment_id: assignment.id,
+        user_id: sub.user_id,
+        user_name: sub.user?.first_name 
+          ? `${sub.user.first_name} ${sub.user.last_name || ''}`.trim()
+          : sub.user?.username || 'Student',
+        user_email: sub.user?.email || '',
+        content_url: sub.content_url || null,
+        text_content: sub.text_content || null,
+        grade: sub.grade || null,
+        feedback: sub.feedback || null,
+        submitted_at: sub.submitted_at,
+        status: sub.grade !== null && sub.grade !== undefined ? "graded" : "submitted",
+      }));
       
       setSubmissions(formattedSubmissions);
       
+      // Update local stats for this assignment
+      setTeacherAssignments(prev => prev.map(a => 
+        a.id === assignment.id 
+          ? { 
+              ...a, 
+              total_submissions: formattedSubmissions.length,
+              graded_count: formattedSubmissions.filter(s => s.grade !== null).length,
+              pending_count: formattedSubmissions.filter(s => s.grade === null).length,
+              average_grade: formattedSubmissions.filter(s => s.grade !== null).length > 0
+                ? formattedSubmissions.filter(s => s.grade !== null).reduce((sum, s) => sum + (s.grade || 0), 0) / formattedSubmissions.filter(s => s.grade !== null).length
+                : 0
+            }
+          : a
+      ));
+      
     } catch (error) {
       console.error("Error fetching submissions:", error);
-      toast.error("Failed to load submissions");
+      toast.error(error instanceof Error ? error.message : "Failed to load submissions");
     } finally {
       setLoadingSubmissions(false);
     }
   };
-  
+
   const handleGradeSubmission = async () => {
     if (!selectedSubmission) return;
     
@@ -873,19 +881,35 @@ export default function AssignmentsPage() {
       
       toast.success(`Grade submitted for ${selectedSubmission.user_name}`);
       
-      // Update local state
-      setSubmissions(prev => prev.map(s =>
+      // Update local state immediately
+      const updatedSubmissions = submissions.map(s =>
         s.id === selectedSubmission.id
           ? { ...s, grade: gradeValue, feedback: feedbackValue, status: "graded" as const }
           : s
-      ));
+      );
+      setSubmissions(updatedSubmissions);
+      
+      // Update teacher assignments stats
+      if (selectedTeacherAssignment) {
+        setTeacherAssignments(prev => prev.map(a =>
+          a.id === selectedTeacherAssignment.id
+            ? {
+                ...a,
+                graded_count: updatedSubmissions.filter(s => s.grade !== null).length,
+                pending_count: updatedSubmissions.filter(s => s.grade === null).length,
+                average_grade: updatedSubmissions.filter(s => s.grade !== null).length > 0
+                  ? updatedSubmissions.filter(s => s.grade !== null).reduce((sum, s) => sum + (s.grade || 0), 0) / updatedSubmissions.filter(s => s.grade !== null).length
+                  : 0
+              }
+            : a
+        ));
+      }
       
       setSelectedSubmission(null);
       setGradeValue(0);
       setFeedbackValue("");
       
-      // Refresh assignment stats and student view
-      await fetchTeacherAssignments();
+      // Refresh student assignments view as well
       await fetchStudentAssignments();
       
     } catch (error: any) {
@@ -895,7 +919,7 @@ export default function AssignmentsPage() {
       setSubmittingGrade(false);
     }
   };
-  
+    
   // ============ HELPER FUNCTIONS ============
   
   const getStudentStatusConfig = (status: string) => {

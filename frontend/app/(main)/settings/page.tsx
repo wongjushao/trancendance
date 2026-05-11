@@ -319,7 +319,7 @@ export default function SettingsPage() {
         }
 
         // Batch all API calls in parallel
-        const [profileRes, mfaRes, notifRes, passwordRes] = await Promise.all([
+        const [profileRes, mfaRes, notifRes, passwordRes, orgsRes] = await Promise.all([
           fetch('/api/auth-service/profile', {
             headers: { 'Authorization': `Bearer ${token}` }
           }),
@@ -331,7 +331,11 @@ export default function SettingsPage() {
           }),
           fetch('/api/auth-service/password-status', {
             headers: { 'Authorization': `Bearer ${token}` }
-          })
+          }),
+          // Add organizations fetch
+          fetch('/api/org-service/organizations/memberships', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          }).catch(() => ({ ok: false })) // Don't fail if this endpoint doesn't exist yet
         ]);
 
         // Check if any failed
@@ -342,6 +346,39 @@ export default function SettingsPage() {
         const profileData = await profileRes.json();
         const mfaData = await mfaRes.json();
         const passwordData = passwordRes.ok ? await passwordRes.json() : null;
+        
+        // Parse organizations if available
+        if (orgsRes.ok) {
+          const orgsData = await orgsRes.json();
+          const organizations = orgsData.organizations || [];
+          
+          // Fetch member counts for each organization
+          const orgsWithCounts = await Promise.all(
+            organizations.map(async (org: any) => {
+              let memberCount = 0;
+              try {
+                const membersResponse = await fetch(`/api/org-service/orgs/${org.id}/members`, {
+                  headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (membersResponse.ok) {
+                  const membersData = await membersResponse.json();
+                  memberCount = membersData.members?.length || 0;
+                }
+              } catch (err) {
+                console.error(`Error fetching member count for org ${org.id}:`, err);
+              }
+              return {
+                id: org.id,
+                name: org.name,
+                memberCount: memberCount,
+                role: org.role,
+              };
+            })
+          );
+          
+          setUserOrganizations(orgsWithCounts);
+          checkPendingDeletions();
+        }
         
         // Handle notification prefs (might 404 if not exist)
         let notifData = null;
@@ -451,19 +488,112 @@ export default function SettingsPage() {
     }
   };
 
-  // Load user's organizations (where they are admin)
+  // Load user's organizations (where they are admin or member)
   const loadUserOrganizations = async () => {
     setLoadingOrgs(true);
     try {
-      // Mock data - replace with actual API call
-      const mockOrganizations: Organization[] = [
-        { id: 1, name: "Tech University", memberCount: 2847 },
-        { id: 2, name: "Design Academy", memberCount: 543 },
-      ];
+      const token = await getAuthToken();
+      if (!token) {
+        console.error('No auth token for loading organizations');
+        setLoadingOrgs(false);
+        return;
+      }
+
+      // Get the current user's profile to get their ID
+      const profileResponse = await fetch('/api/auth-service/profile', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (!profileResponse.ok) {
+        throw new Error('Failed to fetch user profile');
+      }
+
+      const profileData = await profileResponse.json();
+      const userId = profileData.id;
+
+      // Fetch organizations the user belongs to
+      const orgsResponse = await fetch(`/api/org-service/users/${userId}/organizations`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (!orgsResponse.ok) {
+        // If the endpoint doesn't exist yet, try alternative endpoint
+        console.warn('Primary org endpoint failed, trying alternative...');
+        
+        // Alternative: Get organizations via memberships endpoint
+        const membershipsResponse = await fetch(`/api/org-service/organizations/memberships`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (membershipsResponse.ok) {
+          const membershipsData = await membershipsResponse.json();
+          const organizations = membershipsData.organizations || [];
+          
+          // Fetch member counts for each organization
+          const orgsWithCounts = await Promise.all(
+            organizations.map(async (org: any) => {
+              let memberCount = 0;
+              try {
+                const membersResponse = await fetch(`/api/org-service/orgs/${org.id}/members`, {
+                  headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (membersResponse.ok) {
+                  const membersData = await membersResponse.json();
+                  memberCount = membersData.members?.length || 0;
+                }
+              } catch (err) {
+                console.error(`Error fetching member count for org ${org.id}:`, err);
+              }
+              return {
+                id: org.id,
+                name: org.name,
+                memberCount: memberCount,
+                role: org.role,
+              };
+            })
+          );
+          
+          setUserOrganizations(orgsWithCounts);
+          checkPendingDeletions();
+          setLoadingOrgs(false);
+          return;
+        }
+        
+        throw new Error('Failed to fetch organizations');
+      }
+
+      const orgsData = await orgsResponse.json();
+      const organizations = orgsData.organizations || [];
       
-      const adminOrgs = mockOrganizations;
-      setUserOrganizations(adminOrgs);
+      // Fetch member counts for each organization (optional)
+      const orgsWithCounts = await Promise.all(
+        organizations.map(async (org: any) => {
+          let memberCount = 0;
+          try {
+            const membersResponse = await fetch(`/api/org-service/orgs/${org.id}/members`, {
+              headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (membersResponse.ok) {
+              const membersData = await membersResponse.json();
+              memberCount = membersData.members?.length || 0;
+            }
+          } catch (err) {
+            console.error(`Error fetching member count for org ${org.id}:`, err);
+          }
+          return {
+            id: org.id,
+            name: org.name,
+            memberCount: memberCount,
+            role: org.role,
+          };
+        })
+      );
+      
+      setUserOrganizations(orgsWithCounts);
       checkPendingDeletions();
+    } catch (error) {
+      console.error('Error loading organizations:', error);
+      toast.error('Failed to load your organizations');
     } finally {
       setLoadingOrgs(false);
     }
