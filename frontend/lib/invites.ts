@@ -67,7 +67,7 @@ export function createOrganizationInvite(
   invitations.push(newInvite);
   saveInvitations(invitations);
   
-  console.log('[Invites] Created invitation:', { token, email, organizationId, role });
+  // console.log('[Invites] Created invitation:', { token, email, organizationId, role });
   
   sendMockInvitation(
     email,
@@ -113,7 +113,7 @@ export function createCourseInvite(
   invitations.push(newInvite);
   saveInvitations(invitations);
   
-  console.log('[Invites] Created course invitation:', { token, email, courseId, courseName });
+  // console.log('[Invites] Created course invitation:', { token, email, courseId, courseName });
   
   sendMockInvitation(
     email,

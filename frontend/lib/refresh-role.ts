@@ -8,7 +8,7 @@ export async function refreshUserRoleFromBackend(): Promise<RoleData | null> {
     const { data: { session } } = await supabase.auth.getSession();
     
     if (!session?.access_token) {
-      console.log('[RefreshRole] No session, skipping');
+      // console.log('[RefreshRole] No session, skipping');
       return null;
     }
     

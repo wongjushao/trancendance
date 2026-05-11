@@ -48,7 +48,7 @@ export function getUserRoleData(): RoleData {
       
       // If role is pending, pending_admin, pending_teacher, or any non-valid value, default to student
       if (!validRoles.includes(role)) {
-        console.log(`[Role] Sanitizing invalid role: "${role}" -> defaulting to "student"`);
+        // console.log(`[Role] Sanitizing invalid role: "${role}" -> defaulting to "student"`);
         role = 'student';
         
         // Also clear pending fields if they exist

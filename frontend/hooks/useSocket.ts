@@ -7,18 +7,18 @@ import { io, Socket, ManagerOptions, SocketOptions } from 'socket.io-client';
 function resolveSocketUrl(): string {
   // Use environment variable if set (from .env file)
   if (process.env.NEXT_PUBLIC_SOCKET_URL) {
-    console.log('[Socket] Using NEXT_PUBLIC_SOCKET_URL:', process.env.NEXT_PUBLIC_SOCKET_URL);
+    // console.log('[Socket] Using NEXT_PUBLIC_SOCKET_URL:', process.env.NEXT_PUBLIC_SOCKET_URL);
     return process.env.NEXT_PUBLIC_SOCKET_URL;
   }
   
   // Fallback for development - use localhost for direct browser connections
   if (typeof window !== 'undefined') {
-    console.log('[Socket] Using window.location.origin:', window.location.origin);
+    // console.log('[Socket] Using window.location.origin:', window.location.origin);
     return window.location.origin;
   }
   
   // Server-side fallback (should not be used for actual connections)
-  console.log('[Socket] Using default localhost:5002');
+	// console.log('[Socket] Using default localhost:5002');
   return 'http://localhost:5002';
 }
 
@@ -71,7 +71,7 @@ export const useSocket = (token?: string) => {
 
   const connectSocket = useCallback(() => {
     if (!token) {
-      console.log('[Socket] No token, skipping connection');
+      // console.log('[Socket] No token, skipping connection');
       return;
     }
 
@@ -81,8 +81,8 @@ export const useSocket = (token?: string) => {
     reconnectAttemptsRef.current = 0;
 
     const socketUrl = resolveSocketUrl();
-    console.log(`[Socket] Connecting to ${socketUrl}${SOCKET_PATH}`);
-    console.log(`[Socket] Token length: ${token.length}`);
+    // console.log(`[Socket] Connecting to ${socketUrl}${SOCKET_PATH}`);
+    // console.log(`[Socket] Token length: ${token.length}`);
 
     const socketOptions: Partial<ManagerOptions & SocketOptions> = {
       auth: { token },
@@ -99,7 +99,7 @@ export const useSocket = (token?: string) => {
     socketRef.current = socket;
 
     socket.on('connect', () => {
-      console.log('[Socket] Connected successfully:', socket.id);
+      // console.log('[Socket] Connected successfully:', socket.id);
       setIsConnected(true);
       setIsConnecting(false);
       setLastError(null);
@@ -108,8 +108,8 @@ export const useSocket = (token?: string) => {
 
     socket.on('connect_error', (err) => {
       const msg = err?.message || 'Connection failed';
-      console.error('[Socket] Connection error:', msg);
-      console.error('[Socket] Error details:', err);
+    //   console.error('[Socket] Connection error:', msg);
+    //   console.error('[Socket] Error details:', err);
       setLastError(msg);
       setIsConnected(false);
       setIsConnecting(false);
@@ -118,7 +118,7 @@ export const useSocket = (token?: string) => {
       if (reconnectAttemptsRef.current < 3) {
         reconnectAttemptsRef.current++;
         reconnectTimeoutRef.current = setTimeout(() => {
-          console.log(`[Socket] Reconnection attempt ${reconnectAttemptsRef.current}`);
+        //   console.log(`[Socket] Reconnection attempt ${reconnectAttemptsRef.current}`);
           if (socketRef.current && !socketRef.current.connected) {
             socketRef.current.connect();
           }
@@ -127,14 +127,14 @@ export const useSocket = (token?: string) => {
     });
 
     socket.on('disconnect', (reason) => {
-      console.log('[Socket] Disconnected:', reason);
+      // console.log('[Socket] Disconnected:', reason);
       setIsConnected(false);
       if (reason === 'io server disconnect') {
         // Server initiated disconnect, attempt reconnect
         if (reconnectAttemptsRef.current < 3) {
           reconnectAttemptsRef.current++;
           reconnectTimeoutRef.current = setTimeout(() => {
-            console.log(`[Socket] Reconnecting after server disconnect: attempt ${reconnectAttemptsRef.current}`);
+            // console.log(`[Socket] Reconnecting after server disconnect: attempt ${reconnectAttemptsRef.current}`);
             socket.connect();
           }, 1000);
         }
@@ -177,7 +177,7 @@ export const useSocket = (token?: string) => {
   }, []);
 
   const reconnect = useCallback(() => {
-    console.log('[Socket] Manual reconnect requested');
+    // console.log('[Socket] Manual reconnect requested');
     connectSocket();
   }, [connectSocket]);
 

@@ -20,7 +20,7 @@ export default function MFAVerifyPage() {
 
   useEffect(() => {
     const checkPendingMFA = async () => {
-      console.log("[MFA Verify] Checking for pending MFA...");
+      // console.log("[MFA Verify] Checking for pending MFA...");
 
       const supabase = getSupabaseBrowserClient();
       const { data: { session } } = await supabase.auth.getSession();
@@ -33,13 +33,13 @@ export default function MFAVerifyPage() {
       const access = sessionStorage.getItem("mfa_access_token") || session?.access_token || null;
       const refresh = sessionStorage.getItem("mfa_refresh_token") || session?.refresh_token || null;
       
-      console.log("[MFA Verify] mfa_required:", mfaRequired);
-      console.log("[MFA Verify] cookie pending:", cookiePending);
-      console.log("[MFA Verify] access present:", !!access);
-      console.log("[MFA Verify] refresh present:", !!refresh);
+      // console.log("[MFA Verify] mfa_required:", mfaRequired);
+      // console.log("[MFA Verify] cookie pending:", cookiePending);
+      // console.log("[MFA Verify] access present:", !!access);
+      // console.log("[MFA Verify] refresh present:", !!refresh);
       
       if ((mfaRequired !== "true" && !cookiePending) || !access || !refresh) {
-        console.log("[MFA Verify] No pending MFA found, redirecting to login");
+        // console.log("[MFA Verify] No pending MFA found, redirecting to login");
         // Clean up any stale data
         sessionStorage.removeItem("mfa_access_token");
         sessionStorage.removeItem("mfa_refresh_token");
@@ -53,7 +53,7 @@ export default function MFAVerifyPage() {
       setAccessToken(access);
       setRefreshToken(refresh);
       setIsLoading(false);
-      console.log("[MFA Verify] MFA verification ready");
+      // console.log("[MFA Verify] MFA verification ready");
     };
 
     checkPendingMFA();
@@ -76,7 +76,7 @@ export default function MFAVerifyPage() {
     setError(null);
 
     try {
-      console.log("[MFA Verify] Verifying code with backend...");
+      // console.log("[MFA Verify] Verifying code with backend...");
       
       const supabase = getSupabaseBrowserClient();
       
@@ -91,10 +91,10 @@ export default function MFAVerifyPage() {
       });
       
       const data = await response.json();
-      console.log("[MFA Verify] Verification response:", { success: data.success, status: response.status });
+      // console.log("[MFA Verify] Verification response:", { success: data.success, status: response.status });
       
       if (response.ok && data.success) {
-        console.log("[MFA Verify] MFA verification successful!");
+        // console.log("[MFA Verify] MFA verification successful!");
         
         // Clear MFA data from sessionStorage
         sessionStorage.removeItem("mfa_access_token");
@@ -113,10 +113,10 @@ export default function MFAVerifyPage() {
           const onboardingData = await onboardingResponse.json();
           
           if (onboardingData.onboarded) {
-            console.log("[MFA Verify] User onboarded, redirecting to dashboard");
+            // console.log("[MFA Verify] User onboarded, redirecting to dashboard");
             router.replace("/dashboard");
           } else {
-            console.log("[MFA Verify] User not onboarded, redirecting to onboarding");
+            // console.log("[MFA Verify] User not onboarded, redirecting to onboarding");
             router.replace("/onboarding");
           }
         }, 500);

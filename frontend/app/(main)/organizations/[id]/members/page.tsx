@@ -345,7 +345,7 @@ export default function OrganizationMembersPage() {
       } else {
         toast.info(`Invitation created for ${inviteEmail}. Email delivery is not configured.`);
         if (data.mock_email) {
-          console.log("Mock invitation email:", data.mock_email);
+          // console.log("Mock invitation email:", data.mock_email);
         }
       }
       

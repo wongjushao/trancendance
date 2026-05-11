@@ -117,7 +117,7 @@ export default function CoursesPage() {
             organizationName: roleData.organizationName,
             hasOrganization: roleData.organizationId !== null,
           });
-          console.log("[CoursesPage] User role loaded:", roleData);
+          // console.log("[CoursesPage] User role loaded:", roleData);
         } else {
           setUserRole({
             role: "student",
@@ -150,7 +150,7 @@ export default function CoursesPage() {
       try {
         const data = await apiRequest('/api/org-service/users/me/enrolled-courses');
         setEnrolledCourses(data.courses || []);
-        console.log("[CoursesPage] Enrolled courses:", data.courses?.length);
+        // console.log("[CoursesPage] Enrolled courses:", data.courses?.length);
       } catch (error) {
         console.error("Error fetching enrolled courses:", error);
       }
@@ -160,7 +160,7 @@ export default function CoursesPage() {
         const url = `/api/org-service/users/me/discover-courses${searchQuery ? `?q=${encodeURIComponent(searchQuery)}` : ''}`;
         const data = await apiRequest(url);
         setDiscoverCourses(data.courses || []);
-        console.log("[CoursesPage] Discover courses:", data.courses?.length);
+        // console.log("[CoursesPage] Discover courses:", data.courses?.length);
       } catch (error) {
         console.error("Error fetching discover courses:", error);
       }
@@ -170,7 +170,7 @@ export default function CoursesPage() {
         try {
           const data = await apiRequest('/api/org-service/users/me/created-courses');
           setCreatedCourses(data.courses || []);
-          console.log("[CoursesPage] Created courses:", data.courses?.length);
+          // console.log("[CoursesPage] Created courses:", data.courses?.length);
         } catch (error) {
           console.error("Error fetching created courses:", error);
         }

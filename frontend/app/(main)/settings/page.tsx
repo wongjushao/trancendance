@@ -809,13 +809,13 @@ export default function SettingsPage() {
       return null;
     }
     
-    console.log('Session user:', session.user.email);
-    console.log('Token expires at:', new Date(session.expires_at * 1000).toLocaleString());
+    // console.log('Session user:', session.user.email);
+    // console.log('Token expires at:', new Date(session.expires_at * 1000).toLocaleString());
     
     // Check if token is expired
     const expiresAt = session.expires_at;
     if (expiresAt && expiresAt * 1000 < Date.now()) {
-      console.log('Token expired, refreshing...');
+      // console.log('Token expired, refreshing...');
       const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
       if (refreshError || !refreshData.session) {
         console.error('Failed to refresh token:', refreshError);
@@ -885,7 +885,7 @@ export default function SettingsPage() {
       
       if (response.ok) {
         const data = await response.json();
-        console.log('Create default response:', data);
+        // console.log('Create default response:', data);
         // FIX: Extract nested preferences
         if (data.preferences) {
           setNotificationPrefs(data.preferences);
@@ -900,7 +900,7 @@ export default function SettingsPage() {
   const saveNotificationPrefs = async (key: keyof Exclude<typeof notificationPrefs, null>, value: boolean) => {
     if (!notificationPrefs) return;
     
-    console.log(`saveNotificationPrefs called: key=${key}, value=${value}`);
+    // console.log(`saveNotificationPrefs called: key=${key}, value=${value}`);
     
     try {
       const token = await getAuthToken();
@@ -915,7 +915,7 @@ export default function SettingsPage() {
       params.append(key, String(value));
       
       const url = `/api/notification-service/notification?${params.toString()}`;
-      console.log('PATCH URL:', url);
+      // console.log('PATCH URL:', url);
       
       const response = await fetch(url, {
         method: 'PATCH',
@@ -925,7 +925,7 @@ export default function SettingsPage() {
         },
       });
       
-      console.log('PATCH response status:', response.status);
+      // console.log('PATCH response status:', response.status);
       
       if (!response.ok) {
         const errorText = await response.text();
@@ -934,15 +934,15 @@ export default function SettingsPage() {
       }
       
       const data = await response.json();
-      console.log('PATCH response data:', data);
+      // console.log('PATCH response data:', data);
       
       // FIX: Extract nested preferences from the response
       if (data.preferences) {
-        console.log('Setting prefs from preferences object:', data.preferences);
+        // console.log('Setting prefs from preferences object:', data.preferences);
         setNotificationPrefs(data.preferences);
       } else if (data.updated) {
         // Handle the backend's response format with 'updated' field
-        console.log('Update successful, refetching to get latest state...');
+        // console.log('Update successful, refetching to get latest state...');
         await fetchNotificationPrefs();
       } else {
         // Fallback: assume update was successful and update optimistically
@@ -1281,7 +1281,7 @@ export default function SettingsPage() {
       if (error.message?.includes("user_from_sub_claim_in_jwt_does_not_exist") ||
           error.message?.includes("User from sub claim in JWT does not exist")) {
         // User might have been deleted already - just sign out locally
-        console.log("User may have been deleted already, signing out locally");
+        // console.log("User may have been deleted already, signing out locally");
         clearUserRoleData();
         await supabase.auth.signOut();
         toast.success("Account sign out successful (account was already deleted)");

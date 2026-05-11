@@ -46,17 +46,17 @@ export default function AppLayout({
 
   useEffect(() => {
     const checkAuth = async () => {
-      console.log("[AppLayout] Starting auth check for path:", pathname);
+    //   console.log("[AppLayout] Starting auth check for path:", pathname);
       
       const supabase = getSupabaseBrowserClient();
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
-      console.log("[AppLayout] Session error:", sessionError);
-      console.log("[AppLayout] Session exists:", !!session);
-      console.log("[AppLayout] Access token exists:", !!session?.access_token);
+    //   console.log("[AppLayout] Session error:", sessionError);
+    //   console.log("[AppLayout] Session exists:", !!session);
+    //   console.log("[AppLayout] Access token exists:", !!session?.access_token);
       
       if (sessionError || !session?.access_token) {
-        console.log("[AppLayout] No valid session, redirecting to /");
+        // console.log("[AppLayout] No valid session, redirecting to /");
         router.push("/");
         return;
       }
@@ -65,27 +65,27 @@ export default function AppLayout({
 
       try {
         // Get user info from backend
-        console.log("[AppLayout] Fetching user info...");
+        // console.log("[AppLayout] Fetching user info...");
         const userResponse = await fetch('/api/auth-service/auth/me', {
           headers: {
             'Authorization': `Bearer ${token}`,
           },
         });
 
-        console.log("[AppLayout] User response status:", userResponse.status);
+        // console.log("[AppLayout] User response status:", userResponse.status);
 
         if (!userResponse.ok) {
-          console.log("[AppLayout] User response not OK, redirecting to /");
+        //   console.log("[AppLayout] User response not OK, redirecting to /");
           router.push("/");
           return;
         }
 
         const userData = await userResponse.json();
-        console.log("[AppLayout] User data received:", { id: userData.id, email: userData.email });
+        // console.log("[AppLayout] User data received:", { id: userData.id, email: userData.email });
         setUser(userData);
 
         // Check onboarding status
-        console.log("[AppLayout] Checking onboarding status...");
+        // console.log("[AppLayout] Checking onboarding status...");
         const onboardingResponse = await fetch('/api/auth-service/onboarding-status', {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -93,28 +93,28 @@ export default function AppLayout({
           cache: 'no-store',
         });
 
-        console.log("[AppLayout] Onboarding response status:", onboardingResponse.status);
+        // console.log("[AppLayout] Onboarding response status:", onboardingResponse.status);
 
         if (!onboardingResponse.ok) {
-          console.error('[AppLayout] Failed to check onboarding status:', onboardingResponse.status);
+        //   console.error('[AppLayout] Failed to check onboarding status:', onboardingResponse.status);
           router.push("/onboarding");
           return;
         }
 
         const onboardingData = await onboardingResponse.json();
-        console.log("[AppLayout] Onboarding data:", onboardingData);
+        // console.log("[AppLayout] Onboarding data:", onboardingData);
         
         if (!onboardingData.onboarded) {
-          console.log("[AppLayout] User not onboarded, redirecting to /onboarding");
+        //   console.log("[AppLayout] User not onboarded, redirecting to /onboarding");
           router.push("/onboarding");
           return;
         }
         
-        console.log("[AppLayout] Auth check passed!");
+        // console.log("[AppLayout] Auth check passed!");
         setIsLoading(false);
         
       } catch (error) {
-        console.error('[AppLayout] Error checking auth:', error);
+        // console.error('[AppLayout] Error checking auth:', error);
         router.push("/");
         return;
       }

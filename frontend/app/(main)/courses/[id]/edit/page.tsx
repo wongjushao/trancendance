@@ -232,7 +232,7 @@ function SortableLessonItem({ lesson, index, classId, moduleId, onEdit, onDelete
   };
 
   // Debug: Log assignments data
-  console.log(`Lesson "${lesson.title}" (ID: ${lesson.id}) - Assignments:`, lesson.assignments);
+  // console.log(`Lesson "${lesson.title}" (ID: ${lesson.id}) - Assignments:`, lesson.assignments);
   
   // Safe check for assignments - ensure it's an array
   const assignments = Array.isArray(lesson.assignments) ? lesson.assignments : [];
@@ -449,7 +449,7 @@ export default function EditCoursePage() {
       },
       // Add this to debug pointer events
       onActivation: ({ event }) => {
-        console.log("Pointer activated:", event.target);
+        // console.log("Pointer activated:", event.target);
       },
     }),
     useSensor(KeyboardSensor, {
@@ -482,7 +482,7 @@ export default function EditCoursePage() {
       try {
         const userProfile = await apiRequest('/api/auth-service/profile');
         if (userProfile) {
-          console.log("Current user ID:", userProfile.id);
+          // console.log("Current user ID:", userProfile.id);
           setCurrentUserId(userProfile.id);
         }
       } catch (error) {
@@ -516,8 +516,8 @@ export default function EditCoursePage() {
           assignmentsByLesson[lessonId].push(assignment);
         });
         
-        console.log("Fetched assignments:", allAssignments.length);
-        console.log("Assignments by lesson:", assignmentsByLesson);
+        // console.log("Fetched assignments:", allAssignments.length);
+        // console.log("Assignments by lesson:", assignmentsByLesson);
       } catch (err) {
         console.warn("Could not fetch assignments:", err);
         // Continue without assignments if this fails
@@ -541,7 +541,7 @@ export default function EditCoursePage() {
         processedModules.forEach((module: any) => {
           module.classes.forEach((classItem: any) => {
             classItem.lessons.forEach((lesson: any) => {
-              console.log(`Lesson "${lesson.title}" (ID: ${lesson.id}) has ${lesson.assignments?.length || 0} assignments`);
+              // console.log(`Lesson "${lesson.title}" (ID: ${lesson.id}) has ${lesson.assignments?.length || 0} assignments`);
             });
           });
         });
@@ -576,7 +576,7 @@ export default function EditCoursePage() {
   }, [loadCourse]);
 
   const refreshAssignments = async () => {
-    console.log("Refreshing assignments...");
+    // console.log("Refreshing assignments...");
     await loadCourse();
   };
     
@@ -1221,15 +1221,15 @@ const getDayName = (day: number): string => {
   
   // Assignment CRUD - FULLY FIXED with null checks
   const openAssignmentModal = (lesson: LessonWithAssignments, classId: number, moduleId: number, existingAssignment?: any) => {
-    console.log("=== OPEN ASSIGNMENT MODAL ===");
-    console.log("Lesson ID:", lesson.id);
-    console.log("Lesson title:", lesson.title);
-    console.log("Existing assignment:", existingAssignment);
-    console.log("All assignments for this lesson:", lesson.assignments);
+    // console.log("=== OPEN ASSIGNMENT MODAL ===");
+    // console.log("Lesson ID:", lesson.id);
+    // console.log("Lesson title:", lesson.title);
+    // console.log("Existing assignment:", existingAssignment);
+    // console.log("All assignments for this lesson:", lesson.assignments);
     
     // Ensure assignments is an array
     const assignments = lesson.assignments || [];
-    console.log(`Found ${assignments.length} assignments for this lesson`);
+    // console.log(`Found ${assignments.length} assignments for this lesson`);
     
     if (existingAssignment) {
       // Edit existing assignment
@@ -1260,9 +1260,9 @@ const getDayName = (day: number): string => {
   };
 
   const saveAssignment = async () => {
-    console.log("=== SAVE ASSIGNMENT START ===");
-    console.log("Editing Assignment:", editingAssignment);
-    console.log("Assignment Form:", assignmentForm);
+    // console.log("=== SAVE ASSIGNMENT START ===");
+    // console.log("Editing Assignment:", editingAssignment);
+    // console.log("Assignment Form:", assignmentForm);
     
     if (!assignmentForm.title.trim()) {
       toast.error("Please enter an assignment title");
@@ -1278,7 +1278,7 @@ const getDayName = (day: number): string => {
       // Check if we're editing an existing assignment
       if (editingAssignment?.assignment && editingAssignment.assignment.id) {
         // UPDATE existing assignment
-        console.log("Updating assignment ID:", editingAssignment.assignment.id);
+        // console.log("Updating assignment ID:", editingAssignment.assignment.id);
         
         await updateAssignment(editingAssignment.assignment.id, {
           title: assignmentForm.title,
@@ -1293,7 +1293,7 @@ const getDayName = (day: number): string => {
       // Check if we're creating a new assignment
       else if (editingAssignment?.lessonId) {
         // CREATE new assignment
-        console.log("Creating new assignment for lesson ID:", editingAssignment.lessonId);
+        // console.log("Creating new assignment for lesson ID:", editingAssignment.lessonId);
         
         // Format due date if provided
         let dueAt = null;
@@ -1309,7 +1309,7 @@ const getDayName = (day: number): string => {
           points: assignmentForm.points,
         };
         
-        console.log("Sending assignment data:", assignmentData);
+        // console.log("Sending assignment data:", assignmentData);
         
         await addAssignment(editingAssignment.lessonId, assignmentData);
         
@@ -1334,9 +1334,9 @@ const getDayName = (day: number): string => {
       });
       
       // Force a complete reload of course data
-      console.log("Reloading course data to show new assignment...");
+      // console.log("Reloading course data to show new assignment...");
       await loadCourse();
-      console.log("Course reload complete");
+      // console.log("Course reload complete");
       
     } catch (error: any) {
       console.error("ERROR in saveAssignment:", error);
@@ -1345,8 +1345,8 @@ const getDayName = (day: number): string => {
   };
   
   const handleDeleteAssignment = async (assignmentId: number) => {
-    console.log("=== HANDLE DELETE ASSIGNMENT ===");
-    console.log("Assignment ID to delete:", assignmentId);
+    // console.log("=== HANDLE DELETE ASSIGNMENT ===");
+    // console.log("Assignment ID to delete:", assignmentId);
     
     if (!assignmentId) {
       console.error("No assignment ID provided");
@@ -1358,17 +1358,17 @@ const getDayName = (day: number): string => {
     const confirmed = window.confirm("Are you sure you want to delete this assignment? This action cannot be undone.");
     
     if (!confirmed) {
-      console.log("Deletion cancelled by user");
+      // console.log("Deletion cancelled by user");
       return;
     }
     
     try {
-      console.log("Calling deleteAssignment API for ID:", assignmentId);
+      // console.log("Calling deleteAssignment API for ID:", assignmentId);
       
       // Call the imported deleteAssignment function from supabase
       await deleteAssignment(assignmentId);
       
-      console.log("Delete API successful");
+      // console.log("Delete API successful");
       toast.success("Assignment deleted successfully");
       
       // Close the modal first
@@ -1386,7 +1386,7 @@ const getDayName = (day: number): string => {
       // Then reload the course data to refresh the UI
       await loadCourse();
       
-      console.log("Course reloaded after deletion");
+      // console.log("Course reloaded after deletion");
       
     } catch (error) {
       console.error("Error deleting assignment:", error);
@@ -1447,8 +1447,8 @@ const getDayName = (day: number): string => {
         status: offeringForm.status,
       };
       
-      console.log("offeringData being sent:", offeringData);
-      console.log("Course ID:", courseId);
+      // console.log("offeringData being sent:", offeringData);
+      // console.log("Course ID:", courseId);
       
       let response;
       if (editingOffering) {
@@ -1470,7 +1470,7 @@ const getDayName = (day: number): string => {
         toast.success("Offering added successfully");
       }
       
-      console.log("API response:", response);
+      // console.log("API response:", response);
       
       // Refresh course data
       await loadCourse();

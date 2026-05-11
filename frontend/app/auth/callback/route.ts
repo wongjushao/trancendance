@@ -25,7 +25,7 @@ async function checkMFAStatus(token: string): Promise<{
       throw new Error("MFA status check failed");
     }
     const data = await response.json();
-    console.log("[Auth Callback] MFA status response:", data);
+    // console.log("[Auth Callback] MFA status response:", data);
     return {
       enabled_mfa: data.enabled_mfa === true,
       totp_configured: data.totp_configured === true,
@@ -43,11 +43,11 @@ export async function GET(request: NextRequest) {
   const errorDescription = requestUrl.searchParams.get("error_description");
   const inviteTokenRaw = requestUrl.searchParams.get("invite_token");
 
-  console.log("[Auth Callback] Processing request", {
-    hasCode: !!code,
-    error,
-    hasInviteToken: !!inviteTokenRaw,
-  });
+  // console.log("[Auth Callback] Processing request", {
+    // hasCode: !!code,
+    // error,
+    // hasInviteToken: !!inviteTokenRaw,
+  // });
 
   if (error) {
     console.error("[Auth Callback] OAuth error:", error, errorDescription);
@@ -66,7 +66,7 @@ export async function GET(request: NextRequest) {
   try {
     const supabase = await createSupabaseServerClient();
 
-    console.log("[Auth Callback] Exchanging code for session...");
+    // console.log("[Auth Callback] Exchanging code for session...");
     const { data: sessionData, error: sessionError } =
       await supabase.auth.exchangeCodeForSession(code);
 
@@ -88,24 +88,24 @@ export async function GET(request: NextRequest) {
     const refreshToken = sessionData.session.refresh_token;
     const user = sessionData.user;
 
-    console.log("[Auth Callback] User authenticated:", { userId: user.id, email: user.email });
+    // console.log("[Auth Callback] User authenticated:", { userId: user.id, email: user.email });
 
     // Check if this is a password reset flow
     const type = requestUrl.searchParams.get("type");
     if (type === "recovery") {
-      console.log("[Auth Callback] Password recovery flow");
+      // console.log("[Auth Callback] Password recovery flow");
       return NextResponse.redirect(new URL("/reset-password", getServerSiteOrigin()));
     }
 
     // Check MFA status
-    console.log("[Auth Callback] Checking MFA status...");
+    // console.log("[Auth Callback] Checking MFA status...");
     const mfaStatus = await checkMFAStatus(accessToken);
-    console.log("[Auth Callback] MFA Status:", mfaStatus);
+    // console.log("[Auth Callback] MFA Status:", mfaStatus);
 
     const mfaEnabled = mfaStatus.enabled_mfa && mfaStatus.totp_configured;
 
     if (mfaEnabled) {
-      console.log("[Auth Callback] MFA is enabled - redirecting to MFA verification without creating session");
+      // console.log("[Auth Callback] MFA is enabled - redirecting to MFA verification without creating session");
 
       const html = `
       <!DOCTYPE html>
@@ -120,8 +120,8 @@ export async function GET(request: NextRequest) {
             sessionStorage.setItem('mfa_required', 'true');
             document.cookie = 'mfa_pending=true; path=/; max-age=600; SameSite=Lax';
             
-            console.log('MFA data stored in sessionStorage');
-            console.log('Refresh token stored:', !!sessionStorage.getItem('mfa_refresh_token'));
+            // console.log('MFA data stored in sessionStorage');
+            // console.log('Refresh token stored:', !!sessionStorage.getItem('mfa_refresh_token'));
             
             // Redirect to MFA verify page
             window.location.href = '/auth/mfa-verify';
@@ -147,11 +147,11 @@ export async function GET(request: NextRequest) {
       const qp = new URLSearchParams({
         token: inviteTokenRaw.trim(),
       }).toString();
-      console.log("[Auth Callback] invite_token present, redirecting to accept-invite");
+      // console.log("[Auth Callback] invite_token present, redirecting to accept-invite");
       return NextResponse.redirect(new URL(`/accept-invite?${qp}`, getServerSiteOrigin()));
     }
 
-    console.log("[Auth Callback] No MFA required, redirecting to dashboard");
+    // console.log("[Auth Callback] No MFA required, redirecting to dashboard");
     return NextResponse.redirect(new URL("/dashboard", getServerSiteOrigin()));
     
   } catch (error) {

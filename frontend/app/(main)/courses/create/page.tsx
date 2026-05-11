@@ -34,7 +34,7 @@ export default function CreateCoursePage() {
 
   useEffect(() => {
     const checkOrganization = async () => {
-      console.log('[CreateCourse] Checking organization access...');
+      // console.log('[CreateCourse] Checking organization access...');
       
       try {
         const token = await getAuthToken();
@@ -54,7 +54,7 @@ export default function CreateCoursePage() {
         }
 
         const roleDataFromBackend = await roleResponse.json();
-        console.log('[CreateCourse] Role from backend:', roleDataFromBackend);
+        // console.log('[CreateCourse] Role from backend:', roleDataFromBackend);
 
         // Step 2: Check if user has teacher or admin role
         const canCreateCourse = roleDataFromBackend.role === 'teacher' || 

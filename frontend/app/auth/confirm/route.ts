@@ -41,18 +41,18 @@ export async function GET(request: NextRequest) {
 
   const siteOrigin = getServerSiteOrigin();
 
-  console.log("[auth/confirm] Debug:", { 
-    code_exists: !!code, 
-    token_hash_exists: !!token_hash, 
-    type 
-  });
+  // console.log("[auth/confirm] Debug:", { 
+    // code_exists: !!code, 
+    // token_hash_exists: !!token_hash, 
+    // type 
+  // });
 
   const supabase = await createSupabaseServerClient();
 
   try {
     // Handle code-based flow (OAuth, Google Sign-in, password reset)
     if (code) {
-      console.log("[auth/confirm] Exchanging code for session");
+      // console.log("[auth/confirm] Exchanging code for session");
       const { data, error } = await supabase.auth.exchangeCodeForSession(code);
       
       if (error) {
@@ -74,22 +74,22 @@ export async function GET(request: NextRequest) {
       
       // Check if this is a password reset flow
       if (type === "recovery") {
-        console.log("[auth/confirm] Password reset flow - redirecting to reset-password");
+        // console.log("[auth/confirm] Password reset flow - redirecting to reset-password");
         // Redirect to the reset password page where the user can set a new password
         return NextResponse.redirect(`${siteOrigin}/reset-password`);
       }
       
       // Always check the actual database profile status via backend
       const onboarded = await checkOnboardingStatus(accessToken);
-      console.log("[auth/confirm] Onboarding status from database:", onboarded);
+      // console.log("[auth/confirm] Onboarding status from database:", onboarded);
       
       let redirectPath = next;
       
       if (!onboarded) {
         redirectPath = "/onboarding";
-        console.log("[auth/confirm] User needs onboarding, redirecting to:", redirectPath);
+        // console.log("[auth/confirm] User needs onboarding, redirecting to:", redirectPath);
       } else {
-        console.log("[auth/confirm] User already onboarded, redirecting to:", redirectPath);
+        // console.log("[auth/confirm] User already onboarded, redirecting to:", redirectPath);
         // Update metadata to mark onboarding completed (optional - for UI state)
         try {
           const { error: updateError } = await supabase.auth.updateUser({
@@ -103,13 +103,13 @@ export async function GET(request: NextRequest) {
         }
       }
       
-      console.log("[auth/confirm] Final redirect to:", redirectPath);
+      // console.log("[auth/confirm] Final redirect to:", redirectPath);
       return NextResponse.redirect(`${siteOrigin}${redirectPath}`);
     }
     
     // Handle token_hash flow (email confirmation)
     if (token_hash && type) {
-      console.log("[auth/confirm] Verifying OTP");
+      // console.log("[auth/confirm] Verifying OTP");
       const { data, error } = await supabase.auth.verifyOtp({ type, token_hash });
       
       if (error) {
@@ -123,7 +123,7 @@ export async function GET(request: NextRequest) {
       const session = data.session;
       
       if (type === "recovery") {
-        console.log("[auth/confirm] Recovery flow via token_hash - redirecting to reset-password");
+        // console.log("[auth/confirm] Recovery flow via token_hash - redirecting to reset-password");
         return NextResponse.redirect(`${siteOrigin}/reset-password`);
       }
       

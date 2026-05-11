@@ -424,7 +424,7 @@ export default function OnboardingPage() {
       } : {}),
     };
 
-    console.log('[onboarding] Submitting payload to backend:', payload);
+    // console.log('[onboarding] Submitting payload to backend:', payload);
 
     let backendOk = false;
     let backendErrorMessage: string | null = null;
@@ -440,12 +440,12 @@ export default function OnboardingPage() {
       });
 
       const responseText = await res.text();
-      console.log('[onboarding] Backend response status:', res.status);
-      console.log('[onboarding] Backend response body:', responseText);
+      // console.log('[onboarding] Backend response status:', res.status);
+      // console.log('[onboarding] Backend response body:', responseText);
 
       if (res.ok) {
         backendOk = true;
-        console.log('[onboarding] Backend success');
+        // console.log('[onboarding] Backend success');
       } else {
         let body: { error?: string } = {};
         try {
@@ -468,7 +468,7 @@ export default function OnboardingPage() {
     }
 
     // Wait for database to commit the transaction
-    console.log('[onboarding] Waiting for database commit...');
+    // console.log('[onboarding] Waiting for database commit...');
     await new Promise(resolve => setTimeout(resolve, 1500));
 
     // Refresh the session to get updated user data
@@ -485,7 +485,7 @@ export default function OnboardingPage() {
         
         if (verifyResponse.ok) {
           const status = await verifyResponse.json();
-          console.log('[onboarding] Verification status:', status);
+          // console.log('[onboarding] Verification status:', status);
           
           if (!status.onboarded) {
             console.warn('[onboarding] Profile saved but verification shows not onboarded:', status.missing_fields);
@@ -523,7 +523,7 @@ export default function OnboardingPage() {
 
     // Upload avatar if one was selected
     if (formData.avatar) {
-      console.log('[onboarding] Uploading avatar...');
+      // console.log('[onboarding] Uploading avatar...');
       try {
         const avatarFormData = new FormData();
         avatarFormData.append('avatar', formData.avatar);
@@ -538,7 +538,7 @@ export default function OnboardingPage() {
         
         if (uploadRes.ok) {
           const uploadData = await uploadRes.json();
-          console.log('[onboarding] Avatar uploaded successfully:', uploadData.avatar_url);
+          // console.log('[onboarding] Avatar uploaded successfully:', uploadData.avatar_url);
           localStorage.setItem('avatar_url', uploadData.avatar_url);
           
           if (typeof window !== 'undefined') {

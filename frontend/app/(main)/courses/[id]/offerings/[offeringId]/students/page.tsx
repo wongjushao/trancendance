@@ -175,11 +175,11 @@ export default function CourseStudentsPage() {
         headers: { 'Authorization': `Bearer ${accessToken}` }
       });
       
-      console.log("Offerings endpoint response status:", response.status);
+      // console.log("Offerings endpoint response status:", response.status);
       
       if (response.ok) {
         const data = await response.json();
-        console.log("Offerings from dedicated endpoint:", data);
+        // console.log("Offerings from dedicated endpoint:", data);
         
         const offerings = data.offerings || [];
         setCourseOfferings(offerings);

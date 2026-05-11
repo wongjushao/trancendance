@@ -125,13 +125,13 @@ export function ChatBubble() {
   // Reload messages when entering chat view - force refresh from database
   useEffect(() => {
     if (view === 'chat' && currentRoom && accessToken && currentUserId) {
-      console.log('[ChatBubble] Entering chat view, force refreshing messages from database for room:', currentRoom.id);
+      // console.log('[ChatBubble] Entering chat view, force refreshing messages from database for room:', currentRoom.id);
       // Clear cache to ensure fresh data
       clearRoomCache(currentRoom.id);
       // Force refresh from database (single source of truth)
       forceRefreshMessages(currentRoom.id, accessToken, currentUserId, 50)
         .then(refreshedMessages => {
-          console.log('[ChatBubble] Force refreshed', refreshedMessages.length, 'messages');
+          // console.log('[ChatBubble] Force refreshed', refreshedMessages.length, 'messages');
         })
         .catch(err => {
           console.error('[ChatBubble] Error force refreshing messages:', err);

@@ -804,7 +804,7 @@ export default function AssignmentsPage() {
       const submissionsData = await submissionsResponse.json();
       const submissionsList = submissionsData.submissions || [];
       
-      console.log('Submissions loaded:', submissionsList.length); // Debug log
+      // console.log('Submissions loaded:', submissionsList.length); // Debug log
       
       // Format submissions - ensure user data is properly structured
       const formattedSubmissions: Submission[] = submissionsList.map((sub: any) => ({

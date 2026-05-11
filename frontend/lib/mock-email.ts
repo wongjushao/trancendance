@@ -84,7 +84,7 @@ export function enqueueMockInvitationFromBackend(mock: BackendMockInvitationEmai
   const emails = loadEmails();
   emails.push(email);
   saveEmails(emails);
-  console.log('[MockEmail] Queued invitation from backend', { to: mock.to, subject: mock.subject });
+  // console.log('[MockEmail] Queued invitation from backend', { to: mock.to, subject: mock.subject });
 }
 
 export function sendMockInvitation(
@@ -116,5 +116,5 @@ export function sendMockInvitation(
   emails.push(email);
   saveEmails(emails);
 
-  console.log('[MockEmail] Queued invitation email', { to, subject, link });
+  // console.log('[MockEmail] Queued invitation email', { to, subject, link });
 }

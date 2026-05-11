@@ -1245,7 +1245,7 @@ export default function CourseLearnPage() {
       let cmId = courseDetail.class_member_id;
 
       if (!cmId && courseDetail.course.created_by === userProfile.id) {
-        console.log("Course creator accessing without enrollment");
+        // console.log("Course creator accessing without enrollment");
         cmId = -1;
       }
 

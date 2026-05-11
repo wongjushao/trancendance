@@ -552,8 +552,8 @@ export async function updateAssignment(assignmentId: number, updates: Partial<As
 }
 
 export async function deleteAssignment(assignmentId: number): Promise<void> {
-  console.log("=== DELETE ASSIGNMENT FROM COURSES.TS ===");
-  console.log("Deleting assignment ID:", assignmentId);
+  // console.log("=== DELETE ASSIGNMENT FROM COURSES.TS ===");
+  // console.log("Deleting assignment ID:", assignmentId);
   
   const supabase = getSupabaseBrowserClient();
   
@@ -579,7 +579,7 @@ export async function deleteAssignment(assignmentId: number): Promise<void> {
     throw error;
   }
   
-  console.log("Assignment deleted successfully");
+  // console.log("Assignment deleted successfully");
 }
 
 // Course Class (offering) operations
@@ -635,7 +635,7 @@ export async function addCourseClass(courseId: number, classData: {
     is_published: false,
   };
   
-  console.log("Final insert data for course_classes:", insertData);
+  // console.log("Final insert data for course_classes:", insertData);
   
   const { data, error } = await supabase
     .from("course_classes")

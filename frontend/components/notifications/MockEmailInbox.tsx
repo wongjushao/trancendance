@@ -16,7 +16,7 @@ export function MockEmailInbox({ isOpen, onClose }: MockEmailInboxProps) {
 
   const loadEmails = () => {
     const loaded = getMockEmails();
-    console.log('[MockEmailInbox] Loaded emails:', loaded.length);
+    // console.log('[MockEmailInbox] Loaded emails:', loaded.length);
     setEmails(loaded);
   };
 

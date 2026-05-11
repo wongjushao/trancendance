@@ -129,7 +129,7 @@ async function checkUserCanPromote(orgId: string, token: string): Promise<boolea
       return await checkUserIsAdminViaDB(orgId, token);
     }
     const data = await response.json();
-    console.log(`[proxy] can-promote result for org ${orgId}:`, data);
+    // console.log(`[proxy] can-promote result for org ${orgId}:`, data);
     return data.can_promote === true;
   } catch (error) {
     console.error("[proxy] Error checking promotion permission:", error);
@@ -184,11 +184,11 @@ async function checkUserIsAdminViaDB(orgId: string, token: string): Promise<bool
     
     const memberData = await orgResponse.json();
     const isAdmin = memberData.member_role === "admin" || memberData.member_role === "sub_admin";
-    console.log(`[proxy] User ${userId} is admin: ${isAdmin}`);
+    // console.log(`[proxy] User ${userId} is admin: ${isAdmin}`);
     return isAdmin;
     
   } catch (error) {
-    console.error("[proxy] Error in fallback admin check:", error);
+    // console.error("[proxy] Error in fallback admin check:", error);
     return false;
   }
 }
@@ -208,13 +208,13 @@ export async function proxy(request: NextRequest) {
 
   // Allow public routes without any checks
   if (publicRoutes.some(route => pathname === route || pathname.startsWith(route + "/"))) {
-    console.log("[proxy] Public route, allowing access:", pathname);
+    // console.log("[proxy] Public route, allowing access:", pathname);
     return NextResponse.next();
   }
 
   // Allow MFA verify page without session check
   if (pathname === "/auth/mfa-verify") {
-    console.log("[proxy] MFA verify page, allowing access");
+    // console.log("[proxy] MFA verify page, allowing access");
     return NextResponse.next();
   }
 
@@ -224,7 +224,7 @@ export async function proxy(request: NextRequest) {
 
   // Unauthenticated users
   if (!session || sessionError) {
-    console.log("[proxy] User not authenticated");
+    // console.log("[proxy] User not authenticated");
     
     // Allow access to public-only routes
     if (publicOnlyRoutes.some(route => pathname === route) || 
@@ -240,17 +240,17 @@ export async function proxy(request: NextRequest) {
   }
 
   // Authenticated users
-  console.log("[proxy] User authenticated:", session.user.id);
+//   console.log("[proxy] User authenticated:", session.user.id);
 
   const mfaPending = request.cookies.get("mfa_pending")?.value === "true";
   if (mfaPending && pathname !== "/auth/mfa-verify") {
-    console.log("[proxy] MFA pending, redirecting to verification page");
+    // console.log("[proxy] MFA pending, redirecting to verification page");
     return NextResponse.redirect(new URL("/auth/mfa-verify", request.url));
   }
 
   // Don't re-show login/register to signed-in users
   if (publicOnlyRoutes.some(route => pathname === route)) {
-    console.log("[proxy] Authenticated user trying to access public route, redirecting to dashboard");
+    // console.log("[proxy] Authenticated user trying to access public route, redirecting to dashboard");
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
@@ -262,23 +262,23 @@ export async function proxy(request: NextRequest) {
   const isAuthOnly = authOnlyRoutes.some(route => pathname === route || pathname.startsWith(route + "/"));
   
   if (isProtected || isAuthOnly) {
-    console.log("[proxy] Protected or auth-only page, checking onboarding");
+    // console.log("[proxy] Protected or auth-only page, checking onboarding");
     
     const accessToken = session.access_token;
     const onboarded = await checkOnboardingStatus(accessToken);
-    console.log("[proxy] Onboarding status result:", onboarded);
+    // console.log("[proxy] Onboarding status result:", onboarded);
     
     if (isAuthOnly && !onboarded) {
-      console.log("[proxy] Auth-only route and user not onboarded, allowing access");
+    //   console.log("[proxy] Auth-only route and user not onboarded, allowing access");
       return NextResponse.next();
     }
     
     if (isProtected && !onboarded) {
-      console.log("[proxy] Protected route and user not onboarded, redirecting to onboarding");
+    //   console.log("[proxy] Protected route and user not onboarded, redirecting to onboarding");
       return NextResponse.redirect(new URL("/onboarding", request.url));
     }
     
-    console.log("[proxy] Onboarded user, allowing access");
+    // console.log("[proxy] Onboarded user, allowing access");
   }
 
   // Check organization setup status for admin panel access
@@ -290,7 +290,7 @@ export async function proxy(request: NextRequest) {
     const subpath = orgMatch[2];
     const accessToken = session.access_token;
     
-    console.log(`[proxy] Checking organization access for org ${orgId}, subpath: ${subpath}`);
+    // console.log(`[proxy] Checking organization access for org ${orgId}, subpath: ${subpath}`);
     
     // For admin panel, check if user has admin permission
     if (subpath === "admin") {
@@ -298,11 +298,11 @@ export async function proxy(request: NextRequest) {
       const canPromote = await checkUserCanPromote(orgId, accessToken);
       
       if (!canPromote) {
-        console.log(`[proxy] User is not admin for org ${orgId}, redirecting to org page`);
+        // console.log(`[proxy] User is not admin for org ${orgId}, redirecting to org page`);
         return NextResponse.redirect(new URL(`/organizations/${orgId}`, request.url));
       }
       
-      console.log(`[proxy] User is admin for org ${orgId}, allowing access to admin panel`);
+      // console.log(`[proxy] User is admin for org ${orgId}, allowing access to admin panel`);
       // Skip setup check for admin panel - allow access even if setup incomplete
       return NextResponse.next();
     }
@@ -312,7 +312,7 @@ export async function proxy(request: NextRequest) {
       const isSetupComplete = await checkOrganizationSetupStatus(orgId, accessToken);
       
       if (!isSetupComplete) {
-        console.log(`[proxy] Organization ${orgId} setup incomplete, redirecting to setup page`);
+        // console.log(`[proxy] Organization ${orgId} setup incomplete, redirecting to setup page`);
         return NextResponse.redirect(new URL(`/organizations/${orgId}/setup`, request.url));
       }
     }

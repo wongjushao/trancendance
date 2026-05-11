@@ -119,7 +119,7 @@ function ResetPasswordContent() {
             throw new Error(data.error || "Invalid or expired reset link");
           }
           
-          console.log("Token verified for user:", data.email);
+          // console.log("Token verified for user:", data.email);
           
         } catch (err: any) {
           console.error("Token validation error:", err);

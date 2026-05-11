@@ -34,9 +34,9 @@ export function InviteMemberModal({
 
   // Debug: Log when modal opens/closes
   useEffect(() => {
-    console.log('[InviteMemberModal] isOpen changed:', isOpen);
+    // console.log('[InviteMemberModal] isOpen changed:', isOpen);
     if (isOpen) {
-      console.log('[InviteMemberModal] Modal opened with organization:', organization?.name);
+      // console.log('[InviteMemberModal] Modal opened with organization:', organization?.name);
     }
   }, [isOpen, organization]);
 
@@ -136,7 +136,7 @@ export function InviteMemberModal({
   };
 
   if (!isOpen) {
-    console.log('[InviteMemberModal] Modal not open, returning null');
+    // console.log('[InviteMemberModal] Modal not open, returning null');
     return null;
   }
 

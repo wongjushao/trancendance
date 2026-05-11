@@ -20,7 +20,7 @@ export async function fetchUserRoleFromBackend(): Promise<RoleData | null> {
     const { data: { session } } = await supabase.auth.getSession();
     
     if (!session?.access_token) {
-      console.log("[RoleAPI] No session token");
+      // console.log("[RoleAPI] No session token");
       return null;
     }
     
