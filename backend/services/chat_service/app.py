@@ -9,7 +9,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from backend.common.db import create_engine_and_session
 from backend.services.chat_service.chat_service.middleware.metrics import register_metrics
-from backend.services.chat_service.chat_service.routes.http import chat_bp
+from backend.services.chat_service.chat_service.routes.http import chat_ns, prefixed_chat_bp
 from backend.services.chat_service.chat_service.sockets.handlers import init_socket_events
 
 
@@ -42,6 +42,7 @@ def create_app():
         title="Chat Service API",
         version="1.0",
         doc="/docs",
+        prefix="/",
         authorizations=authorizations,
         security="Bearer",
     )
@@ -70,8 +71,8 @@ def create_app():
     def health():
         return jsonify({"service": "chat", "status": "ok"})
 
-    app.register_blueprint(chat_bp)
-    app.register_blueprint(chat_bp, url_prefix="/api/chat-service", name="chat_service_prefixed")
+    api.add_namespace(chat_ns)
+    app.register_blueprint(prefixed_chat_bp, url_prefix="/api/chat-service")
 
     socketio = SocketIO(
         app,
