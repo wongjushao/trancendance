@@ -962,6 +962,8 @@ interface SidebarProps {
   averageRating: number;
   courseReviews: any[];
   dashboardSidebarCollapsed: boolean;
+  mobileDrawerOpen: boolean;
+  onMobileDrawerClose: () => void;
 }
 
 function Sidebar({ 
@@ -977,7 +979,9 @@ function Sidebar({
   onRateClick,
   averageRating,
   courseReviews,
-  dashboardSidebarCollapsed 
+  dashboardSidebarCollapsed,
+  mobileDrawerOpen,
+  onMobileDrawerClose,
 }: SidebarProps) {
   const [expandedModules, setExpandedModules] = useState<Set<number>>(new Set(modules.map(m => m.id)));
 
@@ -992,27 +996,65 @@ function Sidebar({
   };
 
   return (
-    <div className={`fixed top-16 bottom-0 z-20 bg-gray-900 border-r border-gray-800 transition-all duration-300 flex flex-col ${
-      isCollapsed ? "w-16" : "w-80"
-    } ${dashboardSidebarCollapsed ? "left-16" : "left-64"}`}>
-      <div className="p-4 border-b border-gray-800">
-        {!isCollapsed && (
-          <div className="mb-3">
-            <h2 className="font-semibold text-white truncate text-lg">{course.title}</h2>
-            <div className="mt-2">
-              <div className="flex justify-between text-xs text-gray-400 mb-1">
-                <span>Progress</span>
-                <span>{Math.floor(overallProgress)}%</span>
+    <div
+      className={`fixed top-16 bottom-0 z-[35] flex flex-col border-r border-gray-800 bg-gray-900 shadow-xl transition-transform duration-300 max-lg:max-w-[min(100vw-1rem,20rem)] lg:transition-[left,width] ${
+        isCollapsed ? "w-16" : "w-80"
+      } max-lg:left-0 ${dashboardSidebarCollapsed ? "lg:left-20" : "lg:left-64"} ${
+        mobileDrawerOpen ? "translate-x-0" : "-translate-x-full"
+      } lg:translate-x-0`}
+    >
+      <div className="border-b border-gray-800 p-4">
+        {!isCollapsed ? (
+          <div className="mb-2 flex items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <h2 className="truncate text-lg font-semibold text-white">{course.title}</h2>
+              <div className="mt-2">
+                <div className="mb-1 flex justify-between text-xs text-gray-400">
+                  <span>Progress</span>
+                  <span>{Math.floor(overallProgress)}%</span>
+                </div>
+                <Progress value={overallProgress} className="h-1.5" />
               </div>
-              <Progress value={overallProgress} className="h-1.5" />
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                onClick={onMobileDrawerClose}
+                className="rounded-lg p-2 transition-colors hover:bg-gray-800 lg:hidden"
+                aria-label="Close curriculum"
+              >
+                <X className="h-5 w-5 text-gray-400" />
+              </button>
+              <button
+                type="button"
+                onClick={onToggleCollapse}
+                className="rounded-lg p-2 transition-colors hover:bg-gray-800"
+                aria-label={isCollapsed ? "Expand curriculum" : "Collapse curriculum"}
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </button>
             </div>
           </div>
+        ) : (
+          <div className="flex flex-col items-center gap-2">
+            <button
+              type="button"
+              onClick={onMobileDrawerClose}
+              className="rounded-lg p-2 transition-colors hover:bg-gray-800 lg:hidden"
+              aria-label="Close curriculum"
+            >
+              <X className="h-5 w-5 text-gray-400" />
+            </button>
+            <button
+              type="button"
+              onClick={onToggleCollapse}
+              className="rounded-lg p-2 transition-colors hover:bg-gray-800"
+              aria-label="Expand curriculum"
+            >
+              <ChevronRight className="h-5 w-5" />
+            </button>
+          </div>
         )}
-        <button          onClick={onToggleCollapse}
-          className={`p-2 rounded-lg hover:bg-gray-800 transition-colors ${isCollapsed ? 'mx-auto' : ''}`}
-        >
-          {isCollapsed ? <ChevronRight className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
-        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto p-2 space-y-4">
@@ -1178,6 +1220,7 @@ export default function CourseLearnPage() {
   const [overallProgress, setOverallProgress] = useState(0);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [dashboardSidebarCollapsed, setDashboardSidebarCollapsed] = useState(false);
+  const [mobileCurriculumOpen, setMobileCurriculumOpen] = useState(false);
   const [expandedModules, setExpandedModules] = useState<Set<number>>(new Set());
   const [activeTab, setActiveTab] = useState<"content" | "assignments" | "resources" | "discussion">("content");
   const [user, setUser] = useState<any>(null);
@@ -1694,7 +1737,15 @@ export default function CourseLearnPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-950">
+    <div className="relative min-h-screen bg-gray-950">
+      {mobileCurriculumOpen ? (
+        <button
+          type="button"
+          aria-label="Close curriculum panel"
+          className="fixed inset-0 top-16 z-[34] bg-black/50 backdrop-blur-[1px] lg:hidden"
+          onClick={() => setMobileCurriculumOpen(false)}
+        />
+      ) : null}
       <Sidebar
         course={course}
         modules={modules}
@@ -1705,6 +1756,7 @@ export default function CourseLearnPage() {
               for (let lIdx = 0; lIdx < modules[mIdx].classes[cIdx].lessons.length; lIdx++) {
                 if (modules[mIdx].classes[cIdx].lessons[lIdx].id === lessonId) {
                   navigateToLesson(mIdx, cIdx, lIdx);
+                  setMobileCurriculumOpen(false);
                   return;
                 }
               }
@@ -1720,21 +1772,38 @@ export default function CourseLearnPage() {
         courseReviews={courseReviews}
         onRateClick={() => setShowRatingModal(true)}
         dashboardSidebarCollapsed={dashboardSidebarCollapsed}
+        mobileDrawerOpen={mobileCurriculumOpen}
+        onMobileDrawerClose={() => setMobileCurriculumOpen(false)}
       />
 
-      <div 
-        className={`transition-all duration-300 ${
-          sidebarCollapsed 
-            ? dashboardSidebarCollapsed ? "ml-80" : "ml-96"
-            : dashboardSidebarCollapsed ? "ml-96" : "ml-[576px]"
+      <div
+        className={`min-w-0 transition-[margin] duration-300 ml-0 w-full ${
+          sidebarCollapsed
+            ? dashboardSidebarCollapsed
+              ? "lg:ml-80"
+              : "lg:ml-96"
+            : dashboardSidebarCollapsed
+              ? "lg:ml-96"
+              : "lg:ml-[576px]"
         }`}
       >
         <div className="sticky top-0 z-10 bg-gray-900/95 backdrop-blur-sm border-b border-gray-800">
-          <div className="flex items-center justify-between px-6 py-3">
-            <Link href={`/courses/${courseId}`} className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors">
-              <ArrowLeft className="w-4 h-4" />
-              <span className="text-sm">Back to Course</span>
-            </Link>
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <GlowButton
+                type="button"
+                variant="outline"
+                className="lg:hidden shrink-0 px-3 py-2 text-sm"
+                onClick={() => setMobileCurriculumOpen(true)}
+              >
+                <BookOpen className="mr-2 h-4 w-4" />
+                Curriculum
+              </GlowButton>
+              <Link href={`/courses/${courseId}`} className="flex min-w-0 items-center gap-2 text-gray-400 transition-colors hover:text-white">
+                <ArrowLeft className="h-4 w-4 shrink-0" />
+                <span className="truncate text-sm">Back to Course</span>
+              </Link>
+            </div>
             <div className="flex items-center gap-3">
               <Badge className="bg-purple-500/20 text-purple-400">
                 {Math.floor(overallProgress)}% Complete
@@ -1746,7 +1815,7 @@ export default function CourseLearnPage() {
           </div>
         </div>
 
-        <div className="max-w-5xl mx-auto px-6 py-8">
+        <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
           <div className="mb-6">
             <h1 className="text-2xl font-bold text-white mb-2">{currentLesson.title}</h1>
             <div className="flex items-center gap-3 text-sm text-gray-400">

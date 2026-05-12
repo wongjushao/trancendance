@@ -10,6 +10,7 @@ import {
   FileText,
   BarChart3,
   Menu,
+  X,
 } from "lucide-react";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 import { useAvatar } from "@/lib/useAvatar";
@@ -18,9 +19,11 @@ import { useRole } from "@/components/providers/RoleProvider";
 
 interface SidebarProps {
   user: SupabaseUser;
+  mobileDrawerOpen?: boolean;
+  onMobileDrawerClose?: () => void;
 }
 
-export function Sidebar({ user }: SidebarProps) {
+export function Sidebar({ user, mobileDrawerOpen = false, onMobileDrawerClose }: SidebarProps) {
   const pathname = usePathname();
   const { roleData } = useRole();
   const { avatarUrl } = useAvatar();
@@ -148,7 +151,7 @@ export function Sidebar({ user }: SidebarProps) {
   // Don't render during SSR to prevent hydration mismatch
   if (!mounted) {
     return (
-      <aside className="fixed left-0 top-0 z-40 h-screen w-64 bg-gray-900 border-r border-gray-800 flex flex-col">
+      <aside className="fixed left-0 top-16 z-40 flex h-[calc(100vh-4rem)] w-64 -translate-x-full flex-col border-r border-gray-800 bg-gray-900 lg:top-0 lg:h-screen lg:translate-x-0">
         <div className="p-4 border-b border-gray-800">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-purple-600/20" />
@@ -166,25 +169,35 @@ export function Sidebar({ user }: SidebarProps) {
 
   return (
     <aside
-      className={`fixed left-0 top-0 z-40 h-screen bg-gray-900 border-r border-gray-800 flex flex-col transition-all duration-300 ${
-        isCollapsed ? "w-20" : "w-64"
-      }`}
+      className={`fixed left-0 z-40 flex flex-col border-r border-gray-800 bg-gray-900 transition-transform duration-300 max-lg:top-16 max-lg:h-[calc(100vh-4rem)] lg:top-0 lg:h-screen ${
+        mobileDrawerOpen ? "translate-x-0" : "-translate-x-full"
+      } lg:translate-x-0 ${isCollapsed ? "w-20" : "w-64 max-w-[min(100vw-1rem,16rem)] sm:max-w-none"}`}
     >
       {/* Logo and Toggle Button */}
-      <div className={`flex items-center ${isCollapsed ? 'justify-center' : 'justify-between'} p-4 border-b border-gray-800`}>
+      <div className={`flex items-center ${isCollapsed ? "justify-center" : "justify-between"} border-b border-gray-800 p-4`}>
         {!isCollapsed && (
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-sm">E</span>
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-purple-500 to-pink-500">
+              <span className="text-sm font-bold text-white">E</span>
             </div>
-            <span className="text-white font-semibold">Educatorio</span>
+            <span className="font-semibold text-white">Educatorio</span>
           </div>
         )}
         <button
-          onClick={toggleSidebar}
-          className={`p-2 rounded-lg hover:bg-gray-800 transition-colors ${isCollapsed ? 'mx-auto' : ''}`}
+          type="button"
+          onClick={() => onMobileDrawerClose?.()}
+          className="rounded-lg p-2 transition-colors hover:bg-gray-800 lg:hidden"
+          aria-label="Close menu"
         >
-          <Menu className="w-5 h-5 text-gray-400" />
+          <X className="h-5 w-5 text-gray-400" />
+        </button>
+        <button
+          type="button"
+          onClick={toggleSidebar}
+          className={`hidden rounded-lg p-2 transition-colors hover:bg-gray-800 lg:flex ${isCollapsed ? "mx-auto" : ""}`}
+          aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
+          <Menu className="h-5 w-5 text-gray-400" />
         </button>
       </div>
 
@@ -198,6 +211,7 @@ export function Sidebar({ user }: SidebarProps) {
               <Link
                 key={item.href}
                 href={item.href}
+                onClick={() => onMobileDrawerClose?.()}
                 className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-all ${
                   isActive
                     ? "bg-purple-500/10 text-purple-400 border border-purple-500/30"
@@ -215,7 +229,7 @@ export function Sidebar({ user }: SidebarProps) {
 
       {/* User Profile Section */}
       <div className={`p-4 border-t border-gray-800 ${isCollapsed ? 'flex justify-center' : ''}`}>
-        <Link href="/profile" className={`flex items-center gap-3 group ${isCollapsed ? 'justify-center' : ''}`}>
+        <Link href="/profile" className={`flex items-center gap-3 group ${isCollapsed ? 'justify-center' : ''}`} onClick={() => onMobileDrawerClose?.()}>
           <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center overflow-hidden flex-shrink-0">
             {avatarUrl ? (
               <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />

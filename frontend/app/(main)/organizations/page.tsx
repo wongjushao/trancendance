@@ -457,7 +457,7 @@ export default function OrganizationsPage() {
                       </div>
                     </div>
 
-                    <div className="flex gap-3">
+                    <div className="flex flex-col gap-3 sm:flex-row">
                       <GlowButton 
                         variant="outline" 
                         size="sm"

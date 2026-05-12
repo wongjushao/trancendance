@@ -2,7 +2,7 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { Search, User, ChevronDown, Settings, LogOut, UserCircle, AlertTriangle, X, Building2 } from "lucide-react";
+import { Search, ChevronDown, Settings, LogOut, UserCircle, AlertTriangle, X, Building2, Menu } from "lucide-react";
 import { Input } from "../ui/input";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 import { useAvatar } from "@/lib/useAvatar";
@@ -13,6 +13,7 @@ import { useRole } from '@/components/providers/RoleProvider';
 
 interface TopNavProps {
   user: SupabaseUser;
+  onOpenMobileNav?: () => void;
 }
 
 interface UserSearchResult {
@@ -55,7 +56,7 @@ const ConfirmSignOutModal = ({ isOpen, onClose, onConfirm }: { isOpen: boolean; 
   );
 };
 
-export function TopNav({ user }: TopNavProps) {
+export function TopNav({ user, onOpenMobileNav }: TopNavProps) {
   const router = useRouter();
   const { roleData } = useRole();
   const { avatarUrl, refreshAvatar } = useAvatar();
@@ -273,14 +274,22 @@ export function TopNav({ user }: TopNavProps) {
   return (
     <>
       <header className="sticky top-0 z-30 bg-gray-900/80 backdrop-blur-sm border-b border-gray-800">
-        <div className="h-16 px-6 flex items-center justify-between">
+        <div className="h-16 px-3 sm:px-6 flex items-center justify-between gap-3 min-w-0">
+          <button
+            type="button"
+            onClick={() => onOpenMobileNav?.()}
+            className="lg:hidden shrink-0 rounded-lg p-2 text-gray-400 hover:bg-gray-800 hover:text-white transition-colors"
+            aria-label="Open navigation menu"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
           {/* Search Bar */}
-          <div className="flex-1 max-w-md" ref={searchRef}>
+          <div className="flex-1 max-w-md min-w-0" ref={searchRef}>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
               <Input
                 type="search"
-                placeholder="Search courses, lessons, assignments, or users..."
+                placeholder="Search..."
                 value={searchQuery}
                 onChange={(event) => {
                   setSearchQuery(event.target.value);

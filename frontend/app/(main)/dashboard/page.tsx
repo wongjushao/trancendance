@@ -527,7 +527,7 @@ export default function UnifiedDashboardPage() {
 
         {/* Role-based Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="bg-slate-800/50 border border-slate-700">
+          <TabsList className="flex h-auto min-h-9 w-full max-w-full flex-wrap justify-start gap-1 bg-slate-800/50 border border-slate-700 sm:flex-nowrap">
             {availableTabs.filter(tab => tab.show).map(tab => {
               const Icon = tab.icon;
               return (

@@ -210,8 +210,14 @@
 
 /* Keep tab content container at consistent height */
 .tabs-content-container {
-  min-height: 500px;
+  min-height: min(500px, 70vh);
   transition: min-height 0.2s ease;
+}
+
+@media (max-width: 640px) {
+  .tabs-content-container {
+    min-height: min(380px, 60vh);
+  }
 }
 
 /* For the Tabs component wrapper */

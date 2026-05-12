@@ -41,6 +41,7 @@ export default function AppLayout({
   const router = useRouter();
   const pathname = usePathname();
   const isCollapsed = useSidebarState();
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -123,6 +124,10 @@ export default function AppLayout({
     checkAuth();
   }, [router, pathname]);
 
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [pathname]);
+
   if (isLoading || !user) {
     return (
       <div className="min-h-screen bg-[#0B0B0F] flex items-center justify-center">
@@ -140,16 +145,28 @@ export default function AppLayout({
         </div>
 
         <div className="relative z-10 flex">
-          <Sidebar user={user} />
-          <div 
-            className="flex-1 flex flex-col min-h-screen transition-all duration-300"
-            style={{ 
-              marginLeft: isCollapsed ? "5rem" : "16rem",
-              width: `calc(100% - ${isCollapsed ? "5rem" : "16rem"})`
-            }}
+          {mobileNavOpen ? (
+            <button
+              type="button"
+              aria-label="Close navigation menu"
+              className="fixed inset-0 z-30 bg-black/60 backdrop-blur-[2px] lg:hidden"
+              onClick={() => setMobileNavOpen(false)}
+            />
+          ) : null}
+          <Sidebar
+            user={user}
+            mobileDrawerOpen={mobileNavOpen}
+            onMobileDrawerClose={() => setMobileNavOpen(false)}
+          />
+          <div
+            className={`flex min-h-0 min-w-0 flex-1 flex-col transition-[margin,width] duration-300 lg:min-h-screen ${
+              isCollapsed
+                ? "ml-0 w-full lg:ml-20 lg:w-[calc(100%-5rem)]"
+                : "ml-0 w-full lg:ml-64 lg:w-[calc(100%-16rem)]"
+            }`}
           >
-            <TopNav user={user} />
-            <main className="flex-1 p-8">
+            <TopNav user={user} onOpenMobileNav={() => setMobileNavOpen(true)} />
+            <main className="flex-1 overflow-x-hidden p-4 sm:p-6 lg:p-8">
               {children}
             </main>
           </div>
