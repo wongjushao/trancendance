@@ -583,7 +583,7 @@ export default function CourseStudentsPage() {
   };
 
   const handleSendReminder = async (student: Student) => {
-    toast.info(`Reminder functionality would send an email to ${student.email}. This requires email service integration.`);
+    toast.info(`(Mock)Reminder email was sent to ${student.email}. `);
   };
 
   const handleMessageStudent = async (student: Student) => {
@@ -591,7 +591,7 @@ export default function CourseStudentsPage() {
   };
 
   const handleViewProgress = (student: Student) => {
-    router.push(`/courses/${courseId}/students/${student.id}/progress`);
+    router.push(`/courses/${courseId}/analytics`);
   };
 
   const getStatusColor = (status: string) => {

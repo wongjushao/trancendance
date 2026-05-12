@@ -2144,22 +2144,6 @@ const getDayName = (day: number): string => {
                             <GlowButton
                               size="sm"
                               variant="outline"
-                              onClick={() => router.push(`/courses/${courseId}/offerings/${offering.id}/chat`)}
-                            >
-                              <MessageSquare className="w-4 h-4 mr-2" />
-                              Chat Room
-                            </GlowButton>
-                            <GlowButton
-                              size="sm"
-                              variant="outline"
-                              onClick={() => openEditOfferingModal(offering)}
-                            >
-                              <Edit className="w-4 h-4 mr-2" />
-                              Edit
-                            </GlowButton>
-                            <GlowButton
-                              size="sm"
-                              variant="outline"
                               onClick={() => {
                                 if (confirm(`Are you sure you want to delete "${offering.name}"?`)) {
                                   deleteOffering(offering.id);
