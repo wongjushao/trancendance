@@ -94,8 +94,6 @@ services:
   frontend:
     build: ./frontend
     working_dir: /app
-    ports:
-      - "3000:3000"
     expose:
       - "3000"
     environment:

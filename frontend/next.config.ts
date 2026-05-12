@@ -20,12 +20,10 @@ const nextConfig: NextConfig = {
         destination: 'https://org-service:5003/:path*',
       },
       {
-        // Auth service with full path
         source: '/api/auth-service/:path*',
         destination: 'https://auth-service:5001/api/auth-service/:path*',
       },
       {
-        // Notification service - FIXED
         source: '/api/notification-service/:path*',
         destination: 'https://notification-service:5004/:path*',
       },
@@ -35,7 +33,7 @@ const nextConfig: NextConfig = {
       },
     ]
   },
-  // Remove the 'api' block completely - it doesn't belong here
+
   images: {
     remotePatterns: [
       {
@@ -60,7 +58,7 @@ const nextConfig: NextConfig = {
         protocol: 'https',
         hostname: 'images.unsplash.com',
         port: '',
-        pathname: '/**', // Allows all paths from this hostname
+        pathname: '/**',
       },
     ],
   },

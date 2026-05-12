@@ -62,6 +62,7 @@ import {
 import { useRole } from "@/components/providers/RoleProvider";
 import { toast } from "sonner";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
+import { validateEmail } from "@/lib/validation";
 
 // Helper to get auth token
 const getAuthToken = async () => {
@@ -135,12 +136,26 @@ export default function CourseStudentsPage() {
     email: "",
     offeringId: 0,
   });
+  const [enrollError, setEnrollError] = useState<string | null>(null);
   const [enrolling, setEnrolling] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
   const [courseOfferings, setCourseOfferings] = useState<Offering[]>([]);
   const [loadingOfferings, setLoadingOfferings] = useState(false);
   const [accessToken, setAccessToken] = useState<string | null>(null);
+
+  const validateEnrollForm = (): string | null => {
+    const trimmedEmail = enrollData.email.trim();
+    const emailResult = validateEmail(trimmedEmail);
+    if (!emailResult.isValid) return emailResult.error || "Please enter a valid email address";
+
+    if (courseOfferings.length === 0) return "No course offerings available";
+    if (!enrollData.offeringId) return "Please select a course offering";
+    const offeringExists = courseOfferings.some((o: Offering) => o.id === enrollData.offeringId);
+    if (!offeringExists) return "Please select a valid course offering";
+
+    return null;
+  };
 
   // Get auth token on mount
   useEffect(() => {
@@ -439,13 +454,16 @@ export default function CourseStudentsPage() {
   };
 
   const handleEnrollStudent = async () => {
-    if (!enrollData.email) {
-      toast.error("Please enter an email address");
+    setEnrollError(null);
+
+    const validationError = validateEnrollForm();
+    if (validationError) {
+      setEnrollError(validationError);
       return;
     }
     
     if (!accessToken) {
-      toast.error("Please log in");
+      setEnrollError("Please log in");
       return;
     }
 
@@ -464,10 +482,14 @@ export default function CourseStudentsPage() {
         }),
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => null);
 
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to enroll student");
+      if (!data || !data.success) {
+        const message =
+          (data && (data.error || data.message)) ||
+          "Failed to enroll student. Please try again.";
+        setEnrollError(message);
+        return;
       }
 
       if (data.success) {
@@ -480,13 +502,10 @@ export default function CourseStudentsPage() {
         await fetchStudents();
         setShowEnrollModal(false);
         setEnrollData({ email: "", offeringId: courseOfferings[0]?.id || 0 });
-      } else {
-        throw new Error(data.error || "Failed to enroll student");
       }
 
-    } catch (error: any) {
-      console.error('Error enrolling student:', error);
-      toast.error(error.message || "Failed to enroll student. Please try again.");
+    } catch {
+      setEnrollError("Failed to enroll student. Please try again.");
     } finally {
       setEnrolling(false);
     }
@@ -939,7 +958,15 @@ export default function CourseStudentsPage() {
       </div>
 
       {/* Enroll Student Modal */}
-      <Dialog open={showEnrollModal} onOpenChange={setShowEnrollModal}>
+      <Dialog
+        open={showEnrollModal}
+        onOpenChange={(open) => {
+          setShowEnrollModal(open);
+          if (open) {
+            setEnrollError(null);
+          }
+        }}
+      >
         <DialogContent className="bg-gray-900 border-gray-800 max-w-md">
           <DialogHeader>
             <DialogTitle className="text-white">Enroll Student</DialogTitle>
@@ -956,9 +983,15 @@ export default function CourseStudentsPage() {
                 type="email"
                 placeholder="student@example.com"
                 value={enrollData.email}
-                onChange={(e) => setEnrollData({ ...enrollData, email: e.target.value })}
+                onChange={(e) => {
+                  setEnrollError(null);
+                  setEnrollData({ ...enrollData, email: e.target.value });
+                }}
                 className="mt-1"
               />
+              {enrollError && (
+                <p className="text-sm text-red-400 mt-2">{enrollError}</p>
+              )}
               <p className="text-xs text-gray-400 mt-1">
                 Enter the student's email address. They will be automatically added to the organization if needed.
               </p>
@@ -968,7 +1001,10 @@ export default function CourseStudentsPage() {
               <Label htmlFor="offering">Course Offering <span className="text-red-400">*</span></Label>
               <Select
                 value={enrollData.offeringId.toString()}
-                onValueChange={(value) => setEnrollData({ ...enrollData, offeringId: parseInt(value) })}
+                onValueChange={(value) => {
+                  setEnrollError(null);
+                  setEnrollData({ ...enrollData, offeringId: parseInt(value) });
+                }}
               >
                 <SelectTrigger className="mt-1">
                   <SelectValue placeholder="Select offering" />
@@ -1006,6 +1042,7 @@ export default function CourseStudentsPage() {
               variant="outline"
               onClick={() => {
                 setShowEnrollModal(false);
+                setEnrollError(null);
                 setEnrollData({ email: "", offeringId: courseOfferings[0]?.id || 0 });
               }}
             >
@@ -1014,7 +1051,7 @@ export default function CourseStudentsPage() {
             <GlowButton
               onClick={handleEnrollStudent}
               isLoading={enrolling}
-              disabled={courseOfferings.length === 0 || !enrollData.email}
+              disabled={enrolling || courseOfferings.length === 0 || !enrollData.email.trim()}
             >
               <UserPlus className="w-4 h-4 mr-2" />
               Enroll Student
