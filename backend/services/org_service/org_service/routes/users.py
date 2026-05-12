@@ -110,7 +110,7 @@ class UserEnrollResource(Resource):
                     break
 
             if not found_user:
-                return jsonify({"error": f"No user found with email: {email}"}), 400
+                return jsonify({"error": f"No user found with email: {email}"}), 200
 
             student_id = found_user.id if hasattr(found_user, 'id') else found_user.get('id')
             try:
