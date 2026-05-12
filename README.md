@@ -2,9 +2,9 @@
 
 ## Description
 
-**Trancendance** is a web app for schools and training teams that want one place to run courses, track learners, and stay in touch.
+**Educatorio** is a web app for schools and training teams that want one place to run courses, track learners, and stay in touch.
 
-**Goal:** make it easier for an organization to offer courses, enroll people, run classes (including assignments and submissions), and communicate—without juggling many separate tools.
+**Goal:** make it easier for an organization to offer courses, enroll people, run classes (including assignments and submissions), and communicate without juggling many separate tools.
 
 **What it includes (in plain words):**
 
@@ -49,9 +49,9 @@ make start-server-wsl2
 
 **After it is up**
 
-- Open the app in the browser at the URL your team agreed on (often `https://localhost` when using the local proxy, or the port shown in Docker for the frontend dev profile).
+- Open the app in the browser at the URL your team agreed on (often `https://localhost` when using the local proxy).
 
-If anything fails, read the error in `make logs` first—usually it is a missing env value or Docker not running.
+If anything fails, read the error in `make logs` first usually it is a missing env value or Docker not running.
 
 ## Resources
 
@@ -63,7 +63,7 @@ If anything fails, read the error in `make logs` first—usually it is a missing
 - [Supabase documentation](https://supabase.com/docs) — sign-in and hosted Postgres used by the project  
 - [Docker Compose documentation](https://docs.docker.com/compose/) — how the whole stack is started together  
 
-**How AI was used (example wording—adjust to match what your team actually did)**
+**How AI was used (example wording adjust to match what your team actually did)**
 
 - **Brainstorming and wording:** help turning rough notes into clearer README sections and shorter explanations for reviewers.  
 - **Code assistance:** suggestions while building UI pages, API wiring, and debugging; final choices and integration were always reviewed by humans on the team.  
@@ -193,4 +193,4 @@ Chat service, sockets and related APIs, message flows, and cross-team fixes for 
 Cross-cutting support, QA-style passes on the website, compatibility checks, documentation (including this README’s structure), and keeping task boards up to date.
 
 **Challenges (short)**  
-Typical difficulties were aligning four services with one database, getting real-time chat stable for everyone, and keeping env secrets safe while still easy for teammates—solved with clear `.env` examples, code review, and testing on Linux/WSL before demos.
+Typical difficulties were aligning four services with one database, getting real-time chat stable for everyone, and keeping env secrets safe while still easy for teammates solved with clear `.env` examples, code review, and testing on Linux/WSL before demos.
