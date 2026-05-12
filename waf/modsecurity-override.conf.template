@@ -12,3 +12,9 @@ SecRule REQUEST_URI "@beginsWith /api/" \
 # long-polling handshake can complete and then upgrade to WebSocket.
 SecRule REQUEST_URI "@beginsWith /api/chat-service/socket.io/" \
   "id:1000002,phase:1,pass,nolog,t:none,ctl:ruleEngine=Off"
+
+# Grafana sends PromQL expressions in JSON bodies that frequently trip CRS SQLi
+# detection (false positives), and Grafana Live relies on WebSockets.
+# Disable the WAF for Grafana entirely.
+SecRule REQUEST_URI "@beginsWith /grafana/" \
+  "id:1000003,phase:1,pass,nolog,t:none,ctl:ruleEngine=Off"
