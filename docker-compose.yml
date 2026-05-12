@@ -152,12 +152,8 @@ services:
     environment:
       - CHOKIDAR_USEPOLLING=true
       - INFISICAL_TOKEN=${INFISICAL_TOKEN}
-      - GF_SERVER_ROOT_URL=https://localhost/grafana/
-      - GF_SERVER_SERVE_FROM_SUB_PATH=true
-      - GF_SERVER_PROTOCOL=https
-      - GF_SERVER_CERT_FILE=/etc/trancendance-certs/internal-services.crt
-      - GF_SERVER_CERT_KEY=/etc/trancendance-certs/internal-services.key
     volumes:
+      - ./grafana/grafana.ini:/etc/grafana/grafana.ini:ro
       - ./grafana/provisioning:/etc/grafana/provisioning
       - ./grafana/dashboards:/var/lib/grafana/dashboards
       - certs-data:/etc/trancendance-certs:ro
