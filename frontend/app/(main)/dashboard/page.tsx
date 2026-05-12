@@ -1,7 +1,7 @@
 // frontend/app/(main)/dashboard/page.tsx
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -185,12 +185,6 @@ export default function UnifiedDashboardPage() {
     loadUserData();
   }, []);
 
-  useEffect(() => {
-    if (selectedOrgId && initialLoadComplete && activeTab === "admin") {
-      loadAdminDashboard();
-    }
-  }, [selectedOrgId, activeTab, initialLoadComplete]);
-
   const loadUserData = async () => {
     try {
       setLoading(true);
@@ -274,9 +268,6 @@ export default function UnifiedDashboardPage() {
       }
       
       setInitialLoadComplete(true);
-      
-      // Load initial dashboard data
-      await loadDashboardData();
 
     } catch (error) {
       console.error("Error loading user data:", error);
@@ -284,23 +275,6 @@ export default function UnifiedDashboardPage() {
       toast.error("Failed to load user data");
     } finally {
       setLoading(false);
-    }
-  };
-
-  const loadDashboardData = async () => {
-    const token = await getAuthToken();
-    if (!token) return;
-
-    try {
-      // Load based on active tab
-      if (activeTab === "learning") {
-        await loadStudentDashboard(token);
-      } else if (activeTab === "teaching") {
-        await loadTeacherDashboard(token);
-      }
-    } catch (error) {
-      console.error("Error loading dashboard data:", error);
-      toast.error("Failed to load dashboard data");
     }
   };
 
@@ -335,9 +309,14 @@ export default function UnifiedDashboardPage() {
 
   const loadTeacherDashboard = async (token: string) => {
     try {
-      const response = await fetch('/api/org-service/dashboard/teacher', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const query =
+        selectedOrgId != null ? `?organization_id=${selectedOrgId}` : "";
+      const response = await fetch(
+        `/api/org-service/dashboard/teacher${query}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
 
       if (!response.ok) {
         throw new Error("Failed to load teacher dashboard");
@@ -360,14 +339,15 @@ export default function UnifiedDashboardPage() {
     }
   };
 
-  const loadAdminDashboard = async () => {
-    if (!selectedOrgId) return;
-    
+  const loadAdminDashboard = async (organizationId?: number | null) => {
+    const orgId = organizationId ?? selectedOrgId;
+    if (!orgId) return;
+
     const token = await getAuthToken();
     if (!token) return;
 
     try {
-      const response = await fetch(`/api/org-service/dashboard/admin?organization_id=${selectedOrgId}`, {
+      const response = await fetch(`/api/org-service/dashboard/admin?organization_id=${orgId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
 
@@ -394,13 +374,38 @@ export default function UnifiedDashboardPage() {
     }
   };
 
+  // Load the correct dashboard after state updates (setActiveTab is async; calling fetch in
+  // loadUserData used a stale activeTab and loaded student data for teachers).
+  useEffect(() => {
+    if (!initialLoadComplete) return;
+
+    let cancelled = false;
+
+    (async () => {
+      const token = await getAuthToken();
+      if (!token || cancelled) return;
+
+      try {
+        if (activeTab === "learning") {
+          await loadStudentDashboard(token);
+        } else if (activeTab === "teaching") {
+          await loadTeacherDashboard(token);
+        } else if (activeTab === "admin" && selectedOrgId) {
+          await loadAdminDashboard(selectedOrgId);
+        }
+      } catch (error) {
+        console.error("Error loading dashboard data:", error);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, initialLoadComplete, selectedOrgId]);
+
   const switchOrganization = (orgId: number) => {
     setSelectedOrgId(orgId);
     setShowOrgSwitcher(false);
-    // Reload admin dashboard when switching orgs
-    if (activeTab === "admin") {
-      loadAdminDashboard();
-    }
   };
 
   const currentOrg = organizations.find(o => o.id === selectedOrgId);
