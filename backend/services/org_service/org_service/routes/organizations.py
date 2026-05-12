@@ -270,8 +270,35 @@ class OrganizationVerificationResource(Resource):
 
             if verification_request is None:
                 return jsonify({"error": "Invalid verification token"}), 404
-            
+
+            # Idempotent replay: Strict Mode / double-fetch can POST twice after the first
+            # request already succeeded. Treat reuse of the same token as success.
             if verification_request.status != "pending":
+                if (
+                    verification_request.status == "verified"
+                    and verification_request.organization_id is not None
+                    and verification_request.admin_email == admin_email
+                ):
+                    organization = (
+                        session.query(Organization)
+                        .filter(Organization.id == verification_request.organization_id)
+                        .first()
+                    )
+                    if organization is not None:
+                        session.refresh(organization)
+                        session.refresh(verification_request)
+                        return jsonify(
+                            {
+                                "organization": serialize_organization(organization),
+                                "verification_request": serialize_verification_request(verification_request),
+                                "message": (
+                                    f"Organization {organization.name} is already verified. "
+                                    "You are already an admin."
+                                ),
+                                "already_verified": True,
+                            }
+                        )
+
                 return jsonify({"error": "Verification request is not pending"}), 409
             
             if verification_request.expires_at <= now:
