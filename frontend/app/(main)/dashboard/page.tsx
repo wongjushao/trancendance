@@ -239,12 +239,23 @@ export default function UnifiedDashboardPage() {
 
       if (membershipsResponse.ok) {
         const data = await membershipsResponse.json();
-        setOrganizations(data.organizations || []);
-        setUserRoles(new Set(data.roles || ["student"]));
         
-        // Set default organization
-        if (data.organizations && data.organizations.length > 0) {
-          setSelectedOrgId(data.organizations[0].id);
+        // FILTER OUT organizations where role is "pending"
+        const approvedOrganizations = (data.organizations || []).filter(
+          (org: any) => org.role !== "pending"
+        );
+        
+        setOrganizations(approvedOrganizations);
+        
+        // Only include non-pending roles in userRoles set
+        const approvedRoles = approvedOrganizations.map((org: any) => org.role);
+        setUserRoles(new Set(approvedRoles));
+        
+        // Set default organization - only use approved organizations
+        if (approvedOrganizations && approvedOrganizations.length > 0) {
+          setSelectedOrgId(approvedOrganizations[0].id);
+        } else {
+          setSelectedOrgId(null);
         }
 
         // Set default active tab based on highest role
