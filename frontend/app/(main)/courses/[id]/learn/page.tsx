@@ -678,7 +678,7 @@ function QuizComponent({
   );
 }
 
-// Assignment Submission Component - Simplified
+// Assignment Submission — loads existing DB submission into the form; user can edit and resubmit.
 function AssignmentSubmission({ 
   assignment, 
   lessonId, 
@@ -690,67 +690,31 @@ function AssignmentSubmission({
   classMemberId: number | null;
   onSubmitted: () => void;
 }) {
-  // Check if submission already exists
-  const hasExistingSubmission = !!assignment.submission;
-  
-  // If already submitted, show read-only view
-  if (hasExistingSubmission) {
-    return (
-      <div className="bg-gray-800/30 rounded-lg p-6">
-        <div className="flex items-center gap-3 mb-4">
-          <CheckCircle className="w-6 h-6 text-green-400" />
-          <h3 className="text-lg font-semibold text-white">Assignment Already Submitted</h3>
-        </div>
-        <div className="space-y-3">
-          <div className="flex justify-between items-center p-3 bg-gray-800/50 rounded">
-            <span className="text-gray-400">Submitted on:</span>
-            <span className="text-sm text-gray-300">
-              {new Date(assignment.submission!.submitted_at).toLocaleString()}
-            </span>
-          </div>
-          {assignment.submission!.text_content && (
-            <div className="p-3 bg-gray-800/50 rounded">
-              <p className="text-gray-400 mb-1">Your response:</p>
-              <p className="text-white whitespace-pre-wrap">{assignment.submission!.text_content}</p>
-            </div>
-          )}
-          {assignment.submission!.content_url && (
-            <a 
-              href={assignment.submission!.content_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 text-purple-400 hover:text-purple-300 text-sm"
-            >
-              <Download className="w-4 h-4" />
-              View Submission
-            </a>
-          )}
-          {assignment.submission!.grade !== null && (
-            <div className="p-3 bg-gray-800/50 rounded">
-              <p className="text-gray-400 mb-1">Grade:</p>
-              <p className="text-lg font-semibold text-purple-400">
-                {assignment.submission!.grade}/{assignment.points}
-              </p>
-            </div>
-          )}
-          {assignment.submission!.feedback && (
-            <div className="p-3 bg-gray-800/50 rounded">
-              <p className="text-gray-400 mb-1">Feedback:</p>
-              <p className="text-white whitespace-pre-wrap">{assignment.submission!.feedback}</p>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
+  const submission = assignment.submission;
+  const hasExistingSubmission = !!submission;
 
-  // If no submission, show the submission form
-  const [textContent, setTextContent] = useState("");
-  const [uploadedFileUrl, setUploadedFileUrl] = useState<string | null>(null);
+  const [textContent, setTextContent] = useState(submission?.text_content ?? "");
+  const [uploadedFileUrl, setUploadedFileUrl] = useState<string | null>(
+    submission?.content_url ?? null
+  );
   const [submitting, setSubmitting] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [file, setFile] = useState<File | null>(null);
+
+  useEffect(() => {
+    const sub = assignment.submission;
+    setTextContent(sub?.text_content ?? "");
+    setUploadedFileUrl(sub?.content_url ?? null);
+    setFile(null);
+    setHasUnsavedChanges(false);
+  }, [
+    assignment.id,
+    submission?.id,
+    submission?.submitted_at,
+    submission?.text_content,
+    submission?.content_url,
+  ]);
 
   const getAuthToken = async () => {
     const supabase = getSupabaseBrowserClient();
@@ -828,7 +792,15 @@ function AssignmentSubmission({
         throw new Error(error.error || 'Submission failed');
       }
 
-      toast.success("Assignment submitted!");
+      const data = await response.json().catch(() => ({}));
+      const updated = data?.submission;
+      if (updated) {
+        setTextContent(updated.text_content ?? "");
+        setUploadedFileUrl(updated.content_url ?? null);
+      }
+      toast.success(
+        hasExistingSubmission ? "Submission updated." : "Assignment submitted!"
+      );
       setHasUnsavedChanges(false);
       onSubmitted?.();
       
@@ -847,6 +819,13 @@ function AssignmentSubmission({
     toast.info("File removed. Don't forget to submit your changes.");
   };
 
+  const hasContent = !!(textContent?.trim() || uploadedFileUrl);
+  const submitDisabled =
+    submitting ||
+    uploading ||
+    (!hasExistingSubmission && !hasContent) ||
+    (hasExistingSubmission && !hasUnsavedChanges);
+
   return (
     <div className="space-y-6">
       <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4">
@@ -856,6 +835,39 @@ function AssignmentSubmission({
             : `📝 Due: ${assignment.due_at ? new Date(assignment.due_at).toLocaleString() : "No due date"}`}
         </p>
       </div>
+
+      {hasExistingSubmission && submission && (
+        <div className="rounded-lg border border-green-500/25 bg-green-500/5 p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <CheckCircle className="h-5 w-5 shrink-0 text-green-400" />
+            <p className="text-sm font-medium text-white">You already have a submission on file</p>
+          </div>
+          <p className="text-xs text-gray-400">
+            {submission.submitted_at ? (
+              <>
+                Last submitted {new Date(submission.submitted_at).toLocaleString()}. You can edit
+                your response below and save changes.
+              </>
+            ) : (
+              <>You can edit your response below and save changes.</>
+            )}
+          </p>
+          {submission.grade !== null && submission.grade !== undefined && (
+            <div className="rounded-md bg-gray-800/50 p-3">
+              <p className="text-xs text-gray-400">Grade</p>
+              <p className="text-lg font-semibold text-purple-400">
+                {submission.grade}/{assignment.points}
+              </p>
+            </div>
+          )}
+          {submission.feedback ? (
+            <div className="rounded-md bg-gray-800/50 p-3">
+              <p className="text-xs text-gray-400 mb-1">Instructor feedback</p>
+              <p className="text-sm text-white whitespace-pre-wrap">{submission.feedback}</p>
+            </div>
+          ) : null}
+        </div>
+      )}
 
       <div>
         <Label className="text-white mb-2 block">Text Response</Label>
@@ -955,10 +967,10 @@ function AssignmentSubmission({
         <GlowButton 
           onClick={submitAssignment} 
           isLoading={submitting}
-          disabled={!hasUnsavedChanges && !uploadedFileUrl && !textContent?.trim()}
+          disabled={submitDisabled}
         >
           <Send className="w-4 h-4 mr-2" />
-          Submit Assignment
+          {hasExistingSubmission ? "Save changes" : "Submit Assignment"}
         </GlowButton>
       </div>
     </div>
@@ -1760,13 +1772,7 @@ export default function CourseLearnPage() {
   };
 
   const handleAssignmentSubmitted = () => {
-    // Close the drawer first (only once)
     closeAssignmentDrawer();
-    
-    // Show success message
-    toast.success("Assignment submitted successfully!");
-    
-    // Reload data to update assignment status
     loadData();
   };
 

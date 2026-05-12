@@ -194,11 +194,11 @@ export default function AssignmentsPage() {
   const [selectedAssignment, setSelectedAssignment] = useState<StudentAssignment | null>(null);
   const [submissionModalOpen, setSubmissionModalOpen] = useState(false);
   const [textContent, setTextContent] = useState("");
-  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [uploadedFileUrl, setUploadedFileUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [existingSubmission, setExistingSubmission] = useState<Submission | null>(null);
-  const [showResubmit, setShowResubmit] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   
   // Grading panel state (teacher)
   const [gradingPanelOpen, setGradingPanelOpen] = useState(false);
@@ -319,9 +319,8 @@ export default function AssignmentsPage() {
               points: a.points,
               lesson_id: a.lesson_id || 0,
               lesson_title: a.lesson_title || "Assignment",
-              course_id: course.id,
+              course_id: a.course_id ?? course.id,
               course_title: course.title,
-              // Submission data is already included in the assignment from the backend
               status: a.status || "pending",
               submitted_at: a.submitted_at,
               grade: a.grade,
@@ -351,8 +350,13 @@ export default function AssignmentsPage() {
         // Use status from backend if available, otherwise compute
         let status = assignment.status;
         
+        const hasWork =
+          !!assignment.submission_id ||
+          !!(assignment.text_content && String(assignment.text_content).trim()) ||
+          !!assignment.content_url;
+
         if (!status || status === "pending") {
-          if (assignment.submission_id) {
+          if (hasWork) {
             if (assignment.grade !== null && assignment.grade !== undefined) {
               status = "graded";
             } else {
@@ -635,69 +639,66 @@ export default function AssignmentsPage() {
   // ============ STUDENT SUBMISSION FUNCTIONS ============
   
   const handleViewAssignment = (assignment: StudentAssignment) => {
-    // Only open modal for pending or overdue assignments (not submitted/graded)
-    if (assignment.status === "pending" || assignment.status === "overdue") {
-      setSelectedAssignment(assignment);
-      
-      if (assignment.submission_id) {
-        setExistingSubmission({
-          id: assignment.submission_id!,
-          assignment_id: assignment.id,
-          content_url: assignment.content_url || null,
-          text_content: assignment.text_content || null,
-          grade: assignment.grade || null,
-          feedback: assignment.feedback || null,
-          submitted_at: assignment.submitted_at || "",
-          user_id: "",
-          user_name: "",
-          user_email: "",
-          status: assignment.grade !== null ? "graded" : "submitted",
-        });
-        setTextContent(assignment.text_content || "");
-      } else {
-        setExistingSubmission(null);
-        setTextContent("");
-      }
-      
-      setUploadedFile(null);
-      setShowResubmit(false);
-      setSubmissionModalOpen(true);
+    setSelectedAssignment(assignment);
+
+    if (assignment.submission_id) {
+      setExistingSubmission({
+        id: assignment.submission_id,
+        assignment_id: assignment.id,
+        content_url: assignment.content_url || null,
+        text_content: assignment.text_content || null,
+        grade: assignment.grade ?? null,
+        feedback: assignment.feedback ?? null,
+        submitted_at: assignment.submitted_at || "",
+        user_id: "",
+        user_name: "",
+        user_email: "",
+        status: assignment.grade != null ? "graded" : "submitted",
+      });
     } else {
-      if (assignment.status === "submitted") {
-        toast.info("You've already submitted this assignment");
-      } else if (assignment.status === "graded") {
-        toast.info(`This assignment has been graded: ${assignment.grade}/${assignment.points}`);
-      }
+      setExistingSubmission(null);
     }
+
+    setTextContent(assignment.text_content || "");
+    setUploadedFileUrl(assignment.content_url || null);
+    setHasUnsavedChanges(false);
+    setSubmissionModalOpen(true);
   };
-  
+
+  const resetSubmissionModalState = () => {
+    setSelectedAssignment(null);
+    setExistingSubmission(null);
+    setTextContent("");
+    setUploadedFileUrl(null);
+    setHasUnsavedChanges(false);
+  };
+
   const handleFileUpload = async (file: File) => {
-    setUploadedFile(file);
     setUploading(true);
-    
+    setHasUnsavedChanges(true);
+
     try {
       const token = await getAuthToken();
       if (!token) throw new Error("Not authenticated");
-      
+
       const formData = new FormData();
-      formData.append('file', file);
-      formData.append('assignment_id', selectedAssignment!.id.toString());
-      
-      const response = await fetch('/api/auth-service/upload-submission', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` },
+      formData.append("file", file);
+      formData.append("assignment_id", selectedAssignment!.id.toString());
+
+      const response = await fetch("/api/auth-service/upload-submission", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
-      
+
       if (!response.ok) {
         const error = await response.json();
         throw new Error(error.error || "Upload failed");
       }
-      
+
       const data = await response.json();
-      setUploadedFile(null);
-      await submitAssignment(data.file_url, textContent);
-      
+      setUploadedFileUrl(data.file_url);
+      toast.success("File uploaded. Click submit to save your submission.");
     } catch (error: any) {
       console.error("Error uploading file:", error);
       toast.error(error.message || "Failed to upload file");
@@ -705,73 +706,49 @@ export default function AssignmentsPage() {
       setUploading(false);
     }
   };
-  
-  const submitAssignment = async (fileUrl?: string, content?: string) => {
-    if (!fileUrl && !content?.trim()) {
+
+  const removeUploadedFile = () => {
+    setUploadedFileUrl(null);
+    setHasUnsavedChanges(true);
+    toast.info("Attachment removed. Save changes when you are ready.");
+  };
+
+  const submitAssignment = async () => {
+    const trimmed = textContent?.trim() || "";
+    if (!uploadedFileUrl && !trimmed) {
       toast.error("Please provide either text or upload a file");
       return;
     }
-    
+
     setSubmitting(true);
-    
+
     try {
       const token = await getAuthToken();
       if (!token) throw new Error("Not authenticated");
-      
-      const submissionData: any = {
-        assignment_id: selectedAssignment!.id,
-        text_content: content || null,
-        file_url: fileUrl || null,
-      };
-      
-      let response;
-      
-      if (existingSubmission && !showResubmit) {
-        // Update existing submission
-        response = await fetch(`/api/org-service/submissions/${existingSubmission.id}`, {
-          method: 'PUT',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(submissionData),
-        });
-      } else {
-        // Delete old submission if resubmitting
-        if (existingSubmission && showResubmit) {
-          await fetch(`/api/org-service/submissions/${existingSubmission.id}`, {
-            method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${token}` },
-          });
-        }
-        
-        // Create new submission
-        response = await fetch('/api/org-service/submissions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(submissionData),
-        });
-      }
-      
+
+      const response = await fetch("/api/org-service/submissions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          assignment_id: selectedAssignment!.id,
+          text_content: trimmed || null,
+          file_url: uploadedFileUrl || null,
+        }),
+      });
+
       if (!response?.ok) {
         const error = await response?.json().catch(() => ({}));
         throw new Error(error?.error || "Failed to submit assignment");
       }
-      
-      toast.success(existingSubmission && !showResubmit ? "Assignment updated successfully!" : "Assignment submitted successfully!");
-      
-      // Refresh assignments
+
+      toast.success(existingSubmission ? "Submission updated." : "Assignment submitted!");
+
       await fetchStudentAssignments();
       setSubmissionModalOpen(false);
-      setSelectedAssignment(null);
-      setExistingSubmission(null);
-      setTextContent("");
-      setUploadedFile(null);
-      setShowResubmit(false);
-      
+      resetSubmissionModalState();
     } catch (error: any) {
       console.error("Error submitting assignment:", error);
       toast.error(error.message || "Failed to submit assignment");
@@ -970,7 +947,13 @@ export default function AssignmentsPage() {
     pendingGrading: teacherAssignments.reduce((sum, a) => sum + (a.pending_count || 0), 0),
     avgGrade: teacherAssignments.reduce((sum, a) => sum + (a.average_grade || 0), 0) / (teacherAssignments.length || 1),
   };
-  
+
+  const submissionModalSubmitDisabled =
+    submitting ||
+    uploading ||
+    (!existingSubmission && !(textContent?.trim() || uploadedFileUrl)) ||
+    (!!existingSubmission && !hasUnsavedChanges);
+
   const filteredStudentAssignments = getFilteredStudentAssignments();
   const filteredTeacherAssignments = getFilteredTeacherAssignments();
   
@@ -1132,17 +1115,12 @@ export default function AssignmentsPage() {
                 const isOverdue = assignment.status === "overdue";
                 const dueDate = new Date(assignment.due_at);
                 const isDueSoon = dueDate.getTime() - new Date().getTime() < 3 * 24 * 60 * 60 * 1000 && dueDate > new Date();
-                const isClickable = assignment.status === "pending" || assignment.status === "overdue";
                 
                 return (
                   <div
                     key={assignment.id}
-                    className={`transition-all duration-200 ${isClickable ? "cursor-pointer hover:shadow-lg" : "cursor-default"}`}
-                    onClick={() => {
-                      if (isClickable) {
-                        handleViewAssignment(assignment);
-                      }
-                    }}
+                    className="cursor-pointer transition-all duration-200 hover:shadow-lg"
+                    onClick={() => handleViewAssignment(assignment)}
                   >
                     <GlowCard>
                       <div className="p-6">
@@ -1573,162 +1551,183 @@ export default function AssignmentsPage() {
       </Dialog>
       
       {/* Student Submission Modal */}
-      <Dialog open={submissionModalOpen} onOpenChange={setSubmissionModalOpen}>
+      <Dialog
+        open={submissionModalOpen}
+        onOpenChange={(open) => {
+          setSubmissionModalOpen(open);
+          if (!open) resetSubmissionModalState();
+        }}
+      >
         <DialogContent className="bg-gray-900 border-gray-800 max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-white text-xl">
               {selectedAssignment?.title}
             </DialogTitle>
             <DialogDescription>
-              Submit your assignment response below
+              Submit or update your assignment response below
             </DialogDescription>
           </DialogHeader>
-          
+
+          {selectedAssignment ? (
           <div className="space-y-6 py-4">
             {/* Assignment Info */}
             <div className="bg-gray-800/30 rounded-lg p-4">
               <div className="flex justify-between mb-2">
                 <span className="text-gray-400">Course</span>
-                <span className="text-white">{selectedAssignment?.course_title}</span>
+                <span className="text-white">{selectedAssignment.course_title}</span>
               </div>
               <div className="flex justify-between mb-2">
                 <span className="text-gray-400">Due Date</span>
                 <span className="text-yellow-400">
-                  {selectedAssignment?.due_at ? new Date(selectedAssignment.due_at).toLocaleString() : "No due date"}
+                  {selectedAssignment.due_at ? new Date(selectedAssignment.due_at).toLocaleString() : "No due date"}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-400">Points</span>
-                <span className="text-white">{selectedAssignment?.points}</span>
+                <span className="text-white">{selectedAssignment.points}</span>
               </div>
             </div>
-            
-            {/* Assignment Description - FIXED: Render HTML properly */}
-            {selectedAssignment?.description && (
+
+            {selectedAssignment.description && (
               <div>
                 <h4 className="text-white font-medium mb-2">Instructions</h4>
-                <div 
+                <div
                   className="text-gray-300 text-sm prose prose-invert max-w-none"
                   dangerouslySetInnerHTML={{ __html: selectedAssignment.description }}
                 />
               </div>
             )}
-            
-            {/* Existing Submission Info */}
-            {existingSubmission && !showResubmit && (
-              <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <CheckCircle className="w-4 h-4 text-blue-400" />
-                  <span className="text-white font-medium">Already Submitted</span>
+
+            {existingSubmission && (
+              <div className="rounded-lg border border-green-500/25 bg-green-500/5 p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <CheckCircle className="h-5 w-5 shrink-0 text-green-400" />
+                  <span className="text-sm font-medium text-white">You already have a submission on file</span>
                 </div>
-                <p className="text-gray-400 text-sm">
-                  Submitted on: {new Date(existingSubmission.submitted_at).toLocaleString()}
-                </p>
-                {existingSubmission.content_url && (
-                  <a
-                    href={existingSubmission.content_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 text-purple-400 hover:text-purple-300 text-sm mt-2"
-                  >
-                    <Download className="w-4 h-4" />
-                    View Submission
-                  </a>
+                {existingSubmission.submitted_at ? (
+                  <p className="text-xs text-gray-400">
+                    Last submitted {new Date(existingSubmission.submitted_at).toLocaleString()}. You can edit below
+                    and save changes.
+                  </p>
+                ) : (
+                  <p className="text-xs text-gray-400">You can edit below and save changes.</p>
                 )}
-                <button
-                  onClick={() => setShowResubmit(true)}
-                  className="mt-3 text-sm text-yellow-400 hover:text-yellow-300"
-                >
-                  Resubmit Assignment
-                </button>
+                {existingSubmission.grade != null && existingSubmission.grade !== undefined && (
+                  <div className="rounded-md bg-gray-800/50 p-3">
+                    <p className="text-xs text-gray-400">Grade</p>
+                    <p className="text-lg font-semibold text-purple-400">
+                      {existingSubmission.grade}/{selectedAssignment.points}
+                    </p>
+                  </div>
+                )}
+                {existingSubmission.feedback ? (
+                  <div className="rounded-md bg-gray-800/50 p-3">
+                    <p className="text-xs text-gray-400 mb-1">Instructor feedback</p>
+                    <p className="text-sm text-white whitespace-pre-wrap">{existingSubmission.feedback}</p>
+                  </div>
+                ) : null}
               </div>
             )}
-            
-            {/* Submission Form */}
-            {(!existingSubmission || showResubmit) && (
-              <div className="space-y-4">
-                <div>
-                  <Label className="text-white mb-2 block">Text Response</Label>
-                  <Textarea
-                    value={textContent}
-                    onChange={(e) => setTextContent(e.target.value)}
-                    placeholder="Write your answer here..."
-                    rows={8}
-                    className="bg-gray-800/50 border-gray-700"
-                  />
-                </div>
-                
-                <div>
-                  <Label className="text-white mb-2 block">File Attachment (Optional)</Label>
-                  <label className="block w-full">
-                    <div className={`flex items-center justify-center w-full p-4 border-2 border-dashed rounded-lg transition-colors cursor-pointer
-                      ${uploading ? 'border-gray-600 bg-gray-800/30' : 'border-gray-700 hover:border-purple-500'}`}
-                    >
-                      {uploading ? (
-                        <div className="text-center">
-                          <Loader2 className="w-8 h-8 text-purple-400 animate-spin mx-auto mb-2" />
-                          <p className="text-sm text-gray-400">Uploading...</p>
-                        </div>
-                      ) : uploadedFile ? (
-                        <div className="text-center w-full">
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="flex items-center gap-2">
-                              <FileText className="w-5 h-5 text-green-400" />
-                              <span className="text-sm text-white">{uploadedFile.name}</span>
-                              <span className="text-xs text-gray-500">
-                                ({(uploadedFile.size / (1024 * 1024)).toFixed(2)} MB)
-                              </span>
-                            </div>
-                            <button
-                              onClick={(e) => {
-                                e.preventDefault();
-                                setUploadedFile(null);
-                              }}
-                              className="text-red-400 hover:text-red-300"
+
+            <div className="space-y-4">
+              <div>
+                <Label className="text-white mb-2 block">Text Response</Label>
+                <Textarea
+                  value={textContent}
+                  onChange={(e) => {
+                    setTextContent(e.target.value);
+                    setHasUnsavedChanges(true);
+                  }}
+                  placeholder="Write your answer here..."
+                  rows={8}
+                  className="bg-gray-800/50 border-gray-700"
+                />
+              </div>
+
+              <div>
+                <Label className="text-white mb-2 block">File Attachment (Optional)</Label>
+                <label className="block w-full">
+                  <div
+                    className={`flex items-center justify-center w-full p-4 border-2 border-dashed rounded-lg transition-colors cursor-pointer
+                      ${uploading ? "border-gray-600 bg-gray-800/30" : "border-gray-700 hover:border-purple-500"}`}
+                  >
+                    {uploading ? (
+                      <div className="text-center">
+                        <Loader2 className="w-8 h-8 text-purple-400 animate-spin mx-auto mb-2" />
+                        <p className="text-sm text-gray-400">Uploading...</p>
+                      </div>
+                    ) : uploadedFileUrl ? (
+                      <div className="text-center w-full">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2">
+                            <FileText className="w-5 h-5 text-green-400" />
+                            <span className="text-sm text-white">File attached</span>
+                            <a
+                              href={uploadedFileUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-purple-400 hover:text-purple-300 text-xs ml-2"
                             >
-                              <X className="w-4 h-4" />
-                            </button>
+                              View
+                            </a>
                           </div>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              removeUploadedFile();
+                            }}
+                            className="text-red-400 hover:text-red-300"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
                         </div>
-                      ) : (
-                        <div className="text-center">
-                          <Upload className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-                          <p className="text-sm text-gray-400">Click to upload file</p>
-                          <p className="text-xs text-gray-500 mt-1">PDF, DOC, DOCX, images up to 50MB</p>
-                        </div>
-                      )}
-                      <input
-                        type="file"
-                        className="hidden"
-                        accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.zip"
-                        onChange={(e) => {
-                          if (e.target.files?.[0]) {
-                            handleFileUpload(e.target.files[0]);
-                          }
-                        }}
-                        disabled={uploading}
-                      />
-                    </div>
-                  </label>
-                </div>
+                      </div>
+                    ) : (
+                      <div className="text-center">
+                        <Upload className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+                        <p className="text-sm text-gray-400">Click to upload file</p>
+                        <p className="text-xs text-gray-500 mt-1">PDF, DOC, DOCX, images up to 50MB</p>
+                      </div>
+                    )}
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.zip"
+                      onChange={(e) => {
+                        if (e.target.files?.[0]) {
+                          handleFileUpload(e.target.files[0]);
+                        }
+                      }}
+                      disabled={uploading || !!uploadedFileUrl}
+                    />
+                  </div>
+                </label>
               </div>
-            )}
+            </div>
           </div>
-          
+          ) : null}
+
           <DialogFooter>
-            <GlowButton variant="ghost" onClick={() => setSubmissionModalOpen(false)}>
+            <GlowButton
+              variant="ghost"
+              onClick={() => {
+                setSubmissionModalOpen(false);
+                resetSubmissionModalState();
+              }}
+            >
               Cancel
             </GlowButton>
-            {(!existingSubmission || showResubmit) && (
-              <GlowButton
-                onClick={() => submitAssignment(undefined, textContent)}
-                isLoading={submitting}
-                disabled={!textContent.trim() && !uploadedFile}
-              >
-                <Send className="w-4 h-4 mr-2" />
-                {existingSubmission ? "Resubmit Assignment" : "Submit Assignment"}
-              </GlowButton>
-            )}
+            {selectedAssignment ? (
+                <GlowButton
+                  onClick={() => submitAssignment()}
+                  isLoading={submitting}
+                  disabled={submissionModalSubmitDisabled}
+                >
+                  <Send className="w-4 h-4 mr-2" />
+                  {existingSubmission ? "Save changes" : "Submit Assignment"}
+                </GlowButton>
+            ) : null}
           </DialogFooter>
         </DialogContent>
       </Dialog>

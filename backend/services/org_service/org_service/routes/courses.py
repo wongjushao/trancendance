@@ -719,6 +719,12 @@ class CourseDetailResource(Resource):
                     ):
                         subs_by_ass[s.assignment_id] = s
                 now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+                lesson_ids = {a.lesson_id for a in all_assignments if a.lesson_id}
+                lesson_titles: dict[int, str] = {}
+                if lesson_ids:
+                    for les in session.query(Lesson).filter(Lesson.id.in_(lesson_ids)).all():
+                        lesson_titles[les.id] = les.title or "Lesson"
+
                 for a in all_assignments:
                     sub = subs_by_ass.get(a.id)
                     due_dt = a.due_at
@@ -731,10 +737,23 @@ class CourseDetailResource(Resource):
                         {
                             "id": a.id,
                             "title": a.title,
+                            "description": a.description or "",
+                            "course_id": a.course_id,
+                            "lesson_id": a.lesson_id,
+                            "lesson_title": lesson_titles.get(a.lesson_id, "Assignment")
+                            if a.lesson_id
+                            else "Assignment",
                             "due_at": a.due_at.isoformat() if a.due_at else None,
                             "points": a.points,
                             "status": status,
                             "grade": sub.grade if sub else None,
+                            "feedback": sub.feedback if sub else None,
+                            "submission_id": sub.id if sub else None,
+                            "submitted_at": sub.submitted_at.isoformat()
+                            if sub and sub.submitted_at
+                            else None,
+                            "text_content": sub.text_content if sub else None,
+                            "content_url": sub.content_url if sub else None,
                         }
                     )
 
@@ -4256,8 +4275,32 @@ class CourseAssignmentsResource(Resource):
                 Assignment.course_id == course_id
             ).order_by(Assignment.created_at.desc()).all()
 
+            ass_ids = [a.id for a in assignments]
+            subs_by_ass: dict[int, Submission] = {}
+            if user_id and ass_ids:
+                for s in (
+                    session.query(Submission)
+                    .filter(
+                        Submission.user_id == user_id,
+                        Submission.assignment_id.in_(ass_ids),
+                    )
+                    .all()
+                ):
+                    subs_by_ass[s.assignment_id] = s
+
             result = []
             for assignment in assignments:
+                sub = subs_by_ass.get(assignment.id)
+                submission_payload = None
+                if sub is not None:
+                    submission_payload = {
+                        "id": sub.id,
+                        "submitted_at": sub.submitted_at.isoformat() if sub.submitted_at else None,
+                        "content_url": sub.content_url,
+                        "text_content": sub.text_content,
+                        "grade": sub.grade,
+                        "feedback": sub.feedback,
+                    }
                 result.append({
                     "id": assignment.id,
                     "title": assignment.title,
@@ -4268,6 +4311,7 @@ class CourseAssignmentsResource(Resource):
                     "course_class_id": assignment.course_class_id,
                     "lesson_id": assignment.lesson_id,
                     "created_at": assignment.created_at.isoformat() if assignment.created_at else None,
+                    "submission": submission_payload,
                 })
 
             return jsonify({"assignments": result}), 200
