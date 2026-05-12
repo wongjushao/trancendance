@@ -33,6 +33,7 @@ import {
   ArrowLeft,
   FileQuestion,
   Video,
+  ClipboardList,
 } from "lucide-react";
 import { GlowCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
@@ -677,7 +678,7 @@ function QuizComponent({
   );
 }
 
-// Assignment Submission Component - Refactored to use backend API
+// Assignment Submission Component - Simplified
 function AssignmentSubmission({ 
   assignment, 
   lessonId, 
@@ -689,10 +690,67 @@ function AssignmentSubmission({
   classMemberId: number | null;
   onSubmitted: () => void;
 }) {
-  const [textContent, setTextContent] = useState(assignment.submission?.text_content || "");
-  const [file, setFile] = useState<File | null>(null);
+  // Check if submission already exists
+  const hasExistingSubmission = !!assignment.submission;
+  
+  // If already submitted, show read-only view
+  if (hasExistingSubmission) {
+    return (
+      <div className="bg-gray-800/30 rounded-lg p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <CheckCircle className="w-6 h-6 text-green-400" />
+          <h3 className="text-lg font-semibold text-white">Assignment Already Submitted</h3>
+        </div>
+        <div className="space-y-3">
+          <div className="flex justify-between items-center p-3 bg-gray-800/50 rounded">
+            <span className="text-gray-400">Submitted on:</span>
+            <span className="text-sm text-gray-300">
+              {new Date(assignment.submission!.submitted_at).toLocaleString()}
+            </span>
+          </div>
+          {assignment.submission!.text_content && (
+            <div className="p-3 bg-gray-800/50 rounded">
+              <p className="text-gray-400 mb-1">Your response:</p>
+              <p className="text-white whitespace-pre-wrap">{assignment.submission!.text_content}</p>
+            </div>
+          )}
+          {assignment.submission!.content_url && (
+            <a 
+              href={assignment.submission!.content_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 text-purple-400 hover:text-purple-300 text-sm"
+            >
+              <Download className="w-4 h-4" />
+              View Submission
+            </a>
+          )}
+          {assignment.submission!.grade !== null && (
+            <div className="p-3 bg-gray-800/50 rounded">
+              <p className="text-gray-400 mb-1">Grade:</p>
+              <p className="text-lg font-semibold text-purple-400">
+                {assignment.submission!.grade}/{assignment.points}
+              </p>
+            </div>
+          )}
+          {assignment.submission!.feedback && (
+            <div className="p-3 bg-gray-800/50 rounded">
+              <p className="text-gray-400 mb-1">Feedback:</p>
+              <p className="text-white whitespace-pre-wrap">{assignment.submission!.feedback}</p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // If no submission, show the submission form
+  const [textContent, setTextContent] = useState("");
+  const [uploadedFileUrl, setUploadedFileUrl] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
 
   const getAuthToken = async () => {
     const supabase = getSupabaseBrowserClient();
@@ -703,6 +761,7 @@ function AssignmentSubmission({
   const handleFileUpload = async (selectedFile: File) => {
     setFile(selectedFile);
     setUploading(true);
+    setHasUnsavedChanges(true);
     
     try {
       const token = await getAuthToken();
@@ -726,21 +785,21 @@ function AssignmentSubmission({
       }
 
       const data = await response.json();
+      setUploadedFileUrl(data.file_url);
       setFile(null);
-      toast.success("File uploaded successfully!");
-      
-      await submitAssignment(data.file_url, textContent);
+      toast.success("File uploaded! Click 'Submit Assignment' to save.");
       
     } catch (error: any) {
       console.error("Error uploading file:", error);
       toast.error(error.message || "Failed to upload file");
+      setFile(null);
     } finally {
       setUploading(false);
     }
   };
 
-  const submitAssignment = async (fileUrl?: string, content?: string) => {
-    if (!fileUrl && !content?.trim()) {
+  const submitAssignment = async () => {
+    if (!uploadedFileUrl && !textContent?.trim()) {
       toast.error("Please provide either text or upload a file");
       return;
     }
@@ -751,41 +810,26 @@ function AssignmentSubmission({
       const token = await getAuthToken();
       if (!token) throw new Error("Not authenticated");
 
-      let response;
-      
-      if (assignment.submission) {
-        response = await fetch(`/api/org-service/submissions/${assignment.submission.id}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            text_content: content || null,
-            content_url: fileUrl || null,
-          }),
-        });
-      } else {
-        response = await fetch('/api/org-service/submissions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            assignment_id: assignment.id,
-            text_content: content || null,
-            file_url: fileUrl || null,
-          }),
-        });
-      }
+      const response = await fetch('/api/org-service/submissions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          assignment_id: assignment.id,
+          text_content: textContent || null,
+          file_url: uploadedFileUrl || null,
+        }),
+      });
 
       if (!response?.ok) {
         const error = await response.json();
         throw new Error(error.error || 'Submission failed');
       }
 
-      toast.success(assignment.submission ? "Assignment updated!" : "Assignment submitted!");
+      toast.success("Assignment submitted!");
+      setHasUnsavedChanges(false);
       onSubmitted?.();
       
     } catch (error: any) {
@@ -797,75 +841,11 @@ function AssignmentSubmission({
   };
 
   const removeFile = () => {
+    setUploadedFileUrl(null);
     setFile(null);
+    setHasUnsavedChanges(true);
+    toast.info("File removed. Don't forget to submit your changes.");
   };
-
-  const isSubmitted = assignment.submission && assignment.status !== "pending";
-  const isGraded = assignment.status === "graded";
-
-  if (isGraded && assignment.submission?.grade !== undefined) {
-    return (
-      <div className="bg-gray-800/30 rounded-lg p-6">
-        <div className="flex items-center gap-3 mb-4">
-          <CheckCircle className="w-6 h-6 text-green-400" />
-          <h3 className="text-lg font-semibold text-white">Assignment Graded</h3>
-        </div>
-        <div className="space-y-3">
-          <div className="flex justify-between items-center p-3 bg-gray-800/50 rounded">
-            <span className="text-gray-400">Grade:</span>
-            <span className="text-2xl font-bold text-purple-400">
-              {assignment.submission.grade}/{assignment.points}
-            </span>
-          </div>
-          {assignment.submission.content_url && (
-            <a 
-              href={assignment.submission.content_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2 p-2 bg-gray-800/50 rounded text-purple-400 hover:text-purple-300"
-            >
-              <Download className="w-4 h-4" />
-              <span className="text-sm">Download Your Submission</span>
-            </a>
-          )}
-          {assignment.submission.feedback && (
-            <div className="p-3 bg-gray-800/50 rounded">
-              <p className="text-gray-400 mb-1">Feedback:</p>
-              <p className="text-white whitespace-pre-wrap">{assignment.submission.feedback}</p>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  if (isSubmitted) {
-    return (
-      <div className="bg-gray-800/30 rounded-lg p-6">
-        <div className="flex items-center gap-3 mb-4">
-          <CheckCircle className="w-6 h-6 text-yellow-400" />
-          <h3 className="text-lg font-semibold text-white">Assignment Submitted</h3>
-        </div>
-        <p className="text-gray-400 mb-2">
-          Submitted on: {new Date(assignment.submission!.submitted_at).toLocaleString()}
-        </p>
-        {assignment.submission!.content_url && (
-          <a 
-            href={assignment.submission!.content_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 text-purple-400 hover:text-purple-300 text-sm"
-          >
-            <Download className="w-4 h-4" />
-            View Submission
-          </a>
-        )}
-        <p className="text-xs text-gray-500 mt-4">
-          Your submission is pending grading. You'll receive feedback soon.
-        </p>
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-6">
@@ -881,7 +861,10 @@ function AssignmentSubmission({
         <Label className="text-white mb-2 block">Text Response</Label>
         <Textarea
           value={textContent}
-          onChange={(e) => setTextContent(e.target.value)}
+          onChange={(e) => {
+            setTextContent(e.target.value);
+            setHasUnsavedChanges(true);
+          }}
           placeholder="Write your answer here..."
           rows={8}
           className="bg-gray-800/50 border-gray-700"
@@ -899,6 +882,32 @@ function AssignmentSubmission({
                 <Loader2 className="w-8 h-8 text-purple-400 animate-spin mx-auto mb-2" />
                 <p className="text-sm text-gray-400">Uploading...</p>
               </div>
+            ) : uploadedFileUrl ? (
+              <div className="text-center w-full">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <FileText className="w-5 h-5 text-green-400" />
+                    <span className="text-sm text-white">File uploaded successfully</span>
+                    <a 
+                      href={uploadedFileUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-purple-400 hover:text-purple-300 text-xs ml-2"
+                    >
+                      View
+                    </a>
+                  </div>
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault();
+                      removeFile();
+                    }}
+                    className="text-red-400 hover:text-red-300"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
             ) : file ? (
               <div className="text-center w-full">
                 <div className="flex items-center justify-between gap-3">
@@ -912,7 +921,7 @@ function AssignmentSubmission({
                   <button
                     onClick={(e) => {
                       e.preventDefault();
-                      removeFile();
+                      setFile(null);
                     }}
                     className="text-red-400 hover:text-red-300"
                   >
@@ -936,14 +945,18 @@ function AssignmentSubmission({
                   handleFileUpload(e.target.files[0]);
                 }
               }}
-              disabled={uploading}
+              disabled={uploading || !!uploadedFileUrl}
             />
           </div>
         </label>
       </div>
 
-      <div className="flex justify-end">
-        <GlowButton onClick={() => submitAssignment(undefined, textContent)} isLoading={submitting}>
+      <div className="flex justify-end gap-3">
+        <GlowButton 
+          onClick={submitAssignment} 
+          isLoading={submitting}
+          disabled={!hasUnsavedChanges && !uploadedFileUrl && !textContent?.trim()}
+        >
           <Send className="w-4 h-4 mr-2" />
           Submit Assignment
         </GlowButton>
@@ -969,8 +982,10 @@ interface SidebarProps {
   dashboardSidebarCollapsed: boolean;
   mobileDrawerOpen: boolean;
   onMobileDrawerClose: () => void;
+  onOpenAssignment: (assignment: AssignmentData) => void;  // ADD THIS LINE
 }
 
+// Sidebar Component - REPLACE THE ENTIRE FUNCTION
 function Sidebar({ 
   course, 
   modules, 
@@ -987,7 +1002,8 @@ function Sidebar({
   dashboardSidebarCollapsed,
   mobileDrawerOpen,
   onMobileDrawerClose,
-}: SidebarProps) {
+  onOpenAssignment,  // NEW PROP
+}: SidebarProps & { onOpenAssignment: (assignment: AssignmentData) => void }) {  // ADD this to props
   const [expandedModules, setExpandedModules] = useState<Set<number>>(new Set(modules.map(m => m.id)));
 
   const toggleModule = (moduleId: number) => {
@@ -1099,34 +1115,80 @@ function Sidebar({
                       </p>
                       <div className="space-y-1">
                         {classItem.lessons.map((lesson) => (
-                          <button
-                            key={lesson.id}
-                            onClick={() => onLessonSelect(lesson.id)}
-                            className={`w-full flex items-center gap-2 p-2 rounded-lg transition-colors text-left ${
-                              currentLessonId === lesson.id
-                                ? "bg-purple-500/20 text-purple-400"
-                                : lesson.is_completed
-                                ? "text-green-400 hover:bg-gray-800"
-                                : "text-gray-300 hover:bg-gray-800"
-                            }`}
-                          >
-                            {lesson.is_completed ? (
-                              <CheckCircle className="w-4 h-4 flex-shrink-0" />
-                            ) : (
-                              <div className="w-4 h-4 flex-shrink-0" />
-                            )}
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm truncate">{lesson.title}</p>
-                              {lesson.progress_percent > 0 && lesson.progress_percent < 100 && (
-                                <Progress value={lesson.progress_percent} className="h-0.5 mt-1" />
+                          <div key={lesson.id} className="space-y-1">
+                            <button
+                              onClick={() => onLessonSelect(lesson.id)}
+                              className={`w-full flex items-center gap-2 p-2 rounded-lg transition-colors text-left ${
+                                currentLessonId === lesson.id
+                                  ? "bg-purple-500/20 text-purple-400"
+                                  : lesson.is_completed
+                                  ? "text-green-400 hover:bg-gray-800"
+                                  : "text-gray-300 hover:bg-gray-800"
+                              }`}
+                            >
+                              {lesson.is_completed ? (
+                                <CheckCircle className="w-4 h-4 flex-shrink-0" />
+                              ) : (
+                                <div className="w-4 h-4 flex-shrink-0" />
                               )}
-                            </div>
-                            {lesson.duration_seconds && (
-                              <span className="text-xs text-gray-500 flex-shrink-0">
-                                {Math.floor(lesson.duration_seconds / 60)}min
-                              </span>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center justify-between gap-2">
+                                  <p className="text-sm truncate">{lesson.title}</p>
+                                  {/* Assignment badge - CLICKABLE */}
+                                  {lesson.assignments && lesson.assignments.length > 0 && (
+                                    <Badge 
+                                      variant="outline" 
+                                      className="text-xs bg-purple-500/10 text-purple-400 px-1.5 py-0 cursor-pointer hover:bg-purple-500/20"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        // Open first assignment when badge clicked
+                                        if (lesson.assignments && lesson.assignments.length > 0) {
+                                          onOpenAssignment(lesson.assignments[0]);
+                                        }
+                                      }}
+                                    >
+                                      {lesson.assignments.length}
+                                    </Badge>
+                                  )}
+                                </div>
+                                {lesson.progress_percent > 0 && lesson.progress_percent < 100 && (
+                                  <Progress value={lesson.progress_percent} className="h-0.5 mt-1" />
+                                )}
+                              </div>
+                              {lesson.duration_seconds && (
+                                <span className="text-xs text-gray-500 flex-shrink-0">
+                                  {Math.floor(lesson.duration_seconds / 60)}min
+                                </span>
+                              )}
+                            </button>
+                            
+                            {/* Assignment list below lesson */}
+                            {lesson.assignments && lesson.assignments.length > 0 && (
+                              <div className="ml-8 space-y-1 mt-1">
+                                {lesson.assignments.map((assignment) => (
+                                  <button
+                                    key={assignment.id}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onOpenAssignment(assignment);
+                                    }}
+                                    className="w-full flex items-center gap-2 p-1.5 pl-6 rounded-lg text-left text-xs hover:bg-gray-800 transition-colors"
+                                  >
+                                    <ClipboardList className="w-3 h-3 text-purple-400 flex-shrink-0" />
+                                    <span className="text-gray-300 truncate flex-1">{assignment.title}</span>
+                                    <Badge className={`text-xs flex-shrink-0 ${
+                                      assignment.status === "graded" ? "bg-green-500/20 text-green-400" :
+                                      assignment.status === "submitted" ? "bg-yellow-500/20 text-yellow-400" :
+                                      assignment.status === "overdue" ? "bg-red-500/20 text-red-400" :
+                                      "bg-gray-500/20 text-gray-400"
+                                    }`}>
+                                      {assignment.status}
+                                    </Badge>
+                                  </button>
+                                ))}
+                              </div>
                             )}
-                          </button>
+                          </div>
                         ))}
                       </div>
                     </div>
@@ -1239,6 +1301,19 @@ export default function CourseLearnPage() {
   const [reviewText, setReviewText] = useState("");
   const [submittingRating, setSubmittingRating] = useState(false);
 
+  const [selectedAssignment, setSelectedAssignment] = useState<AssignmentData | null>(null);
+  const [assignmentDrawerOpen, setAssignmentDrawerOpen] = useState(false);
+
+  const openAssignmentDrawer = (assignment: AssignmentData) => {
+    setSelectedAssignment(assignment);
+    setAssignmentDrawerOpen(true);
+  };
+
+  const closeAssignmentDrawer = () => {
+    setSelectedAssignment(null);
+    setAssignmentDrawerOpen(false);
+  };
+
   // ========== HELPER FUNCTIONS ==========
   const getAuthToken = async () => {
     const supabase = getSupabaseBrowserClient();
@@ -1282,7 +1357,30 @@ export default function CourseLearnPage() {
       }
       setUser(userProfile);
 
+      // Fetch course detail
       const courseDetail = await apiRequest(`/api/org-service/courses/${courseId}/detail`);
+      
+      // ========== FETCH ASSIGNMENTS SEPARATELY (like edit page) ==========
+      let assignmentsByLesson: Record<number, any[]> = {};
+      try {
+        const assignmentsData = await apiRequest(`/api/org-service/courses/${courseId}/assignments`);
+        const allAssignments = assignmentsData.assignments || [];
+        
+        // Group assignments by lesson_id
+        assignmentsByLesson = {};
+        allAssignments.forEach((assignment: any) => {
+          const lessonId = assignment.lesson_id;
+          if (!assignmentsByLesson[lessonId]) {
+            assignmentsByLesson[lessonId] = [];
+          }
+          assignmentsByLesson[lessonId].push(assignment);
+        });
+        console.log("Fetched assignments:", allAssignments.length);
+        console.log("Assignments by lesson:", assignmentsByLesson);
+      } catch (err) {
+        console.warn("Could not fetch assignments:", err);
+      }
+      // ========== END OF ASSIGNMENT FETCHING ==========
       
       if (!courseDetail.course) {
         toast.error("Course not found");
@@ -1293,7 +1391,6 @@ export default function CourseLearnPage() {
       let cmId = courseDetail.class_member_id;
 
       if (!cmId && courseDetail.course.created_by === userProfile.id) {
-        // console.log("Course creator accessing without enrollment");
         cmId = -1;
       }
 
@@ -1360,9 +1457,12 @@ export default function CourseLearnPage() {
             totalLessons++;
             if (isCompleted) completedLessons++;
 
+            // ========== ATTACH ASSIGNMENTS FROM OUR FETCHED DATA ==========
             let assignments: AssignmentData[] = [];
-            if (lesson.assignments && lesson.assignments.length > 0) {
-              assignments = lesson.assignments.map((assignment: any) => {
+            const lessonAssignments = assignmentsByLesson[lesson.id] || [];
+            
+            if (lessonAssignments.length > 0) {
+              assignments = lessonAssignments.map((assignment: any) => {
                 let status: AssignmentData["status"] = "pending";
                 if (assignment.submission) {
                   status = assignment.submission.grade !== null ? "graded" : "submitted";
@@ -1380,6 +1480,7 @@ export default function CourseLearnPage() {
                 };
               });
             }
+            // ========== END OF ASSIGNMENT ATTACHMENT ==========
 
             return {
               id: lesson.id,
@@ -1392,7 +1493,7 @@ export default function CourseLearnPage() {
               is_free_preview: lesson.is_free_preview,
               is_completed: isCompleted,
               progress_percent: progress?.progress_percent || 0,
-              assignments,
+              assignments, // Now assignments will be populated
             };
           }).sort((a, b) => a.order_index - b.order_index);
 
@@ -1659,7 +1760,19 @@ export default function CourseLearnPage() {
   };
 
   const handleAssignmentSubmitted = () => {
-    window.location.reload();
+    // Close the drawer first (only once)
+    closeAssignmentDrawer();
+    
+    // Show success message
+    toast.success("Assignment submitted successfully!");
+    
+    // Reload data to update assignment status
+    loadData();
+  };
+
+  // Use this as the onAssignmentSubmitted prop
+  const refreshAfterAssignmentSubmit = () => {
+    handleAssignmentSubmitted();
   };
 
   const handleSubmitRating = async () => {
@@ -1735,6 +1848,95 @@ export default function CourseLearnPage() {
     return false;
   };
 
+  // Assignment Details Drawer Component
+  function AssignmentDetailsDrawer({ 
+    assignment, 
+    isOpen, 
+    onClose,
+    courseId,
+    classMemberId,
+    onAssignmentSubmitted
+  }: { 
+    assignment: AssignmentData | null;
+    isOpen: boolean;
+    onClose: () => void;
+    courseId: number;
+    classMemberId: number | null;
+    onAssignmentSubmitted: () => void;
+  }) {
+    if (!assignment) return null;
+
+    return (
+      <>
+        {isOpen && (
+          <div className="fixed inset-0 z-50">
+            {/* Backdrop */}
+            <div className="absolute inset-0 bg-black/80" onClick={onClose} />
+            
+            {/* Drawer */}
+            <div className="absolute right-0 top-0 h-full w-full max-w-2xl bg-gray-900 shadow-xl overflow-y-auto">
+              <div className="sticky top-0 bg-gray-900 border-b border-gray-800 p-4 flex justify-between items-center">
+                <h2 className="text-xl font-semibold text-white">{assignment.title}</h2>
+                <button onClick={onClose} className="text-gray-400 hover:text-white">
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+              
+              <div className="p-6 space-y-6">
+                {/* Assignment Details */}
+                <div>
+                  <div className="flex justify-between items-start mb-4">
+                    <div>
+                      <p className="text-sm text-gray-400">
+                        {assignment.points} points
+                      </p>
+                      {assignment.due_at && (
+                        <p className="text-sm text-gray-400">
+                          Due: {new Date(assignment.due_at).toLocaleString()}
+                        </p>
+                      )}
+                    </div>
+                    <Badge className={
+                      assignment.status === "graded" ? "bg-green-500/20 text-green-400" :
+                      assignment.status === "submitted" ? "bg-yellow-500/20 text-yellow-400" :
+                      assignment.status === "overdue" ? "bg-red-500/20 text-red-400" :
+                      "bg-gray-500/20 text-gray-400"
+                    }>
+                      {assignment.status.charAt(0).toUpperCase() + assignment.status.slice(1)}
+                    </Badge>
+                  </div>
+                  
+                  {assignment.description && (
+                    <div className="mt-4">
+                      <h3 className="text-lg font-semibold text-white mb-2">Description</h3>
+                      <div 
+                        className="prose prose-invert prose-sm max-w-none"
+                        dangerouslySetInnerHTML={{ __html: assignment.description }}
+                      />
+                    </div>
+                  )}
+                </div>
+                
+                {/* Submission Section */}
+                <div className="border-t border-gray-800 pt-6">
+                  <h3 className="text-lg font-semibold text-white mb-4">Your Submission</h3>
+                  <AssignmentSubmission
+                    assignment={assignment}
+                    lessonId={0}
+                    classMemberId={classMemberId}
+                    onSubmitted={() => {
+                      onAssignmentSubmitted();
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -1793,8 +1995,8 @@ export default function CourseLearnPage() {
         dashboardSidebarCollapsed={dashboardSidebarCollapsed}
         mobileDrawerOpen={mobileCurriculumOpen}
         onMobileDrawerClose={() => setMobileCurriculumOpen(false)}
+        onOpenAssignment={openAssignmentDrawer}  // ADD THIS LINE
       />
-
       <div
         className={`min-w-0 transition-all duration-300 w-full ${
           sidebarCollapsed
@@ -2087,6 +2289,15 @@ export default function CourseLearnPage() {
           )}
         </div>
       </div>
+      {/* ADD THE DRAWER HERE - before the final closing div */}
+      <AssignmentDetailsDrawer
+        assignment={selectedAssignment}
+        isOpen={assignmentDrawerOpen}
+        onClose={closeAssignmentDrawer}
+        courseId={courseId}
+        classMemberId={classMemberId}
+        onAssignmentSubmitted={refreshAfterAssignmentSubmit}  // This calls handleAssignmentSubmitted
+      />
     </div>
   );
 }
