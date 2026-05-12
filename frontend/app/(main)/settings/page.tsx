@@ -224,7 +224,8 @@ export default function SettingsPage() {
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
-  
+  const [samePasswordBanner, setSamePasswordBanner] = useState(false);
+
   // Danger zone modals
   const [showSignOutDevices, setShowSignOutDevices] = useState(false);
   const [showDeleteAccount, setShowDeleteAccount] = useState(false);
@@ -1158,6 +1159,15 @@ export default function SettingsPage() {
       return;
     }
 
+    setSamePasswordBanner(false);
+
+    const hasAccountPassword =
+      !isGoogleUser || (isGoogleUser && hasSetPassword);
+    if (hasAccountPassword && currentPassword === newPassword) {
+      setSamePasswordBanner(true);
+      return;
+    }
+
     setChangingPassword(true);
     try {
       const supabase = getSupabaseBrowserClient();
@@ -1180,7 +1190,13 @@ export default function SettingsPage() {
         password: newPassword
       });
       
-      if (error) throw error;
+      if (error) {
+        if ((error as { code?: string }).code === "same_password") {
+          setSamePasswordBanner(true);
+          return;
+        }
+        throw error;
+      }
       
       if (!hasSetPassword && isGoogleUser) {
         toast.success("Password has been set successfully! You can now sign in with email and password.");
@@ -1197,12 +1213,26 @@ export default function SettingsPage() {
         toast.success("Password changed successfully!");
       }
 
+      setSamePasswordBanner(false);
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const code =
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        typeof (error as { code: unknown }).code === "string"
+          ? (error as { code: string }).code
+          : undefined;
+      if (code === "same_password") {
+        setSamePasswordBanner(true);
+        return;
+      }
       console.error("Error changing password:", error);
-      toast.error(error.message || "Failed to change password");
+      const message =
+        error instanceof Error ? error.message : "Failed to change password";
+      toast.error(message);
     } finally {
       setChangingPassword(false);
     }
@@ -2124,7 +2154,10 @@ export default function SettingsPage() {
                       <Input
                         type={showCurrentPassword ? "text" : "password"}
                         value={currentPassword}
-                        onChange={(e) => setCurrentPassword(e.target.value)}
+                        onChange={(e) => {
+                          setSamePasswordBanner(false);
+                          setCurrentPassword(e.target.value);
+                        }}
                         placeholder="Enter current password"
                         className="pr-10"
                       />
@@ -2154,7 +2187,10 @@ export default function SettingsPage() {
                     <Input
                       type={showNewPassword ? "text" : "password"}
                       value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
+                      onChange={(e) => {
+                        setSamePasswordBanner(false);
+                        setNewPassword(e.target.value);
+                      }}
                       placeholder="Enter new password"
                       className="pr-10"
                     />
@@ -2191,7 +2227,10 @@ export default function SettingsPage() {
                     <Input
                       type={showConfirmPassword ? "text" : "password"}
                       value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      onChange={(e) => {
+                        setSamePasswordBanner(false);
+                        setConfirmPassword(e.target.value);
+                      }}
                       placeholder="Confirm new password"
                       className="pr-10"
                     />
@@ -2207,6 +2246,14 @@ export default function SettingsPage() {
                     <p className="text-xs text-red-400 mt-1">Passwords do not match</p>
                   )}
                 </div>
+
+                {samePasswordBanner && (
+                  <div className="p-3 bg-amber-500/10 rounded-lg border border-amber-500/30">
+                    <p className="text-sm text-amber-400">
+                      Your new password must be different from your current password. Choose a different password and try again.
+                    </p>
+                  </div>
+                )}
 
                 <div className="flex justify-end pt-4">
                   <GlowButton 
