@@ -8,8 +8,6 @@ import { Mail, ArrowLeft, AlertCircle, CheckCircle } from "lucide-react";
 import { GlowButton } from "@/components/lms/GlowButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
-import { getSiteUrl } from "@/lib/site-url";
 import { validateEmail } from "@/lib/validation";
 
 // Step 1: Send reset email
@@ -52,19 +50,26 @@ function SendResetForm() {
     setError(null);
     setIsLoading(true);
 
-    const supabase = getSupabaseBrowserClient();
-    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${getSiteUrl()}/reset-password`,
-    });
+    try {
+      const res = await fetch("/api/auth/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const data = (await res.json()) as { ok?: boolean; message?: string };
 
-    setIsLoading(false);
+      setIsLoading(false);
 
-    if (resetError) {
-      setError(resetError.message);
-      return;
+      if (!data.ok) {
+        setError(data.message ?? "Something went wrong. Please try again.");
+        return;
+      }
+
+      setIsSent(true);
+    } catch {
+      setIsLoading(false);
+      setError("Something went wrong. Please try again.");
     }
-
-    setIsSent(true);
   };
 
   return (
