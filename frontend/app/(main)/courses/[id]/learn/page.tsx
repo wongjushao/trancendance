@@ -1302,6 +1302,20 @@ export default function CourseLearnPage() {
         router.push(`/courses/${courseId}`);
         return;
       }
+
+      if (
+        cmId !== -1 &&
+        courseDetail.course.status === "archived"
+      ) {
+        toast.info(
+          courseDetail.course.organization_name
+            ? `This course has been archived by ${courseDetail.course.organization_name}.`
+            : "This course has been archived."
+        );
+        router.replace(`/courses/${courseId}`);
+        return;
+      }
+
       setClassMemberId(cmId);
 
       const progressMap = new Map();

@@ -79,6 +79,8 @@ interface EnrolledCourse {
   last_accessed_at: string;
   rating: number;
   certificate_earned: boolean;
+  status?: string;
+  organization_name?: string | null;
 }
 
 interface TeacherCourse {
@@ -609,11 +611,19 @@ export default function UnifiedDashboardPage() {
                           <span>{course.completed_lessons}/{course.total_lessons} lessons</span>
                         </div>
 
-                        <Link href={`/courses/${course.id}/learn`}>
-                          <GlowButton variant="outline" size="sm" fullWidth>
-                            Continue Learning
-                          </GlowButton>
-                        </Link>
+                        {course.status === "archived" ? (
+                          <p className="text-xs text-amber-400/90 text-center leading-snug px-1">
+                            {course.organization_name
+                              ? `This course has been archived by ${course.organization_name}.`
+                              : "This course has been archived."}
+                          </p>
+                        ) : (
+                          <Link href={`/courses/${course.id}/learn`}>
+                            <GlowButton variant="outline" size="sm" fullWidth>
+                              Continue Learning
+                            </GlowButton>
+                          </Link>
+                        )}
                       </div>
                     </GlowCard>
                   ))

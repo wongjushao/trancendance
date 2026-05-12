@@ -41,8 +41,9 @@ interface CourseData {
   progress: number;
   visibility: string;
   status: string;
-  organization_id: number;
-  organization_name: string;
+  organization_id: number | null;
+  organization_name: string | null;
+  user_role?: string;
   learning_objectives?: string[];
   prerequisites?: string[];
   tags?: string[];
@@ -287,6 +288,7 @@ export default function CourseDetailPage() {
     }
   };
   const handleContinueLearning = () => {
+    if (course?.status === "archived") return;
     for (const module of modules) {
       for (const classItem of module.classes) {
         const incompleteLesson = classItem.lessons.find(l => !l.is_completed);
@@ -446,9 +448,29 @@ export default function CourseDetailPage() {
                 <Badge className="bg-gray-500/20 text-gray-400 border-0">
                   {course.category}
                 </Badge>
+                {course.status === "draft" && (
+                  <Badge className="bg-amber-500/20 text-amber-400 border-0">
+                    Draft
+                  </Badge>
+                )}
                 {course.status === "published" && (
                   <Badge className="bg-green-500/20 text-green-400 border-0">
                     Published
+                  </Badge>
+                )}
+                {course.visibility === "public" && (
+                  <Badge className="bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                    Public
+                  </Badge>
+                )}
+                {course.visibility === "org" && (
+                  <Badge className="bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                    Organization only
+                  </Badge>
+                )}
+                {course.visibility === "private" && (
+                  <Badge className="bg-slate-500/20 text-slate-300 border border-slate-500/35">
+                    Private
                   </Badge>
                 )}
                 {course.tags?.slice(0, 3).map((tag) => (
@@ -521,6 +543,12 @@ export default function CourseDetailPage() {
                     Enroll Now
                   </GlowButton>
                 </>
+              ) : course.status === "archived" ? (
+                <p className="text-sm text-amber-400/90 max-w-md leading-relaxed border border-amber-500/30 rounded-xl px-4 py-3 bg-amber-500/5">
+                  {course.organization_name
+                    ? `This course has been archived by ${course.organization_name}.`
+                    : "This course has been archived."}
+                </p>
               ) : (
                 <>
                   <GlowButton variant="primary" onClick={handleContinueLearning}>
@@ -659,8 +687,8 @@ export default function CourseDetailPage() {
             </GlowCard>
           )}
 
-          {/* Organization Info - Add this new section */}
-          {course.organization_id && course.organization_name && (
+          {/* Organization (when course is tied to an org — name may be blank from API) */}
+          {!!course.organization_id && (
             <div className="mt-6 p-4 bg-gray-800/30 rounded-lg border border-gray-700">
               <div className="flex items-center justify-between flex-wrap gap-4">
                 <div className="flex items-center gap-3">
@@ -673,8 +701,19 @@ export default function CourseDetailPage() {
                       href={`/organizations/${course.organization_id}`}
                       className="text-lg font-semibold text-white hover:text-purple-400 transition-colors"
                     >
-                      {course.organization_name}
+                      {(course.organization_name && course.organization_name.trim()) ||
+                        `Organization #${course.organization_id}`}
                     </Link>
+                    {course.visibility === "private" && (
+                      <p className="text-xs text-slate-400 mt-1">
+                        Private — enrollment is limited to invited members.
+                      </p>
+                    )}
+                    {course.visibility === "org" && (
+                      <p className="text-xs text-blue-400/90 mt-1">
+                        Organization only — members of this organization can access this course.
+                      </p>
+                    )}
                   </div>
                 </div>
                 

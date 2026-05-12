@@ -194,8 +194,10 @@ export default function EnrollPage() {
       }
       
       setJoinRequestPending(true);
+      const nameForToast =
+        (course.organization_name || course.organization?.name || "").trim() || "the organization";
       toast.success(
-        `Join request sent to ${course.organization?.name || "organization"}! The admin will review your request.`,
+        `Join request sent to ${nameForToast}! The admin will review your request.`,
         { duration: 5000 }
       );
       
@@ -327,6 +329,8 @@ export default function EnrollPage() {
   // Determine if the user can enroll (is in organization OR course is public)
   const canEnrollDirectly = course.visibility === "public" || (userOrganization?.id === course.organization_id);
   const needsOrganizationRequest = course.visibility !== "public" && !userOrganization && !joinRequestPending;
+  const orgDisplayName =
+    (course.organization_name || course.organization?.name || "").trim() || "";
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 py-12 px-4">
@@ -336,13 +340,28 @@ export default function EnrollPage() {
           <div className="flex items-center gap-2 text-gray-400">
             <Building2 className="w-4 h-4" />
             <span className="text-sm">
-              {course.visibility === "public" 
-                ? "Public Course - Open to everyone" 
-                : `Course provided by: ${course.organization?.name}`}
+              {course.visibility === "public"
+                ? "Public Course - Open to everyone"
+                : orgDisplayName
+                  ? `Course provided by: ${orgDisplayName}`
+                  : "Private course"}
             </span>
           </div>
-          <Badge variant="outline" className={course.visibility === "public" ? "text-green-400 border-green-400" : "text-purple-400 border-purple-400"}>
-            {course.visibility === "public" ? "Open Enrollment" : "Organization Only"}
+          <Badge
+            variant="outline"
+            className={
+              course.visibility === "public"
+                ? "text-green-400 border-green-400"
+                : course.visibility === "org"
+                  ? "text-blue-300 border-blue-500/40"
+                  : "text-slate-300 border-slate-500/40"
+            }
+          >
+            {course.visibility === "public"
+              ? "Open Enrollment"
+              : course.visibility === "org"
+                ? "Organization Only"
+                : "Private"}
           </Badge>
         </div>
         
@@ -438,7 +457,8 @@ export default function EnrollPage() {
                   <div>
                     <p className="text-sm text-yellow-400 font-medium">Organization Access Required</p>
                     <p className="text-sm text-gray-300 mt-1">
-                      This course is only available to members of <span className="font-semibold">{course.organization?.name}</span>.
+                      This course is only available to members of{" "}
+                      <span className="font-semibold">{orgDisplayName || "this organization"}</span>.
                       You need to join the organization before you can enroll.
                     </p>
                   </div>
@@ -454,7 +474,7 @@ export default function EnrollPage() {
                   <div>
                     <p className="text-sm text-blue-400 font-medium">Join Request Pending</p>
                     <p className="text-sm text-gray-300 mt-1">
-                      Your request to join {course.organization?.name} is pending approval by an organization admin.
+                      Your request to join {orgDisplayName || "the organization"} is pending approval by an organization admin.
                       Once approved, you'll be able to enroll in this course.
                     </p>
                   </div>
@@ -505,10 +525,10 @@ export default function EnrollPage() {
           <div className="mt-4">
             <GlowButton variant="outline" fullWidth onClick={handleJoinOrganization} isLoading={checkingMembership}>
               <LogIn className="w-4 h-4 mr-2" />
-              Request to Join {course.organization?.name} First
+              Request to Join {orgDisplayName || "Organization"} First
             </GlowButton>
             <p className="text-center text-sm text-gray-500 mt-2">
-              You need to be a member of {course.organization?.name} to enroll in this course.
+              You need to be a member of {orgDisplayName || "this organization"} to enroll in this course.
             </p>
           </div>
         )}

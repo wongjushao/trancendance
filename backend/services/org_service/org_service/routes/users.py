@@ -366,60 +366,6 @@ class UserRoleResource(Resource):
         finally:
             session.close()
 
-@users_ns.route("/users/me/enrolled-courses")
-class UserEnrolledCoursesResource(Resource):
-    @users_ns.response(200, "Enrolled courses retrieved")
-    @users_ns.response(401, "Unauthorized")
-    def get(self):
-        """Get courses the current user is enrolled in."""
-        db_session = current_app.config.get("DB_SESSION")
-        if db_session is None:
-            return jsonify({"error": "Database is not configured"}), 503
-
-        user_id, _email = get_authenticated_user()
-        if user_id is None:
-            return jsonify({"error": "Unauthorized"}), 401
-
-        session = db_session()
-        try:
-            # Query class_members to find courses the user is enrolled in
-            enrolled = (
-                session.query(
-                    CourseClass.course_id,
-                    Course.title,
-                    Course.thumbnail,
-                    Course.level,
-                    ClassMember.enrolled_at,
-                    ClassMember.completed_at,
-                    Course.course_class_id
-                )
-                .join(CourseClass, CourseClass.id == ClassMember.course_class_id)
-                .join(Course, Course.id == CourseClass.course_id)
-                .filter(ClassMember.user_id == user_id)
-                .order_by(ClassMember.enrolled_at.desc())
-                .all()
-            )
-            
-            courses = []
-            for course in enrolled:
-                courses.append({
-                    "id": course.course_id,
-                    "title": course.title,
-                    "thumbnail": course.thumbnail,
-                    "level": course.level,
-                    "enrolled_at": course.enrolled_at.isoformat() if course.enrolled_at else None,
-                    "completed_at": course.completed_at.isoformat() if course.completed_at else None,
-                    "class_id": course.course_class_id,
-                    "status": "completed" if course.completed_at else "active"
-                })
-            
-            return jsonify({"courses": courses}), 200
-        except SQLAlchemyError as exc:
-            return jsonify({"error": str(exc)}), 500
-        finally:
-            session.close()
-
-
 @users_ns.route("/users/me/discover-courses")
 class UserDiscoverCoursesResource(Resource):
     @users_ns.response(200, "Discover courses retrieved")

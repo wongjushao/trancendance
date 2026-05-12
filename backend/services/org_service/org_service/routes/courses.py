@@ -1625,40 +1625,6 @@ class CourseUpdateResource(Resource):
             return jsonify({"error": "Unauthorized"}), 401
 
         payload = request.get_json(silent=True) or {}
-        title = normalize_text(payload.get("title"))
-        description = normalize_text(payload.get("description"))
-        category = normalize_text(payload.get("category"))
-        level = normalize_text(payload.get("level") or "intermediate").lower()
-        visibility = normalize_text(payload.get("visibility") or "private").lower()
-        thumbnail = normalize_text(payload.get("thumbnail") or "")
-        
-        learning_objectives, error = normalize_string_list(
-            payload.get("learning_objectives", payload.get("objectives")),
-            "learning_objectives",
-        )
-        if error:
-            return jsonify({"error": error}), 400
-
-        prerequisites, error = normalize_string_list(payload.get("prerequisites"), "prerequisites")
-        if error:
-            return jsonify({"error": error}), 400
-
-        tags, error = normalize_string_list(payload.get("tags"), "tags")
-        if error:
-            return jsonify({"error": error}), 400
-
-        # Validate fields
-        if not title:
-            return jsonify({"error": "Field 'title' is required"}), 400
-        if not description:
-            return jsonify({"error": "Field 'description' is required"}), 400
-        if not category:
-            return jsonify({"error": "Field 'category' is required"}), 400
-        
-        if level not in ALLOWED_LEVELS:
-            return jsonify({"error": "Field 'level' must be one of: beginner, intermediate, advanced"}), 400
-        if visibility not in ALLOWED_VISIBILITIES:
-            return jsonify({"error": "Field 'visibility' must be one of: public, org, private"}), 400
 
         session = db_session()
         try:
@@ -1675,9 +1641,66 @@ class CourseUpdateResource(Resource):
                 )
                 .first()
             )
-            
+
             if course.created_by != user_id and (membership is None or membership.member_role not in COURSE_CREATOR_ROLES):
                 return jsonify({"error": "You do not have permission to edit this course"}), 403
+
+            # Status-only updates (e.g. restore from archived) without resending full metadata
+            if set(payload.keys()) == {"status"}:
+                status_val = normalize_text(payload.get("status")).lower()
+                if not status_val:
+                    return jsonify({"error": "Field 'status' is required"}), 400
+                if status_val not in ALLOWED_STATUSES:
+                    return jsonify(
+                        {"error": "Field 'status' must be one of: draft, published, archived"}
+                    ), 400
+                course.status = status_val
+                session.commit()
+                session.refresh(course)
+                return jsonify(serialize_course(course)), 200
+
+            title = normalize_text(payload.get("title"))
+            description = normalize_text(payload.get("description"))
+            category = normalize_text(payload.get("category"))
+            level = normalize_text(payload.get("level") or "intermediate").lower()
+            visibility = normalize_text(payload.get("visibility") or "private").lower()
+            thumbnail = normalize_text(payload.get("thumbnail") or "")
+
+            learning_objectives, error = normalize_string_list(
+                payload.get("learning_objectives", payload.get("objectives")),
+                "learning_objectives",
+            )
+            if error:
+                return jsonify({"error": error}), 400
+
+            prerequisites, error = normalize_string_list(payload.get("prerequisites"), "prerequisites")
+            if error:
+                return jsonify({"error": error}), 400
+
+            tags, error = normalize_string_list(payload.get("tags"), "tags")
+            if error:
+                return jsonify({"error": error}), 400
+
+            # Validate fields
+            if not title:
+                return jsonify({"error": "Field 'title' is required"}), 400
+            if not description:
+                return jsonify({"error": "Field 'description' is required"}), 400
+            if not category:
+                return jsonify({"error": "Field 'category' is required"}), 400
+
+            if level not in ALLOWED_LEVELS:
+                return jsonify({"error": "Field 'level' must be one of: beginner, intermediate, advanced"}), 400
+            if visibility not in ALLOWED_VISIBILITIES:
+                return jsonify({"error": "Field 'visibility' must be one of: public, org, private"}), 400
+
+            new_status = None
+            if "status" in payload:
+                new_status = normalize_text(payload.get("status")).lower()
+                if new_status not in ALLOWED_STATUSES:
+                    return jsonify(
+                        {"error": "Field 'status' must be one of: draft, published, archived"}
+                    ), 400
 
             # Update course fields
             course.title = title
@@ -1689,12 +1712,14 @@ class CourseUpdateResource(Resource):
             course.learning_objectives = learning_objectives
             course.prerequisites = prerequisites
             course.tags = tags
-            
+            if new_status is not None:
+                course.status = new_status
+
             session.commit()
             session.refresh(course)
 
             return jsonify(serialize_course(course)), 200
-            
+
         except SQLAlchemyError as exc:
             session.rollback()
             return jsonify({"error": str(exc)}), 500

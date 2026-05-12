@@ -4,7 +4,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Search, BookOpen, Users, Plus, Clock, ChevronRight, Eye, Edit, Archive, RotateCcw, AlertCircle, BarChart3, Badge, Building2 } from "lucide-react";
+import { Search, BookOpen, Users, Plus, Clock, ChevronRight, Eye, Edit, Archive, RotateCcw, BarChart3, Badge, Building2 } from "lucide-react";
 import { GlowCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
 import { Input } from "@/components/ui/input";
@@ -29,6 +29,7 @@ interface Course {
   visibility: "public" | "org" | "private";
   status?: "draft" | "published" | "archived";
   organization_id: number;
+  organization_name?: string | null;
   created_by: string;
   created_at: string;
   instructor_name?: string;
@@ -99,8 +100,7 @@ export default function CoursesPage() {
   });
   const [roleLoading, setRoleLoading] = useState(true);
 
-  // Archive/Unarchive modal states
-  const [archiveModalOpen, setArchiveModalOpen] = useState(false);
+  // Unarchive modal (archive is only from course edit page)
   const [unarchiveModalOpen, setUnarchiveModalOpen] = useState(false);
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
 
@@ -230,6 +230,11 @@ export default function CoursesPage() {
     }
   };
 
+  const archivedNotice = (organizationName?: string | null) =>
+    organizationName
+      ? `This course has been archived by ${organizationName}.`
+      : "This course has been archived.";
+
   const handleContinueLearning = (courseId: number) => {
     router.push(`/courses/${courseId}/learn`);
   };
@@ -263,25 +268,6 @@ export default function CoursesPage() {
     } catch (error) {
       console.error('Error fetching course offerings:', error);
       toast.error('Failed to load course offerings');
-    }
-  };
-
-  const handleArchiveCourse = async () => {
-    if (!selectedCourse) return;
-    
-    try {
-      await apiRequest(`/api/org-service/courses/${selectedCourse.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({ status: 'archived' })
-      });
-      
-      toast.success(`"${selectedCourse.title}" has been archived`);
-      setArchiveModalOpen(false);
-      setSelectedCourse(null);
-      await fetchData();
-    } catch (error) {
-      console.error("Error archiving course:", error);
-      toast.error("Failed to archive course");
     }
   };
 
@@ -421,14 +407,20 @@ export default function CoursesPage() {
                               {course.completed_lessons || 0} completed
                             </span>
                           </div>
-                          <GlowButton 
-                            size="sm" 
-                            variant="primary"
-                            onClick={() => handleContinueLearning(course.id)}
-                          >
-                            Continue
-                            <ChevronRight className="w-4 h-4 ml-1" />
-                          </GlowButton>
+                          {course.status === "archived" ? (
+                            <p className="text-sm text-amber-400/90 text-right sm:max-w-[240px] leading-snug shrink-0">
+                              {archivedNotice(course.organization_name)}
+                            </p>
+                          ) : (
+                            <GlowButton
+                              size="sm"
+                              variant="primary"
+                              onClick={() => handleContinueLearning(course.id)}
+                            >
+                              Continue
+                              <ChevronRight className="w-4 h-4 ml-1" />
+                            </GlowButton>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -456,9 +448,15 @@ export default function CoursesPage() {
                 <GlowCard key={course.id} className="h-full hover:scale-[1.02] transition-all cursor-pointer group">
                   <div className="relative overflow-hidden rounded-xl mb-4 bg-gradient-to-br from-purple-500/20 to-pink-500/20 h-48 flex items-center justify-center">
                     <BookOpen className="w-12 h-12 text-gray-500" />
-                    {course.visibility === "org" && (
-                      <div className="absolute bottom-3 left-3 px-2 py-1 bg-blue-500/90 backdrop-blur-sm rounded text-xs text-white">
-                        Organization Only
+                    {(course.visibility === "org" || course.visibility === "private") && (
+                      <div
+                        className={`absolute bottom-3 left-3 px-2 py-1 backdrop-blur-sm rounded text-xs text-white ${
+                          course.visibility === "org"
+                            ? "bg-blue-500/90"
+                            : "bg-slate-600/95 border border-slate-500/50"
+                        }`}
+                      >
+                        {course.visibility === "org" ? "Organization Only" : "Private"}
                       </div>
                     )}
                   </div>
@@ -542,7 +540,7 @@ export default function CoursesPage() {
                                 </span>
                               )}
                               {course.visibility === "private" && (
-                                <span className="px-2 py-0.5 bg-red-500/20 text-red-400 rounded-full text-xs">
+                                <span className="px-2 py-0.5 bg-slate-500/20 text-slate-300 rounded-full text-xs border border-slate-500/25">
                                   Private
                                 </span>
                               )}
@@ -576,16 +574,6 @@ export default function CoursesPage() {
                             >
                               <Users className="w-4 h-4 mr-1" />
                               Students
-                            </GlowButton>
-                            <GlowButton 
-                              size="sm" 
-                              variant="ghost"
-                              onClick={() => {
-                                setSelectedCourse(course);
-                                setArchiveModalOpen(true);
-                              }}
-                            >
-                              <Archive className="w-4 h-4" />
                             </GlowButton>
                           </div>
                         </div>
@@ -674,40 +662,6 @@ export default function CoursesPage() {
           </TabsContent>
         )}
       </Tabs>
-
-      {/* Archive Confirmation Modal */}
-      <Dialog open={archiveModalOpen} onOpenChange={setArchiveModalOpen}>
-        <DialogContent className="bg-slate-800 border-slate-700 max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-white">Archive Course?</DialogTitle>
-            <DialogDescription>
-              This course will be hidden from students but you can restore it later.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <p className="text-gray-300">
-              Are you sure you want to archive <span className="font-semibold text-white">{selectedCourse?.title}</span>?
-            </p>
-            <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3">
-              <div className="flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 text-yellow-400 mt-0.5" />
-                <p className="text-sm text-yellow-300">
-                  Students will no longer see this course, and new enrollments will be disabled.
-                </p>
-              </div>
-            </div>
-          </div>
-          <DialogFooter className="gap-3">
-            <GlowButton variant="ghost" onClick={() => setArchiveModalOpen(false)}>
-              Cancel
-            </GlowButton>
-            <GlowButton variant="primary" onClick={handleArchiveCourse} className="bg-yellow-600 hover:bg-yellow-700">
-              <Archive className="w-4 h-4 mr-2" />
-              Archive Course
-            </GlowButton>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Unarchive Confirmation Modal */}
       <Dialog open={unarchiveModalOpen} onOpenChange={setUnarchiveModalOpen}>

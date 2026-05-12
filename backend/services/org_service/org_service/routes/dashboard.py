@@ -122,6 +122,12 @@ class StudentDashboardResource(Resource):
                     elif instructor.username:
                         instructor_name = instructor.username
 
+                org = (
+                    session.query(Organization)
+                    .filter(Organization.id == course.organization_id)
+                    .first()
+                )
+
                 courses_data.append({
                     "id": course.id,
                     "title": course.title,
@@ -134,6 +140,8 @@ class StudentDashboardResource(Resource):
                     "last_accessed_at": cm.enrolled_at.isoformat() if cm.enrolled_at else None,
                     "rating": 0,
                     "certificate_earned": False,
+                    "status": course.status,
+                    "organization_name": org.name if org else None,
                 })
 
             avg_progress = int(total_progress_sum / len(courses_data)) if courses_data else 0
