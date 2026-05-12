@@ -258,6 +258,10 @@ export default function OrganizationsPage() {
   const totalCourses = myOrganizations.reduce((acc, org) => acc + (org.course_count || 0), 0);
   const discoverableOrgs = allOrganizations.filter(org => !org.is_member);
 
+  const hasAdminOrTeacherRoleInAnyOrg = myOrganizations.some(
+    org => org.user_role === "admin" || org.user_role === "teacher"
+  );
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -277,6 +281,18 @@ export default function OrganizationsPage() {
           <h1 className="text-4xl font-bold text-white tracking-tight mb-2">Organizations</h1>
           <p className="text-[#A0A0B5] text-lg">Manage your learning communities and discover new ones</p>
         </motion.div>
+        {/* Create Organization Button - Show only if NOT admin/teacher in any org */}
+          {!hasAdminOrTeacherRoleInAnyOrg && (
+            <motion.div
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+            >
+              <GlowButton onClick={() => router.push('/organizations/propose')}>
+                <Plus className="w-4 h-4 mr-2" />
+                Create Organization
+              </GlowButton>
+            </motion.div>
+          )}
       </div>
 
       {/* MY ORGANIZATIONS SECTION */}
@@ -286,18 +302,6 @@ export default function OrganizationsPage() {
             <h2 className="text-2xl font-bold text-white tracking-tight">My Organizations</h2>
             <p className="text-[#A0A0B5] text-sm mt-1">Organizations you are a member of</p>
           </div>
-          {myOrganizations.length > 0 && (
-            <div className="flex gap-4">
-              <div className="text-right">
-                <p className="text-sm text-gray-400">Total Members</p>
-                <p className="text-xl font-bold text-white">{totalMembers.toLocaleString()}</p>
-              </div>
-              <div className="text-right">
-                <p className="text-sm text-gray-400">Total Courses</p>
-                <p className="text-xl font-bold text-white">{totalCourses}</p>
-              </div>
-            </div>
-          )}
         </div>
 
         {myOrganizations.length === 0 ? (
@@ -310,10 +314,6 @@ export default function OrganizationsPage() {
               <p className="text-gray-400 mb-4 max-w-md mx-auto">
                 You haven't joined any organizations yet. Discover organizations below or create your own!
               </p>
-              <GlowButton onClick={() => router.push('/organizations/propose')}>
-                <Plus className="w-4 h-4 mr-2" />
-                Create Organization
-              </GlowButton>
             </div>
           </GlowCard>
         ) : (

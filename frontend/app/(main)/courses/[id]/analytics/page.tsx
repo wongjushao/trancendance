@@ -162,14 +162,17 @@ export default function CourseAnalyticsPage() {
           const classMember = allClassMembers.find(m => m.user_id === studentId);
           if (!classMember) continue;
           
-          // Get lesson progress for this student (batch API call would be better)
-          const progressResponse = await fetch(`/api/org-service/lesson-progress?lesson_id=all&class_member_id=${classMember.id}`, {
-            headers: { 'Authorization': `Bearer ${accessToken}` }
-          });
+          // Get lesson progress for this student using batch endpoint
+          const progressResponse = await fetch(
+            `/api/org-service/class-members/${classMember.id}/progress`,
+            { headers: { 'Authorization': `Bearer ${accessToken}` } }
+          );
           
           if (progressResponse.ok) {
             const progressData = await progressResponse.json();
-            const completedCount = progressData.filter((p: any) => p.status === 'completed').length;
+            // Extract the progress array from the response
+            const progressList = progressData.progress || [];
+            const completedCount = progressList.filter((p: any) => p.status === 'completed').length;
             const studentProgress = totalLessons > 0 ? (completedCount / totalLessons) * 100 : 0;
             totalProgress += studentProgress;
             
@@ -177,8 +180,8 @@ export default function CourseAnalyticsPage() {
               completedStudents++;
             }
             
-            // Track lesson completions
-            progressData.forEach((p: any) => {
+            // Track lesson completions for analytics
+            progressList.forEach((p: any) => {
               if (p.status === 'completed') {
                 lessonCompletions[p.lesson_id] = (lessonCompletions[p.lesson_id] || 0) + 1;
               }

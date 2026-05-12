@@ -4312,3 +4312,82 @@ class CourseClassEnrollmentStatusResource(Resource):
         finally:
             session.close()
 
+@courses_ns.route("/class-members/<int:class_member_id>/progress")
+class ClassMemberProgressResource(Resource):
+    @courses_ns.response(200, "All progress retrieved")
+    @courses_ns.response(401, "Unauthorized")
+    @courses_ns.response(403, "Permission denied")
+    @courses_ns.response(404, "Class member not found")
+    def get(self, class_member_id: int):
+        """Get all lesson progress for a class member."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        session = db_session()
+        try:
+            # Verify class member belongs to the user (or user is instructor/admin)
+            class_member = session.query(ClassMember).filter(
+                ClassMember.id == class_member_id
+            ).first()
+            
+            if not class_member:
+                return jsonify({"error": "Class member not found"}), 404
+            
+            # Check if user has permission to view this progress
+            # Allow if: user is the student themselves, OR user is course creator/instructor
+            is_owner = class_member.user_id == user_id
+            
+            # Check if user is course creator or instructor
+            course_class = session.query(CourseClass).filter(
+                CourseClass.id == class_member.course_class_id
+            ).first()
+            
+            has_teacher_access = False
+            if course_class:
+                course = session.query(Course).filter(Course.id == course_class.course_id).first()
+                if course:
+                    # User is course creator
+                    if course.created_by == user_id:
+                        has_teacher_access = True
+                    # User is instructor of this offering
+                    elif course_class.instructor_id == user_id:
+                        has_teacher_access = True
+                    # User is org admin
+                    else:
+                        membership = session.query(OrganizationMember).filter(
+                            OrganizationMember.organization_id == course.organization_id,
+                            OrganizationMember.user_id == user_id,
+                            OrganizationMember.member_role.in_(['admin', 'sub_admin'])
+                        ).first()
+                        if membership:
+                            has_teacher_access = True
+            
+            if not is_owner and not has_teacher_access:
+                return jsonify({"error": "Permission denied"}), 403
+            
+            # Get all progress for this class member
+            progress = session.query(LessonProgress).filter(
+                LessonProgress.class_member_id == class_member_id
+            ).all()
+            
+            return jsonify({
+                "progress": [
+                    {
+                        "lesson_id": p.lesson_id,
+                        "status": p.status,
+                        "progress_percent": p.progress_percent,
+                        "completed_at": p.completed_at.isoformat() if p.completed_at else None,
+                    }
+                    for p in progress
+                ]
+            }), 200
+            
+        except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
