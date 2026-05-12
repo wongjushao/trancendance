@@ -904,8 +904,12 @@ const getDayName = (day: number): string => {
           body: JSON.stringify({ title: moduleForm.title }),
         });
       } else {
-        // Use the current number of modules as the new order_index
-        const newOrderIndex = course?.modules?.length || 0;
+        // ✅ Fix: Get the current maximum order_index and add 1
+        const existingModules = course?.modules || [];
+        const maxOrderIndex = existingModules.length > 0 
+          ? Math.max(...existingModules.map(m => m.order_index ?? 0))
+          : -1;
+        const newOrderIndex = maxOrderIndex + 1;
         
         await apiRequest('/api/org-service/modules', {
           method: 'POST',
@@ -934,13 +938,36 @@ const getDayName = (day: number): string => {
     
     try {
       await deleteModule(moduleToDelete.id);
+      
+      // Get the updated modules after deletion
+      const updatedModules = course!.modules?.filter(m => m.id !== moduleToDelete.id) || [];
+      
+      // Reorder the remaining modules
+      const reorderedModules = updatedModules.map((module, index) => ({
+        id: module.id,
+        order_index: index,
+      }));
+      
+      // Send batch update to backend to reorder modules
+      if (reorderedModules.length > 0) {
+        await apiRequest('/api/org-service/modules/reorder', {
+          method: 'POST',
+          body: JSON.stringify({ updates: reorderedModules }),
+        });
+      }
+      
+      // Update local state
       setCourse({
         ...course!,
-        modules: course!.modules?.filter(m => m.id !== moduleToDelete.id)
+        modules: updatedModules.map((m, idx) => ({ ...m, order_index: idx }))
       });
+      
       toast.success(`Module "${moduleToDelete.title}" deleted`);
       setDeleteModuleModalOpen(false);
       setModuleToDelete(null);
+      
+      // Refresh course data to ensure consistency
+      await loadCourse();
     } catch (error) {
       console.error("Error deleting module:", error);
       toast.error("Failed to delete module");
@@ -967,72 +994,12 @@ const getDayName = (day: number): string => {
     setClassModalOpen(true);
   };
   
-  const saveClass = async () => {
-    if (!classForm.title.trim() || !editingClass) {
-      toast.error("Please enter a class title");
-      return;
-    }
-    
-    try {
-      if (editingClass.class.id) {
-        await updateClass(editingClass.class.id, { title: classForm.title });
-        
-        const updatedModules = course?.modules?.map(m =>
-          m.id === editingClass.moduleId
-            ? {
-                ...m,
-                classes: m.classes.map(c =>
-                  c.id === editingClass.class.id ? { ...c, title: classForm.title } : c
-                )
-              }
-            : m
-        );
-        setCourse({ ...course!, modules: updatedModules });
-        toast.success("Class updated");
-      } else {
-        const newClass = await addClass(editingClass.moduleId, {
-          title: classForm.title,
-          order_index: course?.modules?.find(m => m.id === editingClass.moduleId)?.classes.length || 0,
-        });
-        
-        const updatedModules = course?.modules?.map(m =>
-          m.id === editingClass.moduleId
-            ? { ...m, classes: [...m.classes, { ...newClass, lessons: [] }] }
-            : m
-        );
-        setCourse({ ...course!, modules: updatedModules });
-        toast.success("Class added");
-      }
-      setClassModalOpen(false);
-    } catch (error) {
-      toast.error("Failed to save class");
-    }
-  };
-  
   const promptDeleteClass = (classId: number, moduleId: number, classTitle: string) => {
     setClassToDelete({ id: classId, title: classTitle, moduleId });
     setDeleteClassModalOpen(true);
   };
   
-  const confirmDeleteClass = async () => {
-    if (!classToDelete) return;
-    
-    try {
-      await deleteClass(classToDelete.id);
-      const updatedModules = course?.modules?.map(m =>
-        m.id === classToDelete.moduleId
-          ? { ...m, classes: m.classes.filter(c => c.id !== classToDelete.id) }
-          : m
-      );
-      setCourse({ ...course!, modules: updatedModules });
-      toast.success(`Class "${classToDelete.title}" deleted`);
-      setDeleteClassModalOpen(false);
-      setClassToDelete(null);
-    } catch (error) {
-      console.error("Error deleting class:", error);
-      toast.error("Failed to delete class");
-    }
-  };
+
 
   // Lesson CRUD
   // REPLACE the existing openAddLessonModal with this:
@@ -1095,6 +1062,55 @@ const getDayName = (day: number): string => {
     setLessonModalOpen(true);
   };
     
+  const saveClass = async () => {
+    if (!classForm.title.trim() || !editingClass) {
+      toast.error("Please enter a class title");
+      return;
+    }
+    
+    try {
+      if (editingClass.class.id) {
+        await updateClass(editingClass.class.id, { title: classForm.title });
+        
+        const updatedModules = course?.modules?.map(m =>
+          m.id === editingClass.moduleId
+            ? {
+                ...m,
+                classes: m.classes.map(c =>
+                  c.id === editingClass.class.id ? { ...c, title: classForm.title } : c
+                )
+              }
+            : m
+        );
+        setCourse({ ...course!, modules: updatedModules });
+        toast.success("Class updated");
+      } else {
+        // ✅ Fix: Get the current maximum order_index and add 1
+        const currentClasses = course?.modules?.find(m => m.id === editingClass.moduleId)?.classes || [];
+        const maxOrderIndex = currentClasses.length > 0 
+          ? Math.max(...currentClasses.map(c => c.order_index ?? 0))
+          : -1;
+        const newOrderIndex = maxOrderIndex + 1;
+        
+        const newClass = await addClass(editingClass.moduleId, {
+          title: classForm.title,
+          order_index: newOrderIndex,
+        });
+        
+        const updatedModules = course?.modules?.map(m =>
+          m.id === editingClass.moduleId
+            ? { ...m, classes: [...m.classes, { ...newClass, lessons: [] }] }
+            : m
+        );
+        setCourse({ ...course!, modules: updatedModules });
+        toast.success("Class added");
+      }
+      setClassModalOpen(false);
+    } catch (error) {
+      console.error("Error saving class:", error);
+      toast.error("Failed to save class");
+    }
+  };
 
   const saveLesson = async () => {
     if (!lessonForm.title.trim() || !editingLesson) {
@@ -1116,18 +1132,18 @@ const getDayName = (day: number): string => {
         lessonData.content_json = {
           notes: lessonForm.notes || "",
           video_url: lessonForm.content_url,
-          resources: lessonForm.resources, // Add resources
+          resources: lessonForm.resources,
         };
       } else if (lessonForm.content_type === "text") {
         lessonData.content_json = {
           content: lessonForm.content_json,
-          resources: lessonForm.resources, // Add resources
+          resources: lessonForm.resources,
         };
         lessonData.content_url = null;
       } else if (lessonForm.content_type === "quiz") {
         lessonData.content_json = {
           ...lessonForm.content_json,
-          resources: lessonForm.resources, // Add resources
+          resources: lessonForm.resources,
         };
         lessonData.content_url = null;
       }
@@ -1157,11 +1173,18 @@ const getDayName = (day: number): string => {
         setCourse({ ...course!, modules: updatedModules });
         toast.success("Lesson updated");
       } else {
+        // ✅ Fix: Get the current maximum order_index and add 1
+        const currentLessons = course?.modules
+          ?.find(m => m.id === editingLesson.moduleId)
+          ?.classes.find(c => c.id === editingLesson.classId)?.lessons || [];
+        const maxOrderIndex = currentLessons.length > 0 
+          ? Math.max(...currentLessons.map(l => l.order_index ?? 0))
+          : -1;
+        const newOrderIndex = maxOrderIndex + 1;
+        
         const newLesson = await addLesson(editingLesson.classId, {
           ...lessonData,
-          order_index: course?.modules
-            ?.find(m => m.id === editingLesson.moduleId)
-            ?.classes.find(c => c.id === editingLesson.classId)?.lessons.length || 0,
+          order_index: newOrderIndex,
         });
         
         const updatedModules = course?.modules?.map(m =>
@@ -1185,10 +1208,40 @@ const getDayName = (day: number): string => {
       toast.error("Failed to save lesson");
     }
   };
-  
+
   const promptDeleteLesson = (lessonId: number, classId: number, moduleId: number, lessonTitle: string) => {
     setLessonToDelete({ id: lessonId, title: lessonTitle, classId, moduleId });
     setDeleteLessonModalOpen(true);
+  };
+
+  const confirmDeleteClass = async () => {
+    if (!classToDelete) return;
+    
+    try {
+      await deleteClass(classToDelete.id);
+      
+      // Find the module and reorder its classes
+      const updatedModules = course?.modules?.map(module => {
+        if (module.id === classToDelete.moduleId) {
+          const updatedClasses = module.classes.filter(c => c.id !== classToDelete.id);
+          // Reorder the remaining classes
+          const reorderedClasses = updatedClasses.map((c, idx) => ({ ...c, order_index: idx }));
+          return { ...module, classes: reorderedClasses };
+        }
+        return module;
+      }) || [];
+      
+      setCourse({ ...course!, modules: updatedModules });
+      toast.success(`Class "${classToDelete.title}" deleted`);
+      setDeleteClassModalOpen(false);
+      setClassToDelete(null);
+      
+      // Refresh to ensure consistency
+      await loadCourse();
+    } catch (error) {
+      console.error("Error deleting class:", error);
+      toast.error("Failed to delete class");
+    }
   };
 
   const confirmDeleteLesson = async () => {
@@ -1197,22 +1250,30 @@ const getDayName = (day: number): string => {
     try {
       await deleteLesson(lessonToDelete.id);
       
-      const updatedModules = course?.modules?.map(m =>
-        m.id === lessonToDelete.moduleId
-          ? {
-              ...m,
-              classes: m.classes.map(c =>
-                c.id === lessonToDelete.classId
-                  ? { ...c, lessons: c.lessons.filter(l => l.id !== lessonToDelete.id) }
-                  : c
-              )
+      // Find the class and reorder its lessons
+      const updatedModules = course?.modules?.map(module => {
+        if (module.id === lessonToDelete.moduleId) {
+          const updatedClasses = module.classes.map(classItem => {
+            if (classItem.id === lessonToDelete.classId) {
+              const updatedLessons = classItem.lessons.filter(l => l.id !== lessonToDelete.id);
+              // Reorder the remaining lessons
+              const reorderedLessons = updatedLessons.map((l, idx) => ({ ...l, order_index: idx }));
+              return { ...classItem, lessons: reorderedLessons };
             }
-          : m
-      );
+            return classItem;
+          });
+          return { ...module, classes: updatedClasses };
+        }
+        return module;
+      }) || [];
+      
       setCourse({ ...course!, modules: updatedModules });
       toast.success(`Lesson "${lessonToDelete.title}" deleted`);
       setDeleteLessonModalOpen(false);
       setLessonToDelete(null);
+      
+      // Refresh to ensure consistency
+      await loadCourse();
     } catch (error) {
       console.error("Error deleting lesson:", error);
       toast.error("Failed to delete lesson");
@@ -2079,22 +2140,6 @@ const getDayName = (day: number): string => {
                             >
                               <Users className="w-4 h-4 mr-2" />
                               Manage Students
-                            </GlowButton>
-                            <GlowButton
-                              size="sm"
-                              variant="outline"
-                              onClick={() => router.push(`/courses/${courseId}/offerings/${offering.id}/chat`)}
-                            >
-                              <MessageSquare className="w-4 h-4 mr-2" />
-                              Chat Room
-                            </GlowButton>
-                            <GlowButton
-                              size="sm"
-                              variant="outline"
-                              onClick={() => openEditOfferingModal(offering)}
-                            >
-                              <Edit className="w-4 h-4 mr-2" />
-                              Edit
                             </GlowButton>
                             <GlowButton
                               size="sm"
