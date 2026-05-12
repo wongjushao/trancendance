@@ -121,6 +121,15 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 
+/** Same-day class block: DB requires end_time > start_time (no overnight rows). */
+function isValidClassScheduleTimeRange(startTime: string, endTime: string): boolean {
+  const toSeconds = (t: string) => {
+    const [h = 0, m = 0, s = 0] = t.split(":").map((p) => parseInt(p, 10));
+    return h * 3600 + m * 60 + s;
+  };
+  return toSeconds(endTime) > toSeconds(startTime);
+}
+
 // Sortable Components
 function SortableModuleItem({ module, index, onEdit, onDelete, onToggleExpand, isExpanded, children }: any) {
   const {
@@ -1601,6 +1610,12 @@ const getDayName = (day: number): string => {
       toast.error("Please enter end time");
       return;
     }
+    if (!isValidClassScheduleTimeRange(scheduleForm.start_time, scheduleForm.end_time)) {
+      toast.error(
+        "End time must be after start time on the same day. If the class ends after midnight, split it into two schedules."
+      );
+      return;
+    }
 
     try {
       await addClassSchedule(selectedOfferingId, {
@@ -1620,9 +1635,16 @@ const getDayName = (day: number): string => {
       
       // Reload course data to show the new schedule
       await loadCourse();
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("Error adding schedule:", error);
-      toast.error("Failed to add schedule");
+      const err = error as { code?: string; message?: string };
+      if (err?.code === "23514" || err?.message?.includes("ck_class_schedules_time_range")) {
+        toast.error(
+          "End time must be after start time on the same day. Check that end time is not earlier than start (e.g. 11:11 AM → 12:12 PM, not 12:12 AM)."
+        );
+      } else {
+        toast.error(err?.message || "Failed to add schedule");
+      }
     }
   };
 
@@ -1662,6 +1684,12 @@ const getDayName = (day: number): string => {
       toast.error("Please enter end time");
       return;
     }
+    if (!isValidClassScheduleTimeRange(editScheduleForm.start_time, editScheduleForm.end_time)) {
+      toast.error(
+        "End time must be after start time on the same day. If the class ends after midnight, split it into two schedules."
+      );
+      return;
+    }
 
     try {
       await updateClassSchedule(editingSchedule.id, {
@@ -1681,9 +1709,16 @@ const getDayName = (day: number): string => {
       
       // Reload course data to show the updated schedule
       await loadCourse();
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("Error updating schedule:", error);
-      toast.error("Failed to update schedule");
+      const err = error as { code?: string; message?: string };
+      if (err?.code === "23514" || err?.message?.includes("ck_class_schedules_time_range")) {
+        toast.error(
+          "End time must be after start time on the same day. Check that end time is not earlier than start (e.g. 11:11 AM → 12:12 PM, not 12:12 AM)."
+        );
+      } else {
+        toast.error(err?.message || "Failed to update schedule");
+      }
     }
   };
 
@@ -3050,7 +3085,8 @@ const getDayName = (day: number): string => {
           <DialogHeader>
             <DialogTitle>Add Schedule</DialogTitle>
             <DialogDescription>
-              Add a new schedule time for this offering.
+              Add a new schedule time for this offering. End time must be later than start time the same day (24-hour
+              clock in the picker).
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
@@ -3116,7 +3152,7 @@ const getDayName = (day: number): string => {
           <DialogHeader>
             <DialogTitle>Edit Schedule</DialogTitle>
             <DialogDescription>
-              Update the schedule time for this offering.
+              Update the schedule time for this offering. End time must be later than start time the same day.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
