@@ -22,16 +22,13 @@ import {
   Crown,
   AlertCircle,
   Calendar,
-  Copy,
   Plus,
   Globe,
   Save,
   Loader2,
   AlertTriangle,
-  Check,
   ChevronDown,
   Building2,
-  MessageCircle,
   Clock
 } from "lucide-react";
 import { GlowCard, StatCard } from "@/components/lms/Cards";
@@ -153,7 +150,6 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
   const [newDomain, setNewDomain] = useState("");
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
-  const [copied, setCopied] = useState(false);
 
   const [deleteCooldown, setDeleteCooldown] = useState<{
     organizationId: number;
@@ -161,8 +157,7 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
     scheduledDeletionDate: string;
     daysRemaining: number;
   } | null>(null);
-  const [deletionStep, setDeletionStep] = useState<'select' | 'confirm' | 'cooldown' | 'recovery-request'>('select');
-  const [recoveryReason, setRecoveryReason] = useState('');
+  const [deletionStep, setDeletionStep] = useState<'select' | 'confirm' | 'cooldown'>('select');
 
   // ==================== API HELPER ====================
   const apiRequest = async (url: string, options: RequestInit = {}) => {
@@ -747,15 +742,6 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
     }
   }, [organizationId]);
 
-  // ==================== COPY INVITE LINK ====================
-  const copyInviteLink = () => {
-    const inviteLink = `${window.location.origin}/organizations/join?org=${organizationId}`;
-    navigator.clipboard.writeText(inviteLink);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-    toast.success("Invite link copied to clipboard");
-  };
-
   // ==================== ORGANIZATION DELETION COOLDOWN ====================
   const startOrganizationDeletion = () => {
     if (!organizationId || !organization?.name) {
@@ -806,42 +792,6 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
       setDeletionStep('select');
       
       toast.success(`Deletion of ${organization?.name} has been cancelled.`);
-    }
-  };
-
-  const requestRecoveryFromAdmin = async () => {
-    if (!organizationId || !organization?.name || !recoveryReason.trim()) {
-      toast.error("Please provide a reason for recovery request");
-      return;
-    }
-    
-    try {
-      const token = await getAuthToken();
-      if (!token) return;
-      
-      const response = await fetch('/api/auth-service/contact-support', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          subject: `Organization Recovery Request: ${organization.name}`,
-          message: `Organization ID: ${organizationId}\n\nReason for recovery:\n${recoveryReason}\n\nRequesting cancellation of scheduled deletion.`,
-          type: 'org_recovery'
-        }),
-      });
-      
-      if (response.ok) {
-        toast.success("Recovery request submitted. System admin will review and contact you.");
-        setDeletionStep('cooldown');
-        setRecoveryReason("");
-      } else {
-        throw new Error("Failed to submit request");
-      }
-    } catch (error) {
-      console.error("Error submitting recovery request:", error);
-      toast.error("Failed to submit recovery request. Please try again.");
     }
   };
 
@@ -1290,28 +1240,6 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
 
                 <div className="space-y-4">
                   <h3 className="text-lg font-semibold text-red-400 border-b border-gray-700 pb-2">Danger Zone</h3>
-                  
-                  <div className="p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-start gap-3">
-                        <Copy className="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" />
-                        <div>
-                          <p className="text-sm text-yellow-400 font-medium">Organization Invite Link</p>
-                          <p className="text-xs text-gray-400 mt-1">
-                            Share this link to let users join your organization
-                          </p>
-                        </div>
-                      </div>
-                      <GlowButton variant="secondary" size="sm" onClick={copyInviteLink}>
-                        {copied ? (
-                          <Check className="w-4 h-4 mr-2" />
-                        ) : (
-                          <Copy className="w-4 h-4 mr-2" />
-                        )}
-                        {copied ? "Copied!" : "Copy Link"}
-                      </GlowButton>
-                    </div>
-                  </div>
 
                   <div className="p-4 bg-red-500/5 rounded-lg border border-red-500/20">
                     <div className="mb-4">
@@ -1400,52 +1328,11 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
 
                         <GlowButton 
                           variant="outline" 
-                          onClick={() => setDeletionStep('recovery-request')}
-                          className="w-full border-blue-500/50 text-blue-400 hover:bg-blue-500/10"
-                        >
-                          Request Recovery from Admin
-                        </GlowButton>
-                        
-                        <GlowButton 
-                          variant="outline" 
                           onClick={cancelOrganizationDeletion}
                           className="w-full border-yellow-500/50 text-yellow-400 hover:bg-yellow-500/10"
                         >
                           Cancel Deletion
                         </GlowButton>
-                      </div>
-                    )}
-
-                    {deletionStep === 'recovery-request' && (
-                      <div className="space-y-3">
-                        <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
-                          <p className="text-sm text-blue-300 mb-2 flex items-center gap-2">
-                            <MessageCircle className="w-4 h-4" />
-                            Request organization recovery from system admin
-                          </p>
-                          <textarea
-                            value={recoveryReason}
-                            onChange={(e) => setRecoveryReason(e.target.value)}
-                            placeholder="Explain why you need to recover this organization..."
-                            rows={3}
-                            className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm mt-2"
-                          />
-                        </div>
-                        <div className="flex gap-3">
-                          <GlowButton 
-                            variant="outline" 
-                            onClick={() => setDeletionStep('cooldown')}
-                            className="flex-1"
-                          >
-                            Back
-                          </GlowButton>
-                          <GlowButton 
-                            onClick={requestRecoveryFromAdmin}
-                            className="flex-1 bg-blue-600 hover:bg-blue-700"
-                          >
-                            Submit Recovery Request
-                          </GlowButton>
-                        </div>
                       </div>
                     )}
                   </div>

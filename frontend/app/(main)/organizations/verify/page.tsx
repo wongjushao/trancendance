@@ -33,6 +33,8 @@ function VerifyOrganizationContent() {
       return;
     }
 
+    const ac = new AbortController();
+
     const verifyOrganization = async () => {
       try {
         const supabase = getSupabaseBrowserClient();
@@ -60,6 +62,7 @@ function VerifyOrganizationContent() {
             'Authorization': `Bearer ${session.access_token}`,
           },
           body: JSON.stringify({ token }),
+          signal: ac.signal,
         });
         
         const data = await response.json();
@@ -75,18 +78,17 @@ function VerifyOrganizationContent() {
             return;
           }
           
-          // Already verified (409)
+          // 409 — distinguish "already processed this token" from other conflicts
           if (response.status === 409) {
-            setErrorType('already_verified');
-            setError(data.error || 'This organization has already been verified.');
-            setVerifying(false);
-            return;
-          }
-          
-          // Not pending (409 with different message)
-          if (response.status === 409 && data.error?.toLowerCase().includes('pending')) {
-            setErrorType('not_pending');
-            setError(data.error || 'This verification request is no longer pending.');
+            const errLower = String(data.error || '').toLowerCase();
+            const isNotPending = errLower.includes('not pending') || errLower.includes('not pend');
+            if (isNotPending) {
+              setErrorType('not_pending');
+              setError(data.error || 'This verification request is no longer pending.');
+            } else {
+              setErrorType('already_verified');
+              setError(data.error || 'This organization has already been verified.');
+            }
             setVerifying(false);
             return;
           }
@@ -115,20 +117,31 @@ function VerifyOrganizationContent() {
         
         setOrganization(data.organization);
         setSuccess(true);
-        toast.success(`Organization "${data.organization.name}" verified successfully! You are now an admin.`);
+        if (data.already_verified) {
+          toast.success(`You're already verified for "${data.organization.name}".`);
+        } else {
+          toast.success(`Organization "${data.organization.name}" verified successfully! You are now an admin.`);
+        }
         
         // Clear any stored token
         sessionStorage.removeItem('pending_verification_token');
         
       } catch (err: any) {
+        if (err?.name === 'AbortError') {
+          return;
+        }
         console.error('Verification error:', err);
         setError(err.message || 'Failed to verify organization');
       } finally {
-        setVerifying(false);
+        if (!ac.signal.aborted) {
+          setVerifying(false);
+        }
       }
     };
     
     verifyOrganization();
+
+    return () => ac.abort();
   }, [token, router]);
 
   const handleSignOutAndRetry = async () => {
