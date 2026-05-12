@@ -3,6 +3,8 @@
 
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { RoleData, UserRole, getUserRoleData, setUserRoleData, clearUserRoleData, clearPendingRoleData } from "@/lib/role";
+import { fetchUserRoleFromBackend } from "@/lib/role-api";
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 
 interface RoleContextType {
   roleData: RoleData;
@@ -75,6 +77,37 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     window.addEventListener('role-changed', handleRoleChange as EventListener);
     return () => {
       window.removeEventListener('role-changed', handleRoleChange as EventListener);
+    };
+  }, []);
+
+  // Align sidebar / permissions with org service (localStorage alone goes stale after role changes).
+  useEffect(() => {
+    let cancelled = false;
+
+    async function syncRoleFromBackend() {
+      try {
+        const supabase = getSupabaseBrowserClient();
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.access_token || cancelled) return;
+        await fetchUserRoleFromBackend();
+      } catch {
+        /* keep existing role data */
+      }
+    }
+
+    syncRoleFromBackend();
+
+    const supabase = getSupabaseBrowserClient();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (cancelled) return;
+      if (event === 'SIGNED_IN' && session?.access_token) {
+        void fetchUserRoleFromBackend();
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
     };
   }, []);
 
