@@ -245,15 +245,28 @@ export default function UnifiedDashboardPage() {
         const approvedRoles = approvedOrganizations.map((org: any) => org.role);
         setUserRoles(new Set(approvedRoles));
         
-        // Set default organization - only use approved organizations
-        if (approvedOrganizations && approvedOrganizations.length > 0) {
-          setSelectedOrgId(approvedOrganizations[0].id);
-        } else {
-          setSelectedOrgId(null);
+        // Default org must match capabilities: first org in the list may be one where the user
+        // is only a student while they are admin elsewhere — admin/teacher APIs require the right org.
+        const roles = new Set(data.roles || []);
+        let defaultOrgId: number | null = null;
+        if (approvedOrganizations?.length) {
+          if (roles.has("admin")) {
+            const adminOrg = approvedOrganizations.find(
+              (o: any) => o.role === "admin"
+            );
+            defaultOrgId = adminOrg?.id ?? approvedOrganizations[0].id;
+          } else if (roles.has("teacher")) {
+            const teachOrg = approvedOrganizations.find(
+              (o: any) => o.role === "teacher" || o.role === "admin"
+            );
+            defaultOrgId = teachOrg?.id ?? approvedOrganizations[0].id;
+          } else {
+            defaultOrgId = approvedOrganizations[0].id;
+          }
         }
+        setSelectedOrgId(defaultOrgId);
 
         // Set default active tab based on highest role
-        const roles = new Set(data.roles || []);
         if (roles.has("admin")) {
           setActiveTab("admin");
         } else if (roles.has("teacher")) {
@@ -390,8 +403,17 @@ export default function UnifiedDashboardPage() {
           await loadStudentDashboard(token);
         } else if (activeTab === "teaching") {
           await loadTeacherDashboard(token);
-        } else if (activeTab === "admin" && selectedOrgId) {
-          await loadAdminDashboard(selectedOrgId);
+        } else if (activeTab === "admin") {
+          const currentOrg = organizations.find((o) => o.id === selectedOrgId);
+          const adminOrg = organizations.find((o) => o.role === "admin");
+          const orgIdForAdmin =
+            currentOrg?.role === "admin" ? selectedOrgId : adminOrg?.id;
+          if (!orgIdForAdmin) return;
+          if (orgIdForAdmin !== selectedOrgId) {
+            setSelectedOrgId(orgIdForAdmin);
+            return;
+          }
+          await loadAdminDashboard(orgIdForAdmin);
         }
       } catch (error) {
         console.error("Error loading dashboard data:", error);
@@ -401,7 +423,7 @@ export default function UnifiedDashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeTab, initialLoadComplete, selectedOrgId]);
+  }, [activeTab, initialLoadComplete, selectedOrgId, organizations]);
 
   const switchOrganization = (orgId: number) => {
     setSelectedOrgId(orgId);

@@ -25,6 +25,28 @@ interface Organization {
   is_member?: boolean;
 }
 
+/** Lower sorts earlier: admin orgs surface before teacher/student memberships. */
+function membershipSortPriority(role?: Organization["user_role"]): number {
+  switch (role) {
+    case "admin":
+    case "sub_admin":
+      return 0;
+    case "teacher":
+      return 1;
+    case "student":
+      return 2;
+    default:
+      return 3;
+  }
+}
+
+function compareOrganizationsForMemberList(a: Organization, b: Organization): number {
+  const pa = membershipSortPriority(a.user_role);
+  const pb = membershipSortPriority(b.user_role);
+  if (pa !== pb) return pa - pb;
+  return a.name.localeCompare(b.name);
+}
+
 export default function OrganizationsPage() {
   const router = useRouter();
   const { roleData } = useRole();
@@ -108,6 +130,8 @@ export default function OrganizationsPage() {
           user_role: m.member_role as Organization["user_role"],
           is_member: true,
         })));
+
+        myOrgsWithDetails.sort(compareOrganizationsForMemberList);
       }
 
       setMyOrganizations(myOrgsWithDetails);
