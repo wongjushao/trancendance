@@ -29,7 +29,9 @@ import {
   AlertTriangle,
   ChevronDown,
   Building2,
-  Clock
+  Clock,
+  CheckCircle,
+  XCircle,
 } from "lucide-react";
 import { GlowCard, StatCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
@@ -85,7 +87,7 @@ interface Member {
   user_id: string;
   name: string;
   email: string;
-  role: "admin" | "sub_admin" | "teacher" | "student";
+  role: "admin" | "sub_admin" | "teacher" | "student" | "pending";
   avatar: string;
   joinedAt: string;
   courses: number;
@@ -233,8 +235,10 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
 
         const formattedMembers: Member[] = membersData.members.map((m: any) => {
           let courseCount = 0;
-          
-          if (m.member_role === "student") {
+
+          if (m.member_role === "pending") {
+            courseCount = 0;
+          } else if (m.member_role === "student") {
             courseCount = studentCourseCount.get(m.user_id) || 0;
           } else if (m.member_role === "teacher" || m.member_role === "admin" || m.member_role === "sub_admin") {
             courseCount = instructorCourseCount.get(m.user_id) || 0;
@@ -258,7 +262,7 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
             user_id: m.user_id,
             name: name,
             email: memberEmails[m.user_id] || "",
-            role: m.member_role as Member["role"],
+            role: (m.member_role === "pending" ? "pending" : m.member_role) as Member["role"],
             avatar: m.user?.avatar_url || avatar,
             joinedAt: new Date(m.created_at).toISOString().split("T")[0],
             courses: courseCount,
@@ -450,6 +454,42 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
     } catch (error) {
       console.error("Error updating member:", error);
       toast.error(error instanceof Error ? error.message : "Failed to update member");
+    }
+  };
+
+  const handleApproveJoinRequest = async (
+    member: Member,
+    newRole: "student" | "teacher" | "sub_admin",
+  ) => {
+    try {
+      const token = await getAuthToken();
+      if (!token) return;
+
+      const response = await fetch(`/api/org-service/orgs/${organizationId}/members/${member.user_id}`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ member_role: newRole }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to approve request");
+      }
+
+      setMembers((prev) =>
+        prev.map((m) =>
+          m.user_id === member.user_id
+            ? { ...m, role: newRole, status: "active" as const }
+            : m,
+        ),
+      );
+      toast.success(`${member.name} approved as ${newRole.replace("_", " ")}`);
+    } catch (error) {
+      console.error("Error approving join request:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to approve request");
     }
   };
 
@@ -826,7 +866,10 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
   }, [organizationId]);
 
   // ==================== FILTERED MEMBERS ====================
-  const filteredMembers = members.filter(member => {
+  const pendingJoinRequests = members.filter((m) => m.role === "pending");
+  const rosterMembers = members.filter((m) => m.role !== "pending");
+
+  const filteredMembers = rosterMembers.filter((member) => {
     const matchesSearch = member.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                           (member.email && member.email.toLowerCase().includes(searchQuery.toLowerCase()));
     const matchesRole = roleFilter === "all" || member.role === roleFilter;
@@ -893,7 +936,13 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
         <TabsList className="bg-gray-800/50 border border-gray-700 p-1 rounded-2xl mb-8 flex-wrap h-auto">
           <TabsTrigger value="members" className="rounded-xl px-6 py-2.5">
             <Users className="w-4 h-4 mr-2" />
-            Members ({members.length})
+            Members ({rosterMembers.length}
+            {pendingJoinRequests.length > 0 ? (
+              <span className="text-amber-400 font-medium">
+                , {pendingJoinRequests.length} pending
+              </span>
+            ) : null}
+            )
           </TabsTrigger>
           <TabsTrigger value="courses" className="rounded-xl px-6 py-2.5">
             <BookOpen className="w-4 h-4 mr-2" />
@@ -910,6 +959,95 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
         </TabsList>
 
         <TabsContent value="members">
+          {pendingJoinRequests.length > 0 && (
+            <GlowCard className="mb-6 border-amber-500/30 bg-amber-500/5">
+              <div className="p-6">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-5 h-5 text-amber-400 shrink-0" />
+                    <h2 className="text-xl font-bold text-white">Join requests</h2>
+                  </div>
+                  <p className="text-sm text-amber-200/90 sm:text-right">
+                    Approve with a role or decline. Approving adds them to the member list below.
+                  </p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-amber-500/20">
+                        <th className="text-left text-amber-200/80 font-medium py-3 px-4">User</th>
+                        <th className="text-left text-amber-200/80 font-medium py-3 px-4">Requested</th>
+                        <th className="text-right text-amber-200/80 font-medium py-3 px-4">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pendingJoinRequests.map((member) => (
+                        <tr
+                          key={member.user_id}
+                          className="border-b border-amber-500/10 hover:bg-amber-500/5"
+                        >
+                          <td className="py-3 px-4">
+                            <p className="text-white font-medium">{member.name}</p>
+                            <p className="text-sm text-gray-400">
+                              {memberEmails[member.user_id] || "No email on file"}
+                            </p>
+                          </td>
+                          <td className="py-3 px-4 text-gray-400 text-sm">{member.joinedAt}</td>
+                          <td className="py-3 px-4">
+                            <div className="flex flex-wrap items-center justify-end gap-2">
+                              <select
+                                aria-label={`Role for ${member.name}`}
+                                id={`approve-role-${member.user_id}`}
+                                defaultValue="student"
+                                className="bg-gray-900/80 border border-amber-500/30 text-white rounded-lg h-9 px-2 text-sm"
+                              >
+                                <option value="student">Student</option>
+                                <option value="teacher">Teacher</option>
+                                <option value="sub_admin">Sub admin</option>
+                              </select>
+                              <GlowButton
+                                size="sm"
+                                className="h-9"
+                                onClick={() => {
+                                  const sel = document.getElementById(
+                                    `approve-role-${member.user_id}`,
+                                  ) as HTMLSelectElement | null;
+                                  const v = (sel?.value || "student") as
+                                    | "student"
+                                    | "teacher"
+                                    | "sub_admin";
+                                  handleApproveJoinRequest(member, v);
+                                }}
+                              >
+                                <CheckCircle className="w-4 h-4 mr-1" />
+                                Approve
+                              </GlowButton>
+                              <GlowButton
+                                variant="outline"
+                                size="sm"
+                                className="h-9 border-red-500/40 text-red-300 hover:bg-red-500/10"
+                                onClick={() =>
+                                  handleRemoveMember(
+                                    member.user_id,
+                                    member.name,
+                                    "pending",
+                                  )
+                                }
+                              >
+                                <XCircle className="w-4 h-4 mr-1" />
+                                Decline
+                              </GlowButton>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </GlowCard>
+          )}
+
           <GlowCard>
             <div className="min-h-[400px]">
               <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-6">

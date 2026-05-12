@@ -1527,26 +1527,40 @@ class OrganizationJoinRequestResource(Resource):
 
         session = db_session()
         try:
-            # Check if already has pending request
+            org = session.query(Organization).filter(Organization.id == org_id).first()
+            if not org:
+                return jsonify({"error": "Organization not found"}), 404
+
             existing = session.query(OrganizationMember).filter(
                 OrganizationMember.organization_id == org_id,
                 OrganizationMember.user_id == user_id,
-                OrganizationMember.member_role == "pending"
             ).first()
-            
+
             if existing:
-                return jsonify({"message": "Join request already pending"}), 200
-            
-            # Create pending request
+                if existing.member_role == "pending":
+                    return jsonify(
+                        {"message": "Join request already pending", "status": "already_pending"}
+                    ), 200
+                return jsonify(
+                    {
+                        "message": "You are already a member of this organization",
+                        "status": "already_member",
+                        "member_role": existing.member_role,
+                    }
+                ), 200
+
             new_request = OrganizationMember(
                 organization_id=org_id,
                 user_id=user_id,
-                member_role="pending"
+                member_role="pending",
             )
             session.add(new_request)
             session.commit()
-            
-            return jsonify({"message": "Join request sent successfully"}), 201
+
+            return jsonify({"message": "Join request sent successfully", "status": "created"}), 201
+        except IntegrityError:
+            session.rollback()
+            return jsonify({"error": "Could not create join request (duplicate or constraint)"}), 409
         except SQLAlchemyError as exc:
             session.rollback()
             return jsonify({"error": str(exc)}), 500
@@ -1599,39 +1613,6 @@ class OrganizationMemberRoleResource(Resource):
         finally:
             session.close()
 
-@organizations_ns.route("/organizations/<int:org_id>/membership-status")
-class OrganizationMembershipStatusResource(Resource):
-    @organizations_ns.response(200, "Status retrieved")
-    @organizations_ns.response(401, "Unauthorized")
-    def get(self, org_id: int):
-        """Check user's membership status for an organization."""
-        db_session = current_app.config.get("DB_SESSION")
-        if db_session is None:
-            return jsonify({"error": "Database is not configured"}), 503
-
-        user_id, _email = get_authenticated_user()
-        if user_id is None:
-            return jsonify({"error": "Unauthorized"}), 401
-
-        session = db_session()
-        try:
-            membership = session.query(OrganizationMember).filter(
-                OrganizationMember.organization_id == org_id,
-                OrganizationMember.user_id == user_id
-            ).first()
-            
-            if not membership:
-                return jsonify({"status": "not_member", "member_role": None}), 200
-            
-            return jsonify({
-                "status": "pending" if membership.member_role == "pending" else "member",
-                "member_role": membership.member_role,
-                "joined_at": membership.created_at.isoformat() if membership.created_at else None,
-            }), 200
-        except SQLAlchemyError as exc:
-            return jsonify({"error": str(exc)}), 500
-        finally:
-            session.close()
 
 @organizations_ns.route("/organizations/<int:org_id>/membership-status")
 class OrganizationMembershipStatusResource(Resource):
@@ -1651,12 +1632,12 @@ class OrganizationMembershipStatusResource(Resource):
         try:
             membership = session.query(OrganizationMember).filter(
                 OrganizationMember.organization_id == org_id,
-                OrganizationMember.user_id == user_id
+                OrganizationMember.user_id == user_id,
             ).first()
-            
+
             if not membership:
                 return jsonify({"status": "not_member", "member_role": None}), 200
-            
+
             return jsonify({
                 "status": "pending" if membership.member_role == "pending" else "member",
                 "member_role": membership.member_role,

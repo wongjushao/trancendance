@@ -199,46 +199,54 @@ export default function OrganizationsPage() {
       return;
     }
 
-    setJoinRequestLoading(orgId);
-    
-    try {
-      // Check if already has a pending request
-      const { data: existingRequest } = await supabase
-        .from("organization_members")
-        .select("id, member_role")
-        .eq("organization_id", orgId)
-        .eq("user_id", user.id)
-        .single();
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    if (!token) {
+      toast.error("Please login again to continue");
+      router.push("/login");
+      return;
+    }
 
-      if (existingRequest) {
-        if (existingRequest.member_role === "pending") {
-          toast.info(`You already have a pending request to join ${orgName}`);
-        } else {
-          toast.info(`You are already a member of ${orgName}`);
-        }
-        setJoinRequestLoading(null);
+    setJoinRequestLoading(orgId);
+
+    try {
+      const response = await fetch(`/api/org-service/organizations/${orgId}/join-request`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      const payload = await response.json().catch(() => ({}));
+
+      if (response.status === 401) {
+        toast.error("Please login to request to join");
+        router.push("/login");
         return;
       }
 
-      // Create join request
-      const { error } = await supabase
-        .from("organization_members")
-        .insert({
-          organization_id: orgId,
-          user_id: user.id,
-          member_role: "pending",
-        });
+      if (!response.ok) {
+        const message = typeof payload?.error === "string" ? payload.error : "Failed to send join request";
+        throw new Error(message);
+      }
 
-      if (error) throw error;
-
-      toast.success(`Join request sent to ${orgName}! The organization admin will review your request.`);
-      
-      // Refresh organizations to update the UI
+      const status = payload?.status as string | undefined;
+      if (status === "already_pending") {
+        toast.info(`You already have a pending request to join ${orgName}`);
+      } else if (status === "already_member") {
+        toast.info(`You are already a member of ${orgName}`);
+      } else {
+        toast.success(
+          `Join request sent to ${orgName}! The organization admin will review your request.`,
+        );
+      }
       await loadOrganizations();
-      
     } catch (error) {
       console.error("Error requesting to join:", error);
-      toast.error("Failed to send join request. Please try again.");
+      toast.error(
+        error instanceof Error ? error.message : "Failed to send join request. Please try again.",
+      );
     } finally {
       setJoinRequestLoading(null);
     }
