@@ -602,15 +602,27 @@ class CourseDetailResource(Resource):
                         is_completed = lp is not None and lp.status == "completed"
                         if is_completed:
                             completed_lessons += 1
+                        
+                        # ========== IMPORTANT: Include full lesson content ==========
+                        # Parse content_json if it exists
+                        content_data = {}
+                        if lesson.content_json:
+                            # content_json is already a dict/object from the database
+                            content_data = lesson.content_json
+                        
                         lessons_out.append(
                             {
                                 "id": lesson.id,
                                 "title": lesson.title,
                                 "content_type": lesson.content_type or "",
+                                "content_url": lesson.content_url,
+                                "content_json": content_data,  # Include full content
                                 "duration_seconds": lesson.duration_seconds,
                                 "order_index": lesson.order_index or 0,
                                 "is_free_preview": lesson.is_free_preview,
                                 "is_completed": is_completed,
+                                "notes": content_data.get("notes", "") if content_data else "",
+                                "resources": content_data.get("resources", []) if content_data else [],
                             }
                         )
                     classes_out.append(
@@ -3580,11 +3592,15 @@ class LessonsReorderResource(Resource):
 @courses_ns.route("/modules")
 class ModuleListResource(Resource):
     @courses_ns.expect(courses_ns.model('ModuleCreate', {
-        'course_id': fields.Integer(required=True),
-        'title': fields.String(required=True),
-        'order_index': fields.Integer(required=True),
+        'course_id': fields.Integer(required=True, description="Course ID"),
+        'title': fields.String(required=True, description="Module title"),
+        'order_index': fields.Integer(required=True, description="Display order"),
     }))
     @courses_ns.response(201, "Module created")
+    @courses_ns.response(400, "Invalid request")
+    @courses_ns.response(401, "Unauthorized")
+    @courses_ns.response(403, "Permission denied")
+    @courses_ns.response(404, "Course not found")
     def post(self):
         """Create a new module."""
         db_session = current_app.config.get("DB_SESSION")
@@ -3611,6 +3627,7 @@ class ModuleListResource(Resource):
             if not course:
                 return jsonify({"error": "Course not found"}), 404
 
+            # Check permission
             if course.created_by != user_id:
                 membership = session.query(OrganizationMember).filter(
                     OrganizationMember.organization_id == course.organization_id,
@@ -3642,7 +3659,6 @@ class ModuleListResource(Resource):
             return jsonify({"error": str(exc)}), 500
         finally:
             session.close()
-
 
 @courses_ns.route("/modules/<int:module_id>")
 class ModuleResource(Resource):
@@ -3747,13 +3763,20 @@ class ModuleResource(Resource):
     
 # ========== CLASS CRUD ENDPOINTS ==========
 
+# Find the ClassListResource and replace with:
+
 @courses_ns.route("/classes")
 class ClassListResource(Resource):
     @courses_ns.expect(courses_ns.model('ClassCreate', {
-        'module_id': fields.Integer(required=True),
-        'title': fields.String(required=True),
-        'order_index': fields.Integer(required=True),
+        'module_id': fields.Integer(required=True, description="Parent module ID"),
+        'title': fields.String(required=True, description="Class title"),
+        'order_index': fields.Integer(required=True, description="Display order"),
     }))
+    @courses_ns.response(201, "Class created")
+    @courses_ns.response(400, "Invalid request")
+    @courses_ns.response(401, "Unauthorized")
+    @courses_ns.response(403, "Permission denied")
+    @courses_ns.response(404, "Module not found")
     def post(self):
         """Create a new class."""
         db_session = current_app.config.get("DB_SESSION")
@@ -3780,6 +3803,7 @@ class ClassListResource(Resource):
             if not module:
                 return jsonify({"error": "Module not found"}), 404
 
+            # Get course for permission check
             course = session.query(Course).filter(Course.id == module.course_id).first()
             if course and course.created_by != user_id:
                 membership = session.query(OrganizationMember).filter(
@@ -3812,7 +3836,6 @@ class ClassListResource(Resource):
             return jsonify({"error": str(exc)}), 500
         finally:
             session.close()
-
 
 @courses_ns.route("/classes/<int:class_id>")
 class ClassResource(Resource):
@@ -3916,18 +3939,25 @@ class ClassResource(Resource):
 
 # ========== LESSON CRUD ENDPOINTS ==========
 
+# Find the LessonListResource and replace with:
+
 @courses_ns.route("/lessons")
 class LessonListResource(Resource):
     @courses_ns.expect(courses_ns.model('LessonCreate', {
-        'class_id': fields.Integer(required=True),
-        'title': fields.String(required=True),
-        'content_type': fields.String(required=True),
-        'content_url': fields.String(required=False),
-        'content_json': fields.Raw(required=False),
-        'order_index': fields.Integer(required=True),
-        'duration_seconds': fields.Integer(required=False),
-        'is_free_preview': fields.Boolean(required=False),
+        'class_id': fields.Integer(required=True, description="Parent class ID"),
+        'title': fields.String(required=True, description="Lesson title"),
+        'content_type': fields.String(required=True, description="Content type: video, text, quiz"),
+        'content_url': fields.String(required=False, description="URL for video content"),
+        'content_json': fields.Raw(required=False, description="JSON for quiz or text content"),
+        'order_index': fields.Integer(required=True, description="Display order"),
+        'duration_seconds': fields.Integer(required=False, description="Duration in seconds"),
+        'is_free_preview': fields.Boolean(required=False, description="Free preview available"),
     }))
+    @courses_ns.response(201, "Lesson created")
+    @courses_ns.response(400, "Invalid request")
+    @courses_ns.response(401, "Unauthorized")
+    @courses_ns.response(403, "Permission denied")
+    @courses_ns.response(404, "Class not found")
     def post(self):
         """Create a new lesson."""
         db_session = current_app.config.get("DB_SESSION")
@@ -3948,6 +3978,8 @@ class LessonListResource(Resource):
             return jsonify({"error": "class_id is required"}), 400
         if not title:
             return jsonify({"error": "title is required"}), 400
+        if not content_type:
+            return jsonify({"error": "content_type is required"}), 400
 
         session = db_session()
         try:
@@ -3955,6 +3987,7 @@ class LessonListResource(Resource):
             if not class_item:
                 return jsonify({"error": "Class not found"}), 404
 
+            # Get course for permission check
             module = session.query(Module).filter(Module.id == class_item.module_id).first()
             if module:
                 course = session.query(Course).filter(Course.id == module.course_id).first()
@@ -3974,7 +4007,7 @@ class LessonListResource(Resource):
                 content_url=payload.get("content_url"),
                 content_json=payload.get("content_json"),
                 order_index=order_index,
-                duration_seconds=payload.get("duration_seconds"),
+                duration_seconds=payload.get("duration_seconds", 0),
                 is_free_preview=payload.get("is_free_preview", False),
                 is_published=False
             )
@@ -3999,7 +4032,6 @@ class LessonListResource(Resource):
             return jsonify({"error": str(exc)}), 500
         finally:
             session.close()
-
 
 @courses_ns.route("/lessons/<int:lesson_id>")
 class LessonResource(Resource):
@@ -4106,15 +4138,14 @@ class LessonResource(Resource):
         finally:
             session.close()
 
-@courses_ns.route("/modules")
-class ModuleListResource(Resource):
-    @courses_ns.expect(courses_ns.model('ModuleCreate', {
-        'course_id': fields.Integer(required=True),
-        'title': fields.String(required=True),
-        'order_index': fields.Integer(required=True),
-    }))
-    def post(self):
-        """Create a new module."""
+@courses_ns.route("/lessons/<int:lesson_id>/full")
+class LessonFullDetailResource(Resource):
+    @courses_ns.response(200, "Lesson details retrieved")
+    @courses_ns.response(401, "Unauthorized")
+    @courses_ns.response(403, "Permission denied")
+    @courses_ns.response(404, "Lesson not found")
+    def get(self, lesson_id: int):
+        """Get full lesson details including content_json for editing."""
         db_session = current_app.config.get("DB_SESSION")
         if db_session is None:
             return jsonify({"error": "Database is not configured"}), 503
@@ -4123,114 +4154,52 @@ class ModuleListResource(Resource):
         if user_id is None:
             return jsonify({"error": "Unauthorized"}), 401
 
-        payload = request.get_json(silent=True) or {}
-        course_id = payload.get("course_id")
-        title = payload.get("title", "").strip()
-        order_index = payload.get("order_index", 0)
-
-        if not course_id:
-            return jsonify({"error": "course_id is required"}), 400
-        if not title:
-            return jsonify({"error": "title is required"}), 400
-
         session = db_session()
         try:
-            course = session.query(Course).filter(Course.id == course_id).first()
-            if not course:
-                return jsonify({"error": "Course not found"}), 404
+            lesson = session.query(Lesson).filter(Lesson.id == lesson_id).first()
+            if not lesson:
+                return jsonify({"error": "Lesson not found"}), 404
 
-            if course.created_by != user_id:
-                membership = session.query(OrganizationMember).filter(
-                    OrganizationMember.organization_id == course.organization_id,
-                    OrganizationMember.user_id == user_id,
-                    OrganizationMember.member_role.in_(['admin', 'sub_admin', 'teacher'])
-                ).first()
-                if not membership:
-                    return jsonify({"error": "Permission denied"}), 403
+            # Check permission - only course creator, instructor, or org admin can edit
+            class_item = session.query(ContentClass).filter(ContentClass.id == lesson.class_id).first()
+            if class_item:
+                module = session.query(Module).filter(Module.id == class_item.module_id).first()
+                if module:
+                    course = session.query(Course).filter(Course.id == module.course_id).first()
+                    if course and course.created_by != user_id:
+                        membership = session.query(OrganizationMember).filter(
+                            OrganizationMember.organization_id == course.organization_id,
+                            OrganizationMember.user_id == user_id,
+                            OrganizationMember.member_role.in_(['admin', 'sub_admin', 'teacher'])
+                        ).first()
+                        if not membership:
+                            return jsonify({"error": "Permission denied"}), 403
 
-            new_module = Module(
-                course_id=course_id,
-                title=title,
-                order_index=order_index,
-                is_published=True
-            )
-            session.add(new_module)
-            session.commit()
-            session.refresh(new_module)
-
-            return jsonify({
-                "id": new_module.id,
-                "course_id": new_module.course_id,
-                "title": new_module.title,
-                "order_index": new_module.order_index,
-                "is_published": new_module.is_published
-            }), 201
-        except SQLAlchemyError as exc:
-            session.rollback()
-            return jsonify({"error": str(exc)}), 500
-        finally:
-            session.close()
-
-@courses_ns.route("/modules")
-class ModuleListResource(Resource):
-    @courses_ns.expect(courses_ns.model('ModuleCreate', {
-        'title': fields.String(required=True),
-        'order_index': fields.Integer(required=True),
-    }))
-    def post(self):
-        """Create a new module."""
-        db_session = current_app.config.get("DB_SESSION")
-        if db_session is None:
-            return jsonify({"error": "Database is not configured"}), 503
-
-        user_id, _email = get_authenticated_user()
-        if user_id is None:
-            return jsonify({"error": "Unauthorized"}), 401
-
-        payload = request.get_json(silent=True) or {}
-        title = payload.get("title", "").strip()
-        order_index = payload.get("order_index", 0)
-        course_id = payload.get("course_id")
-
-        if not course_id:
-            return jsonify({"error": "course_id is required"}), 400
-        if not title:
-            return jsonify({"error": "title is required"}), 400
-
-        session = db_session()
-        try:
-            course = session.query(Course).filter(Course.id == course_id).first()
-            if not course:
-                return jsonify({"error": "Course not found"}), 404
-
-            if course.created_by != user_id:
-                membership = session.query(OrganizationMember).filter(
-                    OrganizationMember.organization_id == course.organization_id,
-                    OrganizationMember.user_id == user_id,
-                    OrganizationMember.member_role.in_(['admin', 'sub_admin', 'teacher'])
-                ).first()
-                if not membership:
-                    return jsonify({"error": "Permission denied"}), 403
-
-            new_module = Module(
-                course_id=course_id,
-                title=title,
-                order_index=order_index,
-                is_published=True
-            )
-            session.add(new_module)
-            session.commit()
-            session.refresh(new_module)
+            # Parse content data based on lesson type
+            content_data = lesson.content_json or {}
+            resources = content_data.get("resources", [])
+            notes = content_data.get("notes", "")
+            text_content = content_data.get("content", "") if lesson.content_type == "text" else ""
+            quiz_data = content_data if lesson.content_type == "quiz" else None
 
             return jsonify({
-                "id": new_module.id,
-                "course_id": new_module.course_id,
-                "title": new_module.title,
-                "order_index": new_module.order_index,
-                "is_published": new_module.is_published
-            }), 201
+                "id": lesson.id,
+                "class_id": lesson.class_id,
+                "title": lesson.title,
+                "content_type": lesson.content_type,
+                "content_url": lesson.content_url,
+                "content_json": content_data,
+                "order_index": lesson.order_index,
+                "duration_seconds": lesson.duration_seconds,
+                "is_free_preview": lesson.is_free_preview,
+                "is_published": lesson.is_published,
+                "notes": notes,
+                "resources": resources,
+                "text_content": text_content,
+                "quiz_data": quiz_data,
+            }), 200
+
         except SQLAlchemyError as exc:
-            session.rollback()
             return jsonify({"error": str(exc)}), 500
         finally:
             session.close()
@@ -4388,6 +4357,206 @@ class ClassMemberProgressResource(Resource):
             }), 200
             
         except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+# Add this after the LessonResource class (around line 1500+)
+
+@courses_ns.route("/assignments")
+class AssignmentCreateResource(Resource):
+    @courses_ns.expect(courses_ns.model('AssignmentCreate', {
+        'lesson_id': fields.Integer(required=True, description="Parent lesson ID"),
+        'title': fields.String(required=True, description="Assignment title"),
+        'description': fields.String(required=False, description="Assignment description"),
+        'due_at': fields.String(required=False, description="Due date (ISO format)"),
+        'points': fields.Integer(required=False, description="Points possible", default=100),
+    }))
+    @courses_ns.response(201, "Assignment created")
+    @courses_ns.response(400, "Invalid request")
+    @courses_ns.response(401, "Unauthorized")
+    @courses_ns.response(403, "Permission denied")
+    def post(self):
+        """Create a new assignment."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        payload = request.get_json(silent=True) or {}
+        lesson_id = payload.get("lesson_id")
+        title = payload.get("title", "").strip()
+        description = payload.get("description")
+        due_at = payload.get("due_at")
+        points = payload.get("points", 100)
+
+        if not lesson_id:
+            return jsonify({"error": "lesson_id is required"}), 400
+        if not title:
+            return jsonify({"error": "title is required"}), 400
+
+        session = db_session()
+        try:
+            lesson = session.query(Lesson).filter(Lesson.id == lesson_id).first()
+            if not lesson:
+                return jsonify({"error": "Lesson not found"}), 404
+
+            # Get course for permission check
+            class_item = session.query(ContentClass).filter(ContentClass.id == lesson.class_id).first()
+            if class_item:
+                module = session.query(Module).filter(Module.id == class_item.module_id).first()
+                if module:
+                    course = session.query(Course).filter(Course.id == module.course_id).first()
+                    if course and course.created_by != user_id:
+                        membership = session.query(OrganizationMember).filter(
+                            OrganizationMember.organization_id == course.organization_id,
+                            OrganizationMember.user_id == user_id,
+                            OrganizationMember.member_role.in_(['admin', 'sub_admin', 'teacher'])
+                        ).first()
+                        if not membership:
+                            return jsonify({"error": "Permission denied"}), 403
+
+            # Create assignment
+            new_assignment = Assignment(
+                course_id=course.id if course else None,
+                lesson_id=lesson_id,
+                title=title,
+                description=description,
+                due_at=datetime.fromisoformat(due_at) if due_at else None,
+                points=points,
+            )
+            session.add(new_assignment)
+            session.commit()
+            session.refresh(new_assignment)
+
+            return jsonify({
+                "id": new_assignment.id,
+                "title": new_assignment.title,
+                "description": new_assignment.description,
+                "due_at": new_assignment.due_at.isoformat() if new_assignment.due_at else None,
+                "points": new_assignment.points,
+                "lesson_id": new_assignment.lesson_id,
+                "course_id": new_assignment.course_id,
+            }), 201
+
+        except SQLAlchemyError as exc:
+            session.rollback()
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+@courses_ns.route("/assignments/<int:assignment_id>")
+class AssignmentUpdateResource(Resource):
+    @courses_ns.expect(courses_ns.model('AssignmentUpdate', {
+        'title': fields.String(required=False),
+        'description': fields.String(required=False),
+        'due_at': fields.String(required=False),
+        'points': fields.Integer(required=False),
+    }))
+    @courses_ns.response(200, "Assignment updated")
+    @courses_ns.response(401, "Unauthorized")
+    @courses_ns.response(403, "Permission denied")
+    @courses_ns.response(404, "Assignment not found")
+    def put(self, assignment_id: int):
+        """Update an assignment."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        payload = request.get_json(silent=True) or {}
+
+        session = db_session()
+        try:
+            assignment = session.query(Assignment).filter(Assignment.id == assignment_id).first()
+            if not assignment:
+                return jsonify({"error": "Assignment not found"}), 404
+
+            # Check permission (only course creator or org admin can update)
+            course = session.query(Course).filter(Course.id == assignment.course_id).first()
+            if course and course.created_by != user_id:
+                membership = session.query(OrganizationMember).filter(
+                    OrganizationMember.organization_id == course.organization_id,
+                    OrganizationMember.user_id == user_id,
+                    OrganizationMember.member_role.in_(['admin', 'sub_admin'])
+                ).first()
+                if not membership:
+                    return jsonify({"error": "Permission denied"}), 403
+
+            if 'title' in payload:
+                assignment.title = payload['title']
+            if 'description' in payload:
+                assignment.description = payload['description']
+            if 'due_at' in payload:
+                assignment.due_at = datetime.fromisoformat(payload['due_at']) if payload['due_at'] else None
+            if 'points' in payload:
+                assignment.points = payload['points']
+
+            session.commit()
+            session.refresh(assignment)
+
+            return jsonify({
+                "id": assignment.id,
+                "title": assignment.title,
+                "description": assignment.description,
+                "due_at": assignment.due_at.isoformat() if assignment.due_at else None,
+                "points": assignment.points,
+                "lesson_id": assignment.lesson_id,
+                "course_id": assignment.course_id,
+            }), 200
+
+        except SQLAlchemyError as exc:
+            session.rollback()
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+    @courses_ns.response(200, "Assignment deleted")
+    @courses_ns.response(401, "Unauthorized")
+    @courses_ns.response(403, "Permission denied")
+    @courses_ns.response(404, "Assignment not found")
+    def delete(self, assignment_id: int):
+        """Delete an assignment."""
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        session = db_session()
+        try:
+            assignment = session.query(Assignment).filter(Assignment.id == assignment_id).first()
+            if not assignment:
+                return jsonify({"error": "Assignment not found"}), 404
+
+            # Check permission
+            course = session.query(Course).filter(Course.id == assignment.course_id).first()
+            if course and course.created_by != user_id:
+                membership = session.query(OrganizationMember).filter(
+                    OrganizationMember.organization_id == course.organization_id,
+                    OrganizationMember.user_id == user_id,
+                    OrganizationMember.member_role.in_(['admin', 'sub_admin'])
+                ).first()
+                if not membership:
+                    return jsonify({"error": "Permission denied"}), 403
+
+            # Delete submissions first
+            session.query(Submission).filter(Submission.assignment_id == assignment_id).delete()
+            session.delete(assignment)
+            session.commit()
+
+            return jsonify({"message": "Assignment deleted successfully"}), 200
+
+        except SQLAlchemyError as exc:
+            session.rollback()
             return jsonify({"error": str(exc)}), 500
         finally:
             session.close()

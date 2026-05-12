@@ -279,14 +279,14 @@ function VideoPlayer({
 
   return (
     <div 
-      className="relative group bg-black rounded-lg overflow-hidden"
+      className="relative w-full max-w-full overflow-hidden rounded-lg bg-black"
       onMouseMove={showControlsTemporarily}
       onMouseLeave={() => setShowControls(true)}
     >
       <video
         ref={videoRef}
         src={url}
-        className="w-full"
+        className="w-full h-auto max-h-[70vh] object-contain"
         onTimeUpdate={handleTimeUpdate}
         onLoadedMetadata={handleLoadedMetadata}
         onPlay={() => setIsPlaying(true)}
@@ -348,12 +348,17 @@ function VideoPlayer({
 }
 
 // Text Lesson Component
-function TextLesson({ content, onMarkComplete }: { content: string; onMarkComplete: () => void }) {
+function TextLesson({ content, onMarkComplete }: { content: any; onMarkComplete: () => void }) {
+  // Extract content string from object if needed
+  const contentString = typeof content === 'string' 
+    ? content 
+    : content?.content || content?.text || '';
+  
   return (
     <div className="space-y-4">
       <div 
         className="prose prose-invert prose-sm max-w-none"
-        dangerouslySetInnerHTML={{ __html: content }}
+        dangerouslySetInnerHTML={{ __html: contentString }}
       />
       <div className="flex justify-end pt-4">
         <GlowButton onClick={onMarkComplete}>
@@ -996,13 +1001,13 @@ function Sidebar({
   };
 
   return (
-    <div
-      className={`fixed top-16 bottom-0 z-[35] flex flex-col border-r border-gray-800 bg-gray-900 shadow-xl transition-transform duration-300 max-lg:max-w-[min(100vw-1rem,20rem)] lg:transition-[left,width] ${
-        isCollapsed ? "w-16" : "w-80"
-      } max-lg:left-0 ${dashboardSidebarCollapsed ? "lg:left-20" : "lg:left-64"} ${
-        mobileDrawerOpen ? "translate-x-0" : "-translate-x-full"
-      } lg:translate-x-0`}
-    >
+    <div className={`fixed top-16 bottom-0 z-[35] flex flex-col border-r border-gray-800 bg-gray-900 shadow-xl transition-all duration-300 ${
+      isCollapsed ? "w-16" : "w-72 sm:w-80"
+    } lg:translate-x-0 ${
+      mobileDrawerOpen ? "translate-x-0" : "-translate-x-full"
+    } ${
+      dashboardSidebarCollapsed ? "lg:left-20" : "lg:left-64"
+    }`}>
       <div className="border-b border-gray-800 p-4">
         {!isCollapsed ? (
           <div className="mb-2 flex items-start justify-between gap-2">
@@ -1222,7 +1227,7 @@ export default function CourseLearnPage() {
   const [dashboardSidebarCollapsed, setDashboardSidebarCollapsed] = useState(false);
   const [mobileCurriculumOpen, setMobileCurriculumOpen] = useState(false);
   const [expandedModules, setExpandedModules] = useState<Set<number>>(new Set());
-  const [activeTab, setActiveTab] = useState<"content" | "assignments" | "resources" | "discussion">("content");
+  const [activeTab, setActiveTab] = useState<"content" | "assignments" | "resources">("content");
   const [user, setUser] = useState<any>(null);
   const [courseReviews, setCourseReviews] = useState<any[]>([]);
   const [averageRating, setAverageRating] = useState(0);
@@ -1777,14 +1782,14 @@ export default function CourseLearnPage() {
       />
 
       <div
-        className={`min-w-0 transition-[margin] duration-300 ml-0 w-full ${
+        className={`min-w-0 transition-all duration-300 w-full ${
           sidebarCollapsed
             ? dashboardSidebarCollapsed
-              ? "lg:ml-80"
-              : "lg:ml-96"
+              ? "lg:ml-20 lg:pl-16"
+              : "lg:ml-64 lg:pl-0"
             : dashboardSidebarCollapsed
-              ? "lg:ml-96"
-              : "lg:ml-[576px]"
+              ? "lg:ml-20 lg:pl-72"
+              : "lg:ml-64 lg:pl-80"
         }`}
       >
         <div className="sticky top-0 z-10 bg-gray-900/95 backdrop-blur-sm border-b border-gray-800">
@@ -1815,7 +1820,7 @@ export default function CourseLearnPage() {
           </div>
         </div>
 
-        <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
+        <div className="mx-auto w-full max-w-[calc(100vw-320px)] lg:max-w-4xl px-3 sm:px-4 py-4 sm:py-6">
           <div className="mb-6">
             <h1 className="text-2xl font-bold text-white mb-2">{currentLesson.title}</h1>
             <div className="flex items-center gap-3 text-sm text-gray-400">
@@ -1853,20 +1858,32 @@ export default function CourseLearnPage() {
                 </TabsTrigger>
               )}
               <TabsTrigger value="resources">Resources</TabsTrigger>
-              <TabsTrigger value="discussion">Discussion</TabsTrigger>
             </TabsList>
 
             <TabsContent value="content" className="mt-6">
               <GlowCard>
                 <div className="p-6">
                   {currentLesson.content_type === "video" && currentLesson.content_url && (
-                    <VideoPlayer
-                      url={currentLesson.content_url}
-                      title={currentLesson.title}
-                      onProgress={handleVideoProgress}
-                      onComplete={handleVideoComplete}
-                      initialProgress={currentLesson.progress_percent}
-                    />
+                    <>
+                      <VideoPlayer
+                        url={currentLesson.content_url}
+                        title={currentLesson.title}
+                        onProgress={handleVideoProgress}
+                        onComplete={handleVideoComplete}
+                        initialProgress={currentLesson.progress_percent}
+                      />
+                      
+                      {/* Display lesson notes if available */}
+                      {currentLesson.content_json?.notes && (
+                        <div className="mt-6 p-4 bg-gray-800/30 rounded-lg">
+                          <h3 className="text-lg font-semibold text-white mb-3">Lesson Notes</h3>
+                          <div 
+                            className="prose prose-invert prose-sm max-w-none"
+                            dangerouslySetInnerHTML={{ __html: currentLesson.content_json.notes }}
+                          />
+                        </div>
+                      )}
+                    </>
                   )}
                   
                   {currentLesson.content_type === "text" && currentLesson.content_json && (
@@ -1995,24 +2012,6 @@ export default function CourseLearnPage() {
                       <p className="text-gray-400">No resources available for this lesson</p>
                     </div>
                   )}
-                </div>
-              </GlowCard>
-            </TabsContent>
-
-            <TabsContent value="discussion" className="mt-6">
-              <GlowCard>
-                <div className="p-6">
-                  <h2 className="text-xl font-semibold text-white mb-4">Course Discussion</h2>
-                  <div className="text-center py-8">
-                    <MessageSquare className="w-12 h-12 text-purple-400 mx-auto mb-3" />
-                    <p className="text-gray-400">Join the conversation with fellow students</p>
-                    <Link href={`/courses/${courseId}/chat`}>
-                      <GlowButton className="mt-4">
-                        <MessageSquare className="w-4 h-4 mr-2" />
-                        Go to Course Chat
-                      </GlowButton>
-                    </Link>
-                  </div>
                 </div>
               </GlowCard>
             </TabsContent>

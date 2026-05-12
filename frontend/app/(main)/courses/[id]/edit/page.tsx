@@ -1029,32 +1029,34 @@ const getDayName = (day: number): string => {
   };
   
   // REPLACE the existing openEditLessonModal with this:
-  const openEditLessonModal = async (lesson: LessonWithAssignments, classId: number, moduleId: number) => {
+  const openEditLessonModal = (lesson: LessonWithAssignments, classId: number, moduleId: number) => {
+    console.log("Opening edit for lesson:", lesson);
+    
     let notes = "";
     let resources: Array<{ url: string; name: string; type: string; size: number }> = [];
-    let contentJson = lesson.content_json;
-    let textContent = ""; // Add this for text lesson content
-    let quizData = null; // Add this for quiz data
+    let contentJson = null;
+    let textContent = "";
+    let quizData = null;
     
-    // Extract based on content type
-    if (lesson.content_type === "video" && lesson.content_json) {
-      notes = lesson.content_json.notes || "";
-      resources = lesson.content_json.resources || [];
-      contentJson = lesson.content_json;
-    } else if (lesson.content_type === "text" && lesson.content_json) {
-      // For text lessons, content is stored in the "content" field
-      textContent = lesson.content_json.content || "";
-      resources = lesson.content_json.resources || [];
-      contentJson = lesson.content_json.content; // Set to the actual content for the editor
-    } else if (lesson.content_type === "quiz" && lesson.content_json) {
-      quizData = lesson.content_json;
-      resources = lesson.content_json.resources || [];
-      contentJson = lesson.content_json;
-    } else if (lesson.content_json) {
-      // Fallback for any other case
-      resources = lesson.content_json.resources || [];
-      textContent = lesson.content_json.content || lesson.content_json;
-      contentJson = lesson.content_json.content || lesson.content_json;
+    // Check if lesson has content_json
+    if (lesson.content_json) {
+      console.log("Lesson has content_json:", lesson.content_json);
+      
+      if (lesson.content_type === "video") {
+        notes = lesson.content_json.notes || "";
+        resources = lesson.content_json.resources || [];
+        contentJson = lesson.content_json;
+      } else if (lesson.content_type === "text") {
+        textContent = lesson.content_json.content || "";
+        resources = lesson.content_json.resources || [];
+        contentJson = textContent;
+      } else if (lesson.content_type === "quiz") {
+        quizData = lesson.content_json;
+        resources = lesson.content_json.resources || [];
+        contentJson = lesson.content_json;
+      }
+    } else {
+      console.log("No content_json found for lesson");
     }
     
     setEditingLesson({ lesson, classId, moduleId });
@@ -1132,7 +1134,7 @@ const getDayName = (day: number): string => {
         title: lessonForm.title,
         content_type: lessonForm.content_type,
         is_free_preview: lessonForm.is_free_preview,
-        duration_seconds: lessonForm.duration_seconds,
+        duration_seconds: lessonForm.duration_seconds || 0,
       };
       
       // Handle different content types
@@ -1141,48 +1143,37 @@ const getDayName = (day: number): string => {
         lessonData.content_json = {
           notes: lessonForm.notes || "",
           video_url: lessonForm.content_url,
-          resources: lessonForm.resources,
+          resources: lessonForm.resources || [],
         };
       } else if (lessonForm.content_type === "text") {
         lessonData.content_json = {
-          content: lessonForm.content_json,
-          resources: lessonForm.resources,
+          content: lessonForm.content_json || "",
+          resources: lessonForm.resources || [],
         };
         lessonData.content_url = null;
       } else if (lessonForm.content_type === "quiz") {
         lessonData.content_json = {
           ...lessonForm.content_json,
-          resources: lessonForm.resources,
+          resources: lessonForm.resources || [],
         };
         lessonData.content_url = null;
       }
       
+      // Validate video URL if needed
+      if (lessonForm.content_type === "video" && !lessonForm.content_url) {
+        toast.error("Please add a video URL for video lessons");
+        return;
+      }
+      
       if (editingLesson.lesson.id) {
-        await updateLesson(editingLesson.lesson.id, lessonData);
-        
-        const updatedModules = course?.modules?.map(m =>
-          m.id === editingLesson.moduleId
-            ? {
-                ...m,
-                classes: m.classes.map(c =>
-                  c.id === editingLesson.classId
-                    ? {
-                        ...c,
-                        lessons: c.lessons.map(l =>
-                          l.id === editingLesson.lesson.id
-                            ? { ...l, ...lessonData }
-                            : l
-                        )
-                      }
-                    : c
-                )
-              }
-            : m
-        );
-        setCourse({ ...course!, modules: updatedModules });
-        toast.success("Lesson updated");
+        // Update existing lesson
+        await apiRequest(`/api/org-service/lessons/${editingLesson.lesson.id}`, {
+          method: 'PUT',
+          body: JSON.stringify(lessonData),
+        });
+        toast.success("Lesson updated successfully");
       } else {
-        // ✅ Fix: Get the current maximum order_index and add 1
+        // Create new lesson
         const currentLessons = course?.modules
           ?.find(m => m.id === editingLesson.moduleId)
           ?.classes.find(c => c.id === editingLesson.classId)?.lessons || [];
@@ -1191,30 +1182,24 @@ const getDayName = (day: number): string => {
           : -1;
         const newOrderIndex = maxOrderIndex + 1;
         
-        const newLesson = await addLesson(editingLesson.classId, {
-          ...lessonData,
-          order_index: newOrderIndex,
+        await apiRequest('/api/org-service/lessons', {
+          method: 'POST',
+          body: JSON.stringify({
+            class_id: editingLesson.classId,
+            ...lessonData,
+            order_index: newOrderIndex,
+          }),
         });
-        
-        const updatedModules = course?.modules?.map(m =>
-          m.id === editingLesson.moduleId
-            ? {
-                ...m,
-                classes: m.classes.map(c =>
-                  c.id === editingLesson.classId
-                    ? { ...c, lessons: [...c.lessons, newLesson] }
-                    : c
-                )
-              }
-            : m
-        );
-        setCourse({ ...course!, modules: updatedModules });
-        toast.success("Lesson added");
+        toast.success("Lesson created successfully");
       }
+      
+      // Refresh course data
+      await loadCourse();
       setLessonModalOpen(false);
-    } catch (error) {
+      
+    } catch (error: any) {
       console.error("Error saving lesson:", error);
-      toast.error("Failed to save lesson");
+      toast.error(error.message || "Failed to save lesson");
     }
   };
 
