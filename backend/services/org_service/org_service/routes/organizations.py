@@ -300,12 +300,12 @@ class OrganizationVerificationResource(Resource):
                         )
 
                 return jsonify({"error": "Verification request is not pending"}), 409
-            
+
             if verification_request.expires_at <= now:
                 verification_request.status = "expired"
                 session.commit()
                 return jsonify({"error": "Verification token has expired"}), 400
-            
+
             # Check if the logged-in user's email matches the invited admin email
             if verification_request.admin_email != admin_email:
                 return jsonify({
@@ -321,13 +321,13 @@ class OrganizationVerificationResource(Resource):
             if existing_organization:
                 # Organization already exists, just add/update user membership
                 organization = existing_organization
-                
+
                 # Check if user is already a member
                 existing_member = session.query(OrganizationMember).filter(
                     OrganizationMember.organization_id == organization.id,
                     OrganizationMember.user_id == admin_user_id
                 ).first()
-                
+
                 if existing_member:
                     # Update existing member to admin
                     existing_member.member_role = "admin"
@@ -532,9 +532,11 @@ class OrganizationResource(Resource):
         try:
             organization = session.query(Organization).filter(Organization.id == org_id).first()
             if not organization:
-                return jsonify({"error": "Organization not found"}), 404
+                return jsonify({"exists": False, "error": "Organization not found"}), 200
 
-            return jsonify(serialize_organization(organization)), 200
+            data = serialize_organization(organization)
+            data["exists"] = True
+            return jsonify(data), 200
         except SQLAlchemyError as exc:
             return jsonify({"error": str(exc)}), 500
         finally:
@@ -560,7 +562,7 @@ class OrganizationResource(Resource):
             return jsonify({"error": "Unauthorized"}), 401
 
         payload = request.get_json(silent=True) or {}
-        
+
         session = db_session()
         try:
             # Check if organization exists
@@ -600,9 +602,9 @@ class OrganizationResource(Resource):
 
             session.commit()
             session.refresh(organization)
-            
+
             return jsonify(serialize_organization(organization)), 200
-            
+
         except SQLAlchemyError as exc:
             session.rollback()
             return jsonify({"error": str(exc)}), 500
@@ -922,7 +924,7 @@ class OrganizationMembersListResource(Resource):
 
         limit = request.args.get("limit", type=int)
         session = db_session()
-        
+
         try:
             org = session.query(Organization).filter(Organization.id == org_id).first()
             if not org:
@@ -941,14 +943,14 @@ class OrganizationMembersListResource(Resource):
             query = session.query(OrganizationMember).filter(
                 OrganizationMember.organization_id == org_id
             )
-            
+
             # FOR PUBLIC VISITORS: Only show members with approved roles (not pending)
             if not is_member:
                 query = query.filter(OrganizationMember.member_role != "pending")
-            
+
             if limit:
                 query = query.limit(limit)
-            
+
             members = query.all()
 
             user_ids = [m.user_id for m in members]
@@ -963,7 +965,7 @@ class OrganizationMembersListResource(Resource):
             members_list = []
             for member in members:
                 profile = profiles.get(member.user_id)
-                
+
                 # FOR PUBLIC VISITORS: Only show limited info (no email)
                 if not is_member:
                     members_list.append({
@@ -1084,7 +1086,7 @@ class OrganizationMemberDetailResource(Resource):
                     OrganizationMember.organization_id == org_id,
                     OrganizationMember.member_role == "admin"
                 ).count()
-                
+
                 if admin_count <= 1:
                     return jsonify({"error": "Cannot demote the only organization admin"}), 400
 
@@ -1158,7 +1160,7 @@ class OrganizationMemberDetailResource(Resource):
                     OrganizationMember.organization_id == org_id,
                     OrganizationMember.member_role == "admin"
                 ).count()
-                
+
                 if admin_count <= 1:
                     return jsonify({"error": "Cannot remove the only organization admin"}), 400
 
@@ -1430,7 +1432,7 @@ class OrganizationAnalyticsResource(Resource):
 
             # Calculate average rating across courses
             course_ids = [c.id for c in session.query(Course.id).filter(Course.organization_id == org_id).all()]
-            
+
             avg_rating = 0
             if course_ids:
                 rating_result = session.query(
@@ -1443,13 +1445,13 @@ class OrganizationAnalyticsResource(Resource):
             # Calculate completion rate (based on lesson progress)
             completion_rate = 0
             offering_ids = [o.id for o in session.query(CourseClass.id).filter(CourseClass.course_id.in_(course_ids)).all()]
-            
+
             if offering_ids:
                 class_member_ids = [cm.id for cm in session.query(ClassMember.id).filter(
                     ClassMember.course_class_id.in_(offering_ids),
                     ClassMember.role == "student"
                 ).all()]
-                
+
                 if class_member_ids:
                     total_progress = session.query(LessonProgress).filter(
                         LessonProgress.class_member_id.in_(class_member_ids)
@@ -1466,7 +1468,7 @@ class OrganizationAnalyticsResource(Resource):
                 OrganizationMember.organization_id == org_id,
                 OrganizationMember.created_at >= thirty_days_ago
             ).count()
-            
+
             monthly_growth = (new_members_last_30d / total_members * 100) if total_members > 0 else 0
 
             return jsonify({
@@ -1526,7 +1528,7 @@ class OrganizationDeleteResource(Resource):
                 OrganizationMember.organization_id == org_id,
                 OrganizationMember.member_role == "admin"
             ).count()
-            
+
             if admin_count > 1:
                 # Transfer ownership or require other admins to be removed first
                 return jsonify({"error": "Remove other admins before deleting the organization"}), 400
@@ -1534,20 +1536,20 @@ class OrganizationDeleteResource(Resource):
             # Delete all related data (cascade should handle most, but explicit for safety)
             # Delete organization members
             session.query(OrganizationMember).filter(OrganizationMember.organization_id == org_id).delete()
-            
+
             # Delete organization domains
             session.query(OrganizationDomain).filter(OrganizationDomain.organization_id == org_id).delete()
-            
+
             # Delete organization verification requests
             session.query(OrganizationVerificationRequest).filter(
                 OrganizationVerificationRequest.organization_id == org_id
             ).delete()
-            
+
             # Delete organization member invitations
             session.query(OrganizationMemberInvitation).filter(
                 OrganizationMemberInvitation.organization_id == org_id
             ).delete()
-            
+
             # Finally delete the organization
             session.delete(org)
             session.commit()
