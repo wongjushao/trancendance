@@ -4,10 +4,10 @@ import { useState, useEffect } from "react";
 import { use } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { 
-  Users, 
-  UserPlus, 
-  Settings, 
+import {
+  Users,
+  UserPlus,
+  Settings,
   Mail,
   Shield,
   BarChart3,
@@ -124,9 +124,9 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
   const router = useRouter();
   const { roleData, setRole } = useRole();
   const supabase = getSupabaseBrowserClient();
-  
+
   const organizationId = parseInt(id);
-  
+
   const [organization, setOrganization] = useState<OrganizationData | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
@@ -135,14 +135,14 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
   const [loading, setLoading] = useState(true);
 
   const [memberEmails, setMemberEmails] = useState<Record<string, string>>({});
-  
+
   const [searchQuery, setSearchQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [editingMember, setEditingMember] = useState<Member | null>(null);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [activeTab, setActiveTab] = useState("members");
-  
+
   const [settingsForm, setSettingsForm] = useState({
     name: "",
     description: "",
@@ -165,7 +165,7 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
   const apiRequest = async (url: string, options: RequestInit = {}) => {
     const token = await getAuthToken();
     if (!token) throw new Error("Not authenticated");
-    
+
     const response = await fetch(url, {
       ...options,
       headers: {
@@ -174,12 +174,12 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
         ...options.headers,
       },
     });
-    
+
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: response.statusText }));
       throw new Error(error.error || `Request failed: ${response.status}`);
     }
-    
+
     return response.json();
   };
 
@@ -200,24 +200,24 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
       }
 
       const membersData = await response.json();
-      
+
       if (membersData && membersData.members) {
         // Collect user IDs for email fetch
         const userIds = membersData.members.map((m: any) => m.user_id);
-        
+
         // Fetch emails from backend API
         await fetchMemberEmails(userIds);
 
         // Get student course counts via backend
         let studentCourseCount = new Map<string, number>();
         let instructorCourseCount = new Map<string, number>();
-        
+
         try {
           // Get all courses in this organization to count instructor courses
           const coursesResponse = await fetch(`/api/org-service/courses?organization_id=${organizationId}`, {
             headers: { 'Authorization': `Bearer ${token}` }
           });
-          
+
           if (coursesResponse.ok) {
             const coursesData = await coursesResponse.json();
             coursesData.courses?.forEach((course: any) => {
@@ -226,7 +226,7 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
               }
             });
           }
-          
+
           // For student counts, we'd need a separate endpoint
           // For now, use mock or fetch from enrollment API
         } catch (err) {
@@ -243,20 +243,20 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
           } else if (m.member_role === "teacher" || m.member_role === "admin" || m.member_role === "sub_admin") {
             courseCount = instructorCourseCount.get(m.user_id) || 0;
           }
-          
+
           const firstName = m.user?.first_name || "";
           const lastName = m.user?.last_name || "";
           const username = m.user?.username || "";
-          
+
           let name = "Unknown User";
           if (firstName && lastName) name = `${firstName} ${lastName}`;
           else if (firstName) name = firstName;
           else if (username) name = username;
-          
+
           let avatar = "U";
           if (firstName) avatar = firstName[0].toUpperCase();
           else if (username) avatar = username[0].toUpperCase();
-          
+
           return {
             id: m.user_id,
             user_id: m.user_id,
@@ -269,7 +269,7 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
             status: "active",
           };
         });
-        
+
         setMembers(formattedMembers);
       }
     } catch (error) {
@@ -279,11 +279,11 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
 
   const fetchMemberEmails = async (userIds: string[]) => {
     if (!userIds.length) return;
-    
+
     try {
       const token = await getAuthToken();
       if (!token) return;
-      
+
       // This endpoint already exists
       const response = await fetch('/api/org-service/users/batch-emails', {
         method: 'POST',
@@ -293,7 +293,7 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
         },
         body: JSON.stringify({ user_ids: userIds }),
       });
-      
+
       if (response.ok) {
         const data = await response.json();
         setMemberEmails(data.users || {});
@@ -332,7 +332,7 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
             });
             if (profileResponse.ok) {
               const profile = await profileResponse.json();
-              instructorName = profile.first_name 
+              instructorName = profile.first_name
                 ? `${profile.first_name} ${profile.last_name || ""}`.trim()
                 : profile.username || "Instructor";
             }
@@ -399,11 +399,11 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
       toast.error("Cannot remove admin members");
       return;
     }
-    
+
     try {
       const token = await getAuthToken();
       if (!token) return;
-      
+
       const response = await fetch(`/api/org-service/orgs/${organizationId}/members/${memberId}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
@@ -425,11 +425,11 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
   // ==================== UPDATE MEMBER ROLE ====================
   const handleUpdateMember = async () => {
     if (!editingMember) return;
-    
+
     try {
       const token = await getAuthToken();
       if (!token) return;
-      
+
       const response = await fetch(`/api/org-service/orgs/${organizationId}/members/${editingMember.user_id}`, {
         method: 'PUT',
         headers: {
@@ -443,7 +443,7 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
         const error = await response.json();
         throw new Error(error.error || "Failed to update member");
       }
-      
+
       setMembers(prev =>
         prev.map(member =>
           member.id === editingMember.id ? { ...member, role: editingMember.role } : member
@@ -498,7 +498,7 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
     try {
       const token = await getAuthToken();
       if (!token) return;
-      
+
       const response = await fetch(`/api/org-service/courses/${courseId}/publish`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
@@ -524,11 +524,11 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
   // ==================== UPDATE ORGANIZATION SETTINGS ====================
   const handleSaveSettings = async () => {
     setSavingSettings(true);
-    
+
     try {
       const token = await getAuthToken();
       if (!token) return;
-      
+
       const response = await fetch(`/api/org-service/orgs/${organizationId}`, {
         method: 'PUT',
         headers: {
@@ -546,7 +546,7 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
         const error = await response.json();
         throw new Error(error.error || "Failed to update organization");
       }
-      
+
       const updatedOrg = await response.json();
       setOrganization({ ...organization!, ...updatedOrg });
       toast.success("Organization settings updated successfully");
@@ -579,7 +579,7 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
     try {
       const token = await getAuthToken();
       if (!token) return;
-      
+
       const response = await fetch(`/api/org-service/orgs/${organizationId}/domains`, {
         method: 'POST',
         headers: {
@@ -609,7 +609,7 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
     try {
       const token = await getAuthToken();
       if (!token) return;
-      
+
       const response = await fetch(`/api/org-service/domains/${domainId}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
@@ -638,7 +638,7 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
     try {
       const token = await getAuthToken();
       if (!token) return;
-      
+
       // First, remove all members
       const response = await fetch(`/api/org-service/orgs/${organizationId}`, {
         method: 'DELETE',
@@ -759,12 +759,12 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
     const checkSetupStatus = async () => {
       const token = await getAuthToken();
       if (!token) return;
-      
+
       try {
         const response = await fetch(`/api/org-service/orgs/${organizationId}/setup-status`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        
+
         if (response.ok) {
           const data = await response.json();
           if (!data.is_setup_complete) {
@@ -776,7 +776,7 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
         console.error('[AdminPage] Error checking setup status:', error);
       }
     };
-    
+
     if (organizationId) {
       checkSetupStatus();
     }
@@ -788,38 +788,38 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
       toast.error("No organization found");
       return;
     }
-    
+
     const now = new Date();
     const scheduledDate = new Date();
     scheduledDate.setDate(now.getDate() + 30);
-    
+
     const cooldownData = {
       organizationId: organizationId,
       requestedAt: now.toISOString(),
       scheduledDeletionDate: scheduledDate.toISOString(),
       daysRemaining: 30
     };
-    
+
     const existingDeletions = localStorage.getItem('pending_organization_deletions');
     let deletions = existingDeletions ? JSON.parse(existingDeletions) : [];
-    
+
     deletions = deletions.filter((d: any) => d.organizationId !== organizationId);
     deletions.push(cooldownData);
-    
+
     localStorage.setItem('pending_organization_deletions', JSON.stringify(deletions));
-    
+
     setDeleteCooldown({
       ...cooldownData,
       daysRemaining: 30
     });
     setDeletionStep('cooldown');
-    
+
     toast.success(`Deletion scheduled for ${organization.name}. You have 30 days to cancel.`);
   };
 
   const cancelOrganizationDeletion = () => {
     if (!organizationId || !deleteCooldown) return;
-    
+
     if (confirm(`Are you sure you want to cancel the deletion of ${organization?.name}?`)) {
       const existingDeletions = localStorage.getItem('pending_organization_deletions');
       if (existingDeletions) {
@@ -827,10 +827,10 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
         deletions = deletions.filter((d: any) => d.organizationId !== organizationId);
         localStorage.setItem('pending_organization_deletions', JSON.stringify(deletions));
       }
-      
+
       setDeleteCooldown(null);
       setDeletionStep('select');
-      
+
       toast.success(`Deletion of ${organization?.name} has been cancelled.`);
     }
   };
@@ -838,17 +838,17 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
   // ==================== CHECK PENDING DELETIONS ====================
   useEffect(() => {
     if (!organizationId) return;
-    
+
     const savedDeletions = localStorage.getItem('pending_organization_deletions');
     if (savedDeletions) {
       const deletions = JSON.parse(savedDeletions);
       const pendingDeletion = deletions.find((d: any) => d.organizationId === organizationId);
-      
+
       if (pendingDeletion) {
         const scheduledDate = new Date(pendingDeletion.scheduledDeletionDate);
         const now = new Date();
         const daysRemaining = Math.ceil((scheduledDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-        
+
         if (daysRemaining > 0) {
           setDeleteCooldown({
             organizationId: pendingDeletion.organizationId,
@@ -1110,9 +1110,13 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
                       <tr key={member.id} className="border-b border-gray-700 hover:bg-gray-800/30">
                         <td className="py-3 px-4">
                           <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center">
-                              <span className="text-white font-semibold text-sm">{member.avatar}</span>
-                            </div>
+							<div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center overflow-hidden flex-shrink-0">
+								{member.avatar?.startsWith('http') || member.avatar?.startsWith('/') || member.avatar?.startsWith('data:image') ? (
+									<img src={member.avatar} alt={`${member.name} Avatar`} className="w-full h-full object-cover" />
+								) : (
+								<span className="text-white font-semibold text-sm">{member.avatar}</span>
+								)}
+								</div>
                             <div>
                               <p className="text-white font-medium">{member.name}</p>
                               <p className="text-sm text-gray-400">{memberEmails[member.user_id] || "No email"}</p>
@@ -1121,8 +1125,8 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
                         </td>
                         <td className="py-3 px-4">
                           <span className={`px-2 py-1 rounded-full text-xs ${
-                            member.role === "admin" 
-                              ? "bg-purple-500/20 text-purple-400" 
+                            member.role === "admin"
+                              ? "bg-purple-500/20 text-purple-400"
                               : member.role === "sub_admin"
                               ? "bg-indigo-500/20 text-indigo-400"
                               : member.role === "teacher"
@@ -1134,8 +1138,8 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
                         </td>
                         <td className="py-3 px-4">
                           <span className={`px-2 py-1 rounded-full text-xs ${
-                            member.status === "active" 
-                              ? "bg-green-500/20 text-green-400" 
+                            member.status === "active"
+                              ? "bg-green-500/20 text-green-400"
                               : "bg-gray-500/20 text-gray-400"
                           }`}>
                             {member.status}
@@ -1147,13 +1151,13 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
                           <div className="flex gap-2">
                             {member.role !== "admin" && (
                               <>
-                                <button 
+                                <button
                                   onClick={() => setEditingMember(member)}
                                   className="p-1 hover:bg-gray-700 rounded-lg transition-colors"
                                 >
                                   <Edit2 className="w-4 h-4 text-gray-400" />
                                 </button>
-                                <button 
+                                <button
                                   onClick={() => handleRemoveMember(member.user_id, member.name, member.role)}
                                   className="p-1 hover:bg-gray-700 rounded-lg transition-colors"
                                 >
@@ -1243,8 +1247,8 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
                       <span className="text-purple-400">{course.students} students</span>
                     </div>
                     <div className="w-full bg-gray-700 rounded-full h-2">
-                      <div 
-                        className="bg-purple-500 h-2 rounded-full" 
+                      <div
+                        className="bg-purple-500 h-2 rounded-full"
                         style={{ width: `${Math.min(100, (course.students / 100) * 100)}%` }}
                       />
                     </div>
@@ -1398,7 +1402,7 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
                             ⚠️ Deleting your organization will permanently remove all courses, members, and data.
                           </p>
                         </div>
-                        <GlowButton 
+                        <GlowButton
                           onClick={() => setDeletionStep('confirm')}
                           className="w-full bg-red-600 hover:bg-red-700"
                         >
@@ -1416,14 +1420,14 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
                           </p>
                         </div>
                         <div className="flex gap-3">
-                          <GlowButton 
-                            variant="outline" 
+                          <GlowButton
+                            variant="outline"
                             onClick={() => setDeletionStep('select')}
                             className="flex-1"
                           >
                             Cancel
                           </GlowButton>
-                          <GlowButton 
+                          <GlowButton
                             onClick={startOrganizationDeletion}
                             className="flex-1 bg-red-600 hover:bg-red-700"
                           >
@@ -1453,7 +1457,7 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
                               <span className="text-orange-400 font-semibold">{deleteCooldown.daysRemaining} days</span>
                             </div>
                             <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
-                              <div 
+                              <div
                                 className="h-full bg-orange-500 rounded-full transition-all"
                                 style={{ width: `${((30 - deleteCooldown.daysRemaining) / 30) * 100}%` }}
                               />
@@ -1464,8 +1468,8 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
                           </div>
                         </div>
 
-                        <GlowButton 
-                          variant="outline" 
+                        <GlowButton
+                          variant="outline"
                           onClick={cancelOrganizationDeletion}
                           className="w-full border-yellow-500/50 text-yellow-400 hover:bg-yellow-500/10"
                         >
@@ -1519,15 +1523,15 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
             <div className="p-6 space-y-4">
               <div>
                 <Label className="text-sm font-medium text-gray-400 mb-2 block">Name</Label>
-                <Input 
-                  defaultValue={editingMember.name} 
-                  className="bg-gray-800/50 border-gray-700" 
+                <Input
+                  defaultValue={editingMember.name}
+                  className="bg-gray-800/50 border-gray-700"
                   onChange={(e) => setEditingMember({ ...editingMember, name: e.target.value })}
                 />
               </div>
               <div>
                 <Label className="text-sm font-medium text-gray-400 mb-2 block">Role</Label>
-                <select 
+                <select
                   value={editingMember.role}
                   onChange={(e) => setEditingMember({ ...editingMember, role: e.target.value as any })}
                   className="w-full bg-gray-800/50 border border-gray-700 text-white rounded-xl h-12 px-4"
