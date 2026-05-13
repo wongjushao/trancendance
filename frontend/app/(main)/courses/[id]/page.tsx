@@ -779,10 +779,7 @@ export default function CourseDetailPage() {
                           {classItem.lessons.map((lesson) => (
                             <Link 
                               key={lesson.id} 
-                              href={course.enrolled || lesson.is_free_preview 
-                                ? `/courses/${courseId}/learn/lesson/${lesson.id}`
-                                : "#"
-                              }
+                              href={"#"}
                               onClick={(e) => {
                                 if (!course.enrolled && !lesson.is_free_preview) {
                                   e.preventDefault();

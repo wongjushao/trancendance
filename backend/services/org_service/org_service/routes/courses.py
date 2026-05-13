@@ -231,12 +231,19 @@ def normalize_string_list(value, field_name: str) -> tuple[list[str], str | None
 
 
 def _can_view_course(session, course: Course, user_id: uuid.UUID | None) -> bool:
+    # Published courses are always visible
     if course.status == "published":
         return True
+        
+    # Draft/archived courses need special access
     if user_id is None:
         return False
+        
+    # Course creator can see their own drafts
     if user_id == course.created_by:
         return True
+        
+    # Check if user has teacher/admin role in the organization
     membership = (
         session.query(OrganizationMember)
         .filter(
@@ -245,8 +252,12 @@ def _can_view_course(session, course: Course, user_id: uuid.UUID | None) -> bool
         )
         .first()
     )
-    return membership is not None and membership.member_role in COURSE_CREATOR_ROLES
-
+    
+    # Teachers and admins can see draft courses
+    if membership is not None and membership.member_role in COURSE_CREATOR_ROLES:
+        return True
+        
+    return False
 
 def _profile_brief(p: Profile | None) -> dict | None:
     if p is None:
@@ -284,17 +295,24 @@ review_upsert_model = courses_ns.model(
 @courses_ns.route("/courses")
 class CourseListResource(Resource):
     @courses_ns.response(200, "Courses retrieved")
-    @courses_ns.response(401, "Unauthorized")
+    @courses_ns.response(401, "Unauthorized")  # Keep but won't block public
     def get(self):
         """Get courses, optionally filtered by organization_id."""
         db_session = current_app.config.get("DB_SESSION")
         if db_session is None:
             return jsonify({"error": "Database is not configured"}), 503
 
-        user_id, _email = get_authenticated_user()
-        if user_id is None:
-            return jsonify({"error": "Unauthorized"}), 401
-
+        # Don't require authentication - get user if exists
+        token = extract_bearer_token()
+        user_id = None
+        if token:
+            uid, _ = verify_supabase_jwt(token)
+            if uid:
+                try:
+                    user_id = uuid.UUID(str(uid))
+                except (ValueError, TypeError):
+                    pass
+        
         # Get query parameters
         organization_id = request.args.get("organization_id", type=int)
         status_filter = request.args.get("status")
@@ -308,22 +326,24 @@ class CourseListResource(Resource):
             # Apply organization filter
             if organization_id:
                 query = query.filter(Course.organization_id == organization_id)
-
-                # Check if user has access to this organization
-                membership = session.query(OrganizationMember).filter(
-                    OrganizationMember.organization_id == organization_id,
-                    OrganizationMember.user_id == user_id
-                ).first()
                 
-                if not membership:
-                    return jsonify({"error": "You do not have access to this organization"}), 403
+                # REMOVED THE MEMBERSHIP CHECK - PUBLIC CAN VIEW
+                # We only need to check if organization exists
+                org_exists = session.query(Organization).filter(Organization.id == organization_id).first()
+                if not org_exists:
+                    return jsonify({"error": "Organization not found"}), 404
 
-            # Apply status filter
+            # Apply status filter - DEFAULT TO PUBLISHED FOR PUBLIC
             if status_filter:
                 query = query.filter(Course.status == status_filter)
             else:
-                # By default, exclude archived unless explicitly requested
-                query = query.filter(Course.status != "archived")
+                # Public users see only published courses
+                if user_id is None:
+                    query = query.filter(Course.status == "published")
+                else:
+                    # Logged-in users see published + their own drafts (if they created them)
+                    # But for organization page, we only want published
+                    query = query.filter(Course.status == "published")
 
             # Get total count before pagination
             total = query.count()
@@ -357,8 +377,8 @@ class CourseListResource(Resource):
                     "created_at": course.created_at.isoformat() if course.created_at else None,
                     "instructor_name": instructor["name"],
                     "instructor_avatar": instructor["avatar"],
-                    "rating": 0,  # Would need calculation
-                    "students_count": 0,  # Would need calculation
+                    "rating": 0,
+                    "students_count": 0,
                 })
 
             return jsonify({
@@ -372,115 +392,6 @@ class CourseListResource(Resource):
             return jsonify({"error": str(exc)}), 500
         finally:
             session.close()
-
-    @courses_ns.expect(course_create_model, validate=False)
-    @courses_ns.response(201, "Course created")
-    @courses_ns.response(400, "Invalid request body")
-    @courses_ns.response(401, "Unauthorized")
-    @courses_ns.response(403, "Insufficient organization permissions")
-    @courses_ns.response(404, "Organization not found")
-    def post(self):
-        db_session = current_app.config.get("DB_SESSION")
-        if db_session is None:
-            return jsonify({"error": "Database is not configured. Set valid DATABASE_URL"}), 503
-
-        user_id, _email = get_authenticated_user()
-        if user_id is None:
-            return jsonify({"error": "Unauthorized"}), 401
-
-        payload = request.get_json(silent=True) or {}
-        title = normalize_text(payload.get("title"))
-        description = normalize_text(payload.get("description"))
-        category = normalize_text(payload.get("category"))
-        level = normalize_text(payload.get("level") or "intermediate").lower()
-        visibility = normalize_text(payload.get("visibility") or "private").lower()
-        status = normalize_text(payload.get("status") or "draft").lower()
-        thumbnail = normalize_text(
-            payload.get("thumbnail")
-            or payload.get("thumbnail_url")
-            or payload.get("course_thumbnail")
-            or payload.get("course_thumbnail_url")
-        )
-        organization_id = payload.get("organization_id")
-
-        learning_objectives, error = normalize_string_list(
-            payload.get("learning_objectives", payload.get("objectives")),
-            "learning_objectives",
-        )
-        if error:
-            return jsonify({"error": error}), 400
-
-        prerequisites, error = normalize_string_list(payload.get("prerequisites"), "prerequisites")
-        if error:
-            return jsonify({"error": error}), 400
-
-        tags, error = normalize_string_list(payload.get("tags"), "tags")
-        if error:
-            return jsonify({"error": error}), 400
-
-        if not title:
-            return jsonify({"error": "Field 'title' is required"}), 400
-        if not description:
-            return jsonify({"error": "Field 'description' is required"}), 400
-        if not category:
-            return jsonify({"error": "Field 'category' is required"}), 400
-        if not organization_id:
-            return jsonify({"error": "Field 'organization_id' is required"}), 400
-
-        try:
-            organization_id = int(organization_id)
-        except (TypeError, ValueError):
-            return jsonify({"error": "Field 'organization_id' must be an integer"}), 400
-
-        if level not in ALLOWED_LEVELS:
-            return jsonify({"error": "Field 'level' must be one of: beginner, intermediate, advanced"}), 400
-        if visibility not in ALLOWED_VISIBILITIES:
-            return jsonify({"error": "Field 'visibility' must be one of: public, org, private"}), 400
-        if status not in ALLOWED_STATUSES:
-            return jsonify({"error": "Field 'status' must be one of: draft, published, archived"}), 400
-
-        session = db_session()
-        try:
-            organization = session.query(Organization).filter(Organization.id == organization_id).first()
-            if organization is None:
-                return jsonify({"error": "Organization not found"}), 404
-
-            membership = (
-                session.query(OrganizationMember)
-                .filter(
-                    OrganizationMember.organization_id == organization_id,
-                    OrganizationMember.user_id == user_id,
-                )
-                .first()
-            )
-            if membership is None or membership.member_role not in COURSE_CREATOR_ROLES:
-                return jsonify({"error": "You do not have permission to create courses for this organization"}), 403
-
-            course = Course(
-                organization_id=organization_id,
-                title=title,
-                description=description,
-                category=category,
-                level=level,
-                thumbnail=thumbnail or None,
-                learning_objectives=learning_objectives,
-                prerequisites=prerequisites,
-                tags=tags,
-                visibility=visibility,
-                status=status,
-                created_by=user_id,
-            )
-            session.add(course)
-            session.commit()
-            session.refresh(course)
-
-            return jsonify(serialize_course(course)), 201
-        except SQLAlchemyError as exc:
-            session.rollback()
-            return jsonify({"error": str(exc)}), 500
-        finally:
-            session.close()
-
 
 @courses_ns.route("/courses/<int:course_id>/detail")
 class CourseDetailResource(Resource):

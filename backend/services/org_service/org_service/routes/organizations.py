@@ -899,17 +899,26 @@ class OrganizationMemberInvitationAcceptResource(Resource):
 
 # ========== ORGANIZATION MEMBERS ENDPOINTS ==========
 
+# backend/services/org_service/org_service/routes/organizations.py
+
 @organizations_ns.route("/orgs/<int:org_id>/members")
 class OrganizationMembersListResource(Resource):
     def get(self, org_id: int):
-        """Get all members of an organization with their profiles."""
+        """Get all members of an organization - PUBLIC (but only some fields for non-members)"""
         db_session = current_app.config.get("DB_SESSION")
         if db_session is None:
             return jsonify({"error": "Database is not configured"}), 503
 
-        user_id, _email = get_authenticated_user()
-        if user_id is None:
-            return jsonify({"error": "Unauthorized"}), 401
+        # Get authenticated user if exists (optional)
+        token = extract_bearer_token()
+        user_id = None
+        if token:
+            uid, _ = verify_supabase_jwt(token)
+            if uid:
+                try:
+                    user_id = uuid.UUID(str(uid))
+                except (TypeError, ValueError):
+                    pass
 
         limit = request.args.get("limit", type=int)
         session = db_session()
@@ -919,17 +928,23 @@ class OrganizationMembersListResource(Resource):
             if not org:
                 return jsonify({"error": "Organization not found"}), 404
 
-            viewer_membership = session.query(OrganizationMember).filter(
-                OrganizationMember.organization_id == org_id,
-                OrganizationMember.user_id == user_id
-            ).first()
-            
-            if not viewer_membership:
-                return jsonify({"error": "You are not a member of this organization"}), 403
+            # Check if viewer is a member
+            is_member = False
+            if user_id:
+                viewer_membership = session.query(OrganizationMember).filter(
+                    OrganizationMember.organization_id == org_id,
+                    OrganizationMember.user_id == user_id
+                ).first()
+                is_member = viewer_membership is not None
 
+            # Build query for members
             query = session.query(OrganizationMember).filter(
                 OrganizationMember.organization_id == org_id
             )
+            
+            # FOR PUBLIC VISITORS: Only show members with approved roles (not pending)
+            if not is_member:
+                query = query.filter(OrganizationMember.member_role != "pending")
             
             if limit:
                 query = query.limit(limit)
@@ -942,32 +957,64 @@ class OrganizationMembersListResource(Resource):
                 for profile in session.query(Profile).filter(Profile.id.in_(user_ids)).all():
                     profiles[profile.id] = profile
 
+            # REMOVED: memberEmails variable - we're not fetching emails here anymore
+            # For security, don't return emails from this endpoint at all
+
             members_list = []
             for member in members:
                 profile = profiles.get(member.user_id)
-                members_list.append({
-                    "id": member.id,
-                    "user_id": str(member.user_id),
-                    "member_role": member.member_role,
-                    "created_at": member.created_at.isoformat() if member.created_at else None,
-                    "user": {
-                        "id": str(profile.id) if profile else None,
-                        "first_name": profile.first_name if profile else None,
-                        "last_name": profile.last_name if profile else None,
-                        "username": profile.username if profile else None,
-                        "avatar_url": profile.avatar_url if profile else None,
-                    } if profile else {
-                        "id": str(member.user_id),
-                        "first_name": None,
-                        "last_name": None,
-                        "username": None,
-                        "avatar_url": None,
-                    }
-                })
+                
+                # FOR PUBLIC VISITORS: Only show limited info (no email)
+                if not is_member:
+                    members_list.append({
+                        "id": member.id,
+                        "user_id": str(member.user_id),
+                        "member_role": member.member_role,
+                        "created_at": member.created_at.isoformat() if member.created_at else None,
+                        "user": {
+                            "id": str(member.user_id),
+                            "first_name": profile.first_name if profile else None,
+                            "last_name": profile.last_name if profile else None,
+                            "username": profile.username if profile else None,
+                            "avatar_url": profile.avatar_url if profile else None,
+                            # NO EMAIL for public
+                        } if profile else {
+                            "id": str(member.user_id),
+                            "first_name": None,
+                            "last_name": None,
+                            "username": None,
+                            "avatar_url": None,
+                        }
+                    })
+                else:
+                    # FOR MEMBERS: Full info including email
+                    # Note: We don't have emails in this endpoint for security
+                    # The frontend should fetch emails separately if needed
+                    members_list.append({
+                        "id": member.id,
+                        "user_id": str(member.user_id),
+                        "member_role": member.member_role,
+                        "created_at": member.created_at.isoformat() if member.created_at else None,
+                        "user": {
+                            "id": str(profile.id) if profile else str(member.user_id),
+                            "first_name": profile.first_name if profile else None,
+                            "last_name": profile.last_name if profile else None,
+                            "username": profile.username if profile else None,
+                            "avatar_url": profile.avatar_url if profile else None,
+                            # Email removed from this endpoint - fetch separately if needed
+                        } if profile else {
+                            "id": str(member.user_id),
+                            "first_name": None,
+                            "last_name": None,
+                            "username": None,
+                            "avatar_url": None,
+                        }
+                    })
 
             return jsonify({"members": members_list}), 200
 
         except SQLAlchemyError as exc:
+            current_app.logger.error(f"Error in OrganizationMembersListResource: {str(exc)}")
             return jsonify({"error": str(exc)}), 500
         finally:
             session.close()

@@ -86,19 +86,24 @@ export default function OrganizationPublicPage({ params }: PageProps) {
     try {
       const token = await getAuthToken();
       
-      // Get current user from backend API
+      // Get current user from backend API (optional - don't fail if not logged in)
+      let currentUserId = null;
       if (token) {
-        const userResponse = await fetch('/api/auth-service/auth/me', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        
-        if (userResponse.ok) {
-          const userData = await userResponse.json();
-          setCurrentUserId(userData.id);
+        try {
+          const userResponse = await fetch('/api/auth-service/auth/me', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (userResponse.ok) {
+            const userData = await userResponse.json();
+            currentUserId = userData.id;
+            setCurrentUserId(currentUserId);
+          }
+        } catch (err) {
+          console.log("User not logged in or token invalid - continuing with public view");
         }
       }
 
-      // 1. Get organization details via backend
+      // 1. Get organization details (always public)
       const orgResponse = await fetch(`/api/org-service/orgs/${organizationId}`, {
         headers: token ? { 'Authorization': `Bearer ${token}` } : {}
       });
@@ -111,19 +116,22 @@ export default function OrganizationPublicPage({ params }: PageProps) {
       const org = await orgResponse.json();
       setOrganization(org);
 
-      // 2. Get user's role in this organization (if logged in)
+      // 2. Get user's role in this organization (only if logged in)
       if (token && currentUserId) {
-        const roleResponse = await fetch(`/api/org-service/orgs/${organizationId}/members/${currentUserId}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-
-        if (roleResponse.ok) {
-          const memberData = await roleResponse.json();
-          setUserRole(memberData.member_role);
+        try {
+          const roleResponse = await fetch(`/api/org-service/orgs/${organizationId}/members/${currentUserId}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (roleResponse.ok) {
+            const memberData = await roleResponse.json();
+            setUserRole(memberData.member_role);
+          }
+        } catch (err) {
+          console.log("User not a member of this organization - showing public view");
         }
       }
 
-      // 3. Get organization members via backend API
+      // 3. Get organization members (now public - uses your fixed backend)
       const membersResponse = await fetch(`/api/org-service/orgs/${organizationId}/members?limit=12`, {
         headers: token ? { 'Authorization': `Bearer ${token}` } : {}
       });
@@ -131,14 +139,15 @@ export default function OrganizationPublicPage({ params }: PageProps) {
       if (membersResponse.ok) {
         const membersData = await membersResponse.json();
         
-        // Collect user IDs to fetch emails
+        // Collect user IDs to fetch emails (only if logged in and member)
         const userIds = membersData.members?.map((m: any) => m.user_id) || [];
-        if (userIds.length > 0 && token) {
+        let emailsMap = {};
+        if (userIds.length > 0 && token && userRole) {
+          // Only fetch emails if user is a member of this org
           await fetchMemberEmails(userIds, token);
+          emailsMap = memberEmails;
         }
 
-        // Format members without needing additional API calls
-        // Use the data we already have
         const formattedMembers: Member[] = (membersData.members || []).map((m: any) => {
           const name = m.user?.first_name 
             ? `${m.user.first_name} ${m.user.last_name || ""}`.trim()
@@ -152,17 +161,17 @@ export default function OrganizationPublicPage({ params }: PageProps) {
             avatar: avatarInitial.toUpperCase(),
             avatar_url: m.user?.avatar_url,
             role: m.member_role,
-            joinDate: new Date(m.created_at).toISOString().split("T")[0],
-            courses: 0, // Will update from course data if needed
-            email: memberEmails[m.user_id] || "",
+            joinDate: m.created_at ? new Date(m.created_at).toISOString().split("T")[0] : "Unknown",
+            courses: 0,
+            email: (userRole && emailsMap[m.user_id]) || "", // Only show email if user is member
           };
         });
-
+        
         setMembers(formattedMembers);
         setStats(prev => ({ ...prev, totalMembers: formattedMembers.length }));
       }
 
-      // 4. Get published courses using the existing /courses endpoint
+      // 4. Get published courses - NOW WORKS WITHOUT AUTH
       const coursesResponse = await fetch(`/api/org-service/courses?organization_id=${organizationId}&status=published&limit=6`, {
         headers: token ? { 'Authorization': `Bearer ${token}` } : {}
       });
@@ -170,24 +179,26 @@ export default function OrganizationPublicPage({ params }: PageProps) {
       if (coursesResponse.ok) {
         const coursesData = await coursesResponse.json();
         
-        // Get detailed info for each course
+        // Get detailed info for each course (this requires auth but fails gracefully)
         const formattedCourses: Course[] = await Promise.all(
           (coursesData.courses || []).map(async (course: any) => {
-            // Get student count and rating from course detail
             let studentCount = 0;
             let avgRating = 0;
             
-            try {
-              const detailResponse = await fetch(`/api/org-service/courses/${course.id}/detail`, {
-                headers: token ? { 'Authorization': `Bearer ${token}` } : {}
-              });
-              if (detailResponse.ok) {
-                const detail = await detailResponse.json();
-                studentCount = detail.course?.students_count || 0;
-                avgRating = detail.course?.rating || 0;
+            // Try to get detailed info, but don't fail if not authenticated
+            if (token) {
+              try {
+                const detailResponse = await fetch(`/api/org-service/courses/${course.id}/detail`, {
+                  headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (detailResponse.ok) {
+                  const detail = await detailResponse.json();
+                  studentCount = detail.course?.students_count || 0;
+                  avgRating = detail.course?.rating || 0;
+                }
+              } catch (err) {
+                console.log(`Could not fetch details for course ${course.id} - showing limited info`);
               }
-            } catch (err) {
-              console.error("Error fetching course detail:", err);
             }
             
             return {

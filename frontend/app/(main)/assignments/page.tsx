@@ -289,7 +289,10 @@ export default function AssignmentsPage() {
       if (!enrolledResponse.ok) throw new Error("Failed to fetch enrolled courses");
       
       const enrolledData = await enrolledResponse.json();
-      const enrolledCourses = enrolledData.courses || [];
+      // Only include courses that are PUBLISHED
+      const enrolledCourses = (enrolledData.courses || []).filter(
+        (course: any) => course.status === "published"
+      );
       
       if (enrolledCourses.length === 0) {
         setStudentAssignments([]);
@@ -298,7 +301,6 @@ export default function AssignmentsPage() {
       }
       
       // Fetch assignments for each enrolled course
-      // The course detail endpoint already includes submission data
       let allAssignments: any[] = [];
       
       for (const course of enrolledCourses) {
@@ -307,31 +309,37 @@ export default function AssignmentsPage() {
             headers: { 'Authorization': `Bearer ${token}` }
           });
           
-          if (response.ok) {
-            const courseData = await response.json();
-            const assignments = courseData.assignments || [];
-            
-            allAssignments.push(...assignments.map((a: any) => ({
-              id: a.id,
-              title: a.title,
-              description: a.description || "",
-              due_at: a.due_at,
-              points: a.points,
-              lesson_id: a.lesson_id || 0,
-              lesson_title: a.lesson_title || "Assignment",
-              course_id: a.course_id ?? course.id,
-              course_title: course.title,
-              status: a.status || "pending",
-              submitted_at: a.submitted_at,
-              grade: a.grade,
-              feedback: a.feedback,
-              submission_id: a.submission_id,
-              content_url: a.content_url,
-              text_content: a.text_content,
-            })));
+          // Skip if course not found or forbidden (404/403)
+          if (!response.ok) {
+            console.warn(`Skipping course ${course.id}: ${response.status}`);
+            continue; // Don't throw, just skip this course
           }
+          
+          const courseData = await response.json();
+          const assignments = courseData.assignments || [];
+          
+          allAssignments.push(...assignments.map((a: any) => ({
+            id: a.id,
+            title: a.title,
+            description: a.description || "",
+            due_at: a.due_at,
+            points: a.points,
+            lesson_id: a.lesson_id || 0,
+            lesson_title: a.lesson_title || "Assignment",
+            course_id: a.course_id ?? course.id,
+            course_title: course.title,
+            status: a.status || "pending",
+            submitted_at: a.submitted_at,
+            grade: a.grade,
+            feedback: a.feedback,
+            submission_id: a.submission_id,
+            content_url: a.content_url,
+            text_content: a.text_content,
+          })));
         } catch (err) {
-          console.error(`Error fetching assignments for course ${course.id}:`, err);
+          // Log warning instead of error to avoid console noise
+          console.warn(`Could not fetch assignments for course ${course.id}:`, err);
+          // Continue to next course
         }
       }
       

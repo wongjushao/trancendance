@@ -663,7 +663,7 @@ export default function UnifiedDashboardPage() {
                           <p className="text-sm text-gray-400">{assignment.course_name}</p>
                           <p className="text-xs text-orange-400 mt-1">{assignment.submissions} submissions pending</p>
                         </div>
-                        <GlowButton size="sm" onClick={() => router.push(`/assignments/${assignment.id}/grade`)}>
+                        <GlowButton size="sm" onClick={() => router.push(`/assignments`)}>
                           Grade Now
                         </GlowButton>
                       </div>
