@@ -146,10 +146,10 @@ def get_course_progress(session, course_id: int, user_id: uuid.UUID, class_membe
     ).filter(
         Module.course_id == course_id
     ).all()
-    
+
     total_lessons = len(lessons)
     lesson_ids = [l.id for l in lessons]
-    
+
     # Get completed lessons - filter by class_member_id if provided
     completed = 0
     if lesson_ids:
@@ -161,9 +161,9 @@ def get_course_progress(session, course_id: int, user_id: uuid.UUID, class_membe
         if class_member_id:
             query = query.filter(LessonProgress.class_member_id == class_member_id)
         completed = query.count()
-    
+
     progress = int((completed / total_lessons) * 100) if total_lessons > 0 else 0
-    
+
     return {
         "total_lessons": total_lessons,
         "completed_lessons": completed,
@@ -175,7 +175,7 @@ def get_instructor_info(session, user_id: uuid.UUID) -> dict:
     profile = session.query(Profile).filter(Profile.id == user_id).first()
     if not profile:
         return {"name": "Instructor", "avatar": None}
-    
+
     name = None
     if profile.first_name and profile.last_name:
         name = f"{profile.first_name} {profile.last_name}"
@@ -183,7 +183,7 @@ def get_instructor_info(session, user_id: uuid.UUID) -> dict:
         name = profile.first_name
     elif profile.username:
         name = profile.username
-    
+
     return {
         "name": name or "Instructor",
         "avatar": profile.avatar_url
@@ -234,15 +234,15 @@ def _can_view_course(session, course: Course, user_id: uuid.UUID | None) -> bool
     # Published courses are always visible
     if course.status == "published":
         return True
-        
+
     # Draft/archived courses need special access
     if user_id is None:
         return False
-        
+
     # Course creator can see their own drafts
     if user_id == course.created_by:
         return True
-        
+
     # Check if user has teacher/admin role in the organization
     membership = (
         session.query(OrganizationMember)
@@ -252,11 +252,11 @@ def _can_view_course(session, course: Course, user_id: uuid.UUID | None) -> bool
         )
         .first()
     )
-    
+
     # Teachers and admins can see draft courses
     if membership is not None and membership.member_role in COURSE_CREATOR_ROLES:
         return True
-        
+
     return False
 
 def _profile_brief(p: Profile | None) -> dict | None:
@@ -295,24 +295,17 @@ review_upsert_model = courses_ns.model(
 @courses_ns.route("/courses")
 class CourseListResource(Resource):
     @courses_ns.response(200, "Courses retrieved")
-    @courses_ns.response(401, "Unauthorized")  # Keep but won't block public
+    @courses_ns.response(401, "Unauthorized")
     def get(self):
         """Get courses, optionally filtered by organization_id."""
         db_session = current_app.config.get("DB_SESSION")
         if db_session is None:
             return jsonify({"error": "Database is not configured"}), 503
 
-        # Don't require authentication - get user if exists
-        token = extract_bearer_token()
-        user_id = None
-        if token:
-            uid, _ = verify_supabase_jwt(token)
-            if uid:
-                try:
-                    user_id = uuid.UUID(str(uid))
-                except (ValueError, TypeError):
-                    pass
-        
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
         # Get query parameters
         organization_id = request.args.get("organization_id", type=int)
         status_filter = request.args.get("status")
@@ -326,24 +319,22 @@ class CourseListResource(Resource):
             # Apply organization filter
             if organization_id:
                 query = query.filter(Course.organization_id == organization_id)
-                
-                # REMOVED THE MEMBERSHIP CHECK - PUBLIC CAN VIEW
-                # We only need to check if organization exists
-                org_exists = session.query(Organization).filter(Organization.id == organization_id).first()
-                if not org_exists:
-                    return jsonify({"error": "Organization not found"}), 404
 
-            # Apply status filter - DEFAULT TO PUBLISHED FOR PUBLIC
+                # Check if user has access to this organization
+                membership = session.query(OrganizationMember).filter(
+                    OrganizationMember.organization_id == organization_id,
+                    OrganizationMember.user_id == user_id
+                ).first()
+
+                if not membership:
+                    return jsonify({"error": "You do not have access to this organization"}), 403
+
+            # Apply status filter
             if status_filter:
                 query = query.filter(Course.status == status_filter)
             else:
-                # Public users see only published courses
-                if user_id is None:
-                    query = query.filter(Course.status == "published")
-                else:
-                    # Logged-in users see published + their own drafts (if they created them)
-                    # But for organization page, we only want published
-                    query = query.filter(Course.status == "published")
+                # By default, exclude archived unless explicitly requested
+                query = query.filter(Course.status != "archived")
 
             # Get total count before pagination
             total = query.count()
@@ -361,7 +352,7 @@ class CourseListResource(Resource):
             courses_list = []
             for course in courses:
                 instructor = get_instructor_info(session, course.created_by)
-                
+
                 courses_list.append({
                     "id": course.id,
                     "title": course.title,
@@ -377,8 +368,8 @@ class CourseListResource(Resource):
                     "created_at": course.created_at.isoformat() if course.created_at else None,
                     "instructor_name": instructor["name"],
                     "instructor_avatar": instructor["avatar"],
-                    "rating": 0,
-                    "students_count": 0,
+                    "rating": 0,  # Would need calculation
+                    "students_count": 0,  # Would need calculation
                 })
 
             return jsonify({
@@ -389,6 +380,114 @@ class CourseListResource(Resource):
             }), 200
 
         except SQLAlchemyError as exc:
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+    @courses_ns.expect(course_create_model, validate=False)
+    @courses_ns.response(201, "Course created")
+    @courses_ns.response(400, "Invalid request body")
+    @courses_ns.response(401, "Unauthorized")
+    @courses_ns.response(403, "Insufficient organization permissions")
+    @courses_ns.response(404, "Organization not found")
+    def post(self):
+        db_session = current_app.config.get("DB_SESSION")
+        if db_session is None:
+            return jsonify({"error": "Database is not configured. Set valid DATABASE_URL"}), 503
+
+        user_id, _email = get_authenticated_user()
+        if user_id is None:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        payload = request.get_json(silent=True) or {}
+        title = normalize_text(payload.get("title"))
+        description = normalize_text(payload.get("description"))
+        category = normalize_text(payload.get("category"))
+        level = normalize_text(payload.get("level") or "intermediate").lower()
+        visibility = normalize_text(payload.get("visibility") or "private").lower()
+        status = normalize_text(payload.get("status") or "draft").lower()
+        thumbnail = normalize_text(
+            payload.get("thumbnail")
+            or payload.get("thumbnail_url")
+            or payload.get("course_thumbnail")
+            or payload.get("course_thumbnail_url")
+        )
+        organization_id = payload.get("organization_id")
+
+        learning_objectives, error = normalize_string_list(
+            payload.get("learning_objectives", payload.get("objectives")),
+            "learning_objectives",
+        )
+        if error:
+            return jsonify({"error": error}), 400
+
+        prerequisites, error = normalize_string_list(payload.get("prerequisites"), "prerequisites")
+        if error:
+            return jsonify({"error": error}), 400
+
+        tags, error = normalize_string_list(payload.get("tags"), "tags")
+        if error:
+            return jsonify({"error": error}), 400
+
+        if not title:
+            return jsonify({"error": "Field 'title' is required"}), 400
+        if not description:
+            return jsonify({"error": "Field 'description' is required"}), 400
+        if not category:
+            return jsonify({"error": "Field 'category' is required"}), 400
+        if not organization_id:
+            return jsonify({"error": "Field 'organization_id' is required"}), 400
+
+        try:
+            organization_id = int(organization_id)
+        except (TypeError, ValueError):
+            return jsonify({"error": "Field 'organization_id' must be an integer"}), 400
+
+        if level not in ALLOWED_LEVELS:
+            return jsonify({"error": "Field 'level' must be one of: beginner, intermediate, advanced"}), 400
+        if visibility not in ALLOWED_VISIBILITIES:
+            return jsonify({"error": "Field 'visibility' must be one of: public, org, private"}), 400
+        if status not in ALLOWED_STATUSES:
+            return jsonify({"error": "Field 'status' must be one of: draft, published, archived"}), 400
+
+        session = db_session()
+        try:
+            organization = session.query(Organization).filter(Organization.id == organization_id).first()
+            if organization is None:
+                return jsonify({"error": "Organization not found"}), 404
+
+            membership = (
+                session.query(OrganizationMember)
+                .filter(
+                    OrganizationMember.organization_id == organization_id,
+                    OrganizationMember.user_id == user_id,
+                )
+                .first()
+            )
+            if membership is None or membership.member_role not in COURSE_CREATOR_ROLES:
+                return jsonify({"error": "You do not have permission to create courses for this organization"}), 403
+
+            course = Course(
+                organization_id=organization_id,
+                title=title,
+                description=description,
+                category=category,
+                level=level,
+                thumbnail=thumbnail or None,
+                learning_objectives=learning_objectives,
+                prerequisites=prerequisites,
+                tags=tags,
+                visibility=visibility,
+                status=status,
+                created_by=user_id,
+            )
+            session.add(course)
+            session.commit()
+            session.refresh(course)
+
+            return jsonify(serialize_course(course)), 201
+        except SQLAlchemyError as exc:
+            session.rollback()
             return jsonify({"error": str(exc)}), 500
         finally:
             session.close()
@@ -426,7 +525,7 @@ class CourseDetailResource(Resource):
 
             # ========== ADD THIS SECTION - FETCH OFFERINGS WITH SCHEDULES ==========
             offerings = session.query(CourseClass).filter(CourseClass.course_id == course_id).all()
-            
+
             # Process offerings to include schedules
             offerings_with_schedules = []
             for offering in offerings:
@@ -434,7 +533,7 @@ class CourseDetailResource(Resource):
                 schedules = session.query(ClassSchedule).filter(
                     ClassSchedule.course_class_id == offering.id
                 ).order_by(ClassSchedule.day_of_week).all()
-                
+
                 offerings_with_schedules.append({
                     "id": offering.id,
                     "course_id": offering.course_id,
@@ -513,14 +612,14 @@ class CourseDetailResource(Resource):
                         is_completed = lp is not None and lp.status == "completed"
                         if is_completed:
                             completed_lessons += 1
-                        
+
                         # ========== IMPORTANT: Include full lesson content ==========
                         # Parse content_json if it exists
                         content_data = {}
                         if lesson.content_json:
                             # content_json is already a dict/object from the database
                             content_data = lesson.content_json
-                        
+
                         lessons_out.append(
                             {
                                 "id": lesson.id,
@@ -791,7 +890,7 @@ class CourseEnrollResource(Resource):
                 OrganizationMember.organization_id == course.organization_id,
                 OrganizationMember.user_id == user_id
             ).first()
-            
+
             # If not an organization member, add them as a student/member
             if not existing_org_member:
                 new_org_member = OrganizationMember(
@@ -855,7 +954,7 @@ class CourseEnrollResource(Resource):
             return jsonify({"error": str(exc)}), 500
         finally:
             session.close()
-            
+
 @courses_ns.route("/courses/<int:course_id>/reviews")
 class CourseReviewUpsertResource(Resource):
     @courses_ns.expect(review_upsert_model, validate=False)
@@ -947,29 +1046,29 @@ class SubmissionResource(Resource):
         db_session = current_app.config.get("DB_SESSION")
         if db_session is None:
             return jsonify({"error": "Database is not configured"}), 503
-        
+
         user_id, _email = get_authenticated_user()
         if user_id is None:
             return jsonify({"error": "Unauthorized"}), 401
-        
+
         payload = request.get_json(silent=True) or {}
         assignment_id = payload.get("assignment_id")
         text_content = payload.get("text_content")
         file_url = payload.get("file_url")
-        
+
         if not assignment_id:
             return jsonify({"error": "assignment_id is required"}), 400
-        
+
         if not text_content and not file_url:
             return jsonify({"error": "Either text_content or file_url is required"}), 400
-        
+
         session = db_session()
         try:
             # Verify assignment exists
             assignment = session.query(Assignment).filter(Assignment.id == assignment_id).first()
             if not assignment:
                 return jsonify({"error": "Assignment not found"}), 404
-            
+
             # FIXED: Check if user is enrolled in the course offering
             course_class_id = assignment.course_class_id
             if not course_class_id:
@@ -980,7 +1079,7 @@ class SubmissionResource(Resource):
                 ).first()
                 if course_class:
                     course_class_id = course_class.id
-            
+
             is_enrolled = False
             if course_class_id:
                 is_enrolled = session.query(ClassMember).filter(
@@ -997,16 +1096,16 @@ class SubmissionResource(Resource):
                     CourseClass.course_id == assignment.course_id,
                     ClassMember.role == "student"
                 ).first() is not None
-            
+
             if not is_enrolled:
                 return jsonify({"error": "You are not enrolled in this course"}), 403
-            
+
             # Check for existing submission
             existing = session.query(Submission).filter(
                 Submission.assignment_id == assignment_id,
                 Submission.user_id == user_id
             ).first()
-            
+
             if existing:
                 # Update existing
                 existing.content_url = file_url or existing.content_url
@@ -1050,7 +1149,7 @@ class SubmissionResource(Resource):
                         "feedback": new_submission.feedback
                     }
                 }), 201
-                
+
         except SQLAlchemyError as exc:
             session.rollback()
             return jsonify({"error": str(exc)}), 500
@@ -1067,73 +1166,73 @@ class SubmissionUploadResource(Resource):
         db_session = current_app.config.get("DB_SESSION")
         if db_session is None:
             return jsonify({"error": "Database is not configured"}), 503
-        
+
         user_id, _email = get_authenticated_user()
         if user_id is None:
             return jsonify({"error": "Unauthorized"}), 401
-        
+
         if 'file' not in request.files:
             return jsonify({"error": "No file uploaded"}), 400
-        
+
         file = request.files['file']
         if file.filename == '':
             return jsonify({"error": "No file selected"}), 400
-        
+
         assignment_id = request.form.get('assignment_id')
         if not assignment_id:
             return jsonify({"error": "assignment_id is required"}), 400
-        
+
         # Validate file type
         file_ext = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else ''
         if file_ext not in ALLOWED_FILE_EXTENSIONS:
             return jsonify({"error": f"File type not allowed. Allowed: {', '.join(ALLOWED_FILE_EXTENSIONS)}"}), 400
-        
+
         # Validate file size
         file.seek(0, 2)
         file_size = file.tell()
         file.seek(0)
         if file_size > MAX_FILE_SIZE:
             return jsonify({"error": f"File size exceeds 50MB limit"}), 400
-        
+
         try:
             supabase_url = os.environ.get("SUPABASE_URL")
             supabase_service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-            
+
             if not supabase_url or not supabase_service_key:
                 return jsonify({"error": "Storage configuration missing"}), 500
-            
+
             supabase_admin = create_client(supabase_url, supabase_service_key)
-            
+
             # Ensure submissions bucket exists
             try:
                 supabase_admin.storage.get_bucket('submissions')
             except:
                 supabase_admin.storage.create_bucket('submissions', {'public': True})
-            
+
             # Generate unique filename
             filename = secure_filename(file.filename)
             unique_filename = f"{user_id}/{assignment_id}/{uuid.uuid4().hex}.{file_ext}"
-            
+
             file_content = file.read()
-            
+
             response = supabase_admin.storage.from_('submissions').upload(
                 unique_filename,
                 file_content,
                 file_options={"content-type": file.content_type or "application/octet-stream"}
             )
-            
+
             if not response:
                 raise Exception("Failed to upload file")
-            
+
             public_url = supabase_admin.storage.from_('submissions').get_public_url(unique_filename)
-            
+
             return jsonify({
                 "success": True,
                 "file_url": public_url,
                 "file_name": filename,
                 "file_size": file_size
             }), 200
-            
+
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
@@ -1149,11 +1248,11 @@ class UserEnrolledCoursesResource(Resource):
         db_session = current_app.config.get("DB_SESSION")
         if db_session is None:
             return jsonify({"error": "Database is not configured"}), 503
-        
+
         user_id, _email = get_authenticated_user()
         if user_id is None:
             return jsonify({"error": "Unauthorized"}), 401
-        
+
         session = db_session()
         try:
             # Get all class members for this user with their offering info
@@ -1161,10 +1260,10 @@ class UserEnrolledCoursesResource(Resource):
                 ClassMember.user_id == user_id,
                 ClassMember.role == "student"
             ).all()
-            
+
             if not class_members:
                 return jsonify({"courses": [], "total": 0}), 200
-            
+
             # Get unique course IDs with their offering info
             course_offering_map = {}
             for cm in class_members:
@@ -1182,17 +1281,17 @@ class UserEnrolledCoursesResource(Resource):
                                 "class_member_id": cm.id,
                                 "offering_id": course_class.id
                             }
-            
+
             result_courses = []
             for course_id, data in course_offering_map.items():
                 course = data["course"]
                 class_member_id = data["class_member_id"]
-                
+
                 # Get progress for this specific offering
                 progress_data = get_course_progress(session, course.id, user_id, class_member_id)
                 instructor = get_instructor_info(session, course.created_by)
                 org = session.query(Organization).filter(Organization.id == course.organization_id).first()
-                
+
                 result_courses.append({
                     "id": course.id,
                     "title": course.title,
@@ -1210,12 +1309,12 @@ class UserEnrolledCoursesResource(Resource):
                     "total_lessons": progress_data["total_lessons"],
                     "completed_lessons": progress_data["completed_lessons"],
                 })
-            
+
             return jsonify({
                 "courses": result_courses,
                 "total": len(result_courses)
             }), 200
-            
+
         except SQLAlchemyError as exc:
             import traceback
             traceback.print_exc()
@@ -1233,13 +1332,13 @@ class DiscoverCoursesResource(Resource):
         db_session = current_app.config.get("DB_SESSION")
         if db_session is None:
             return jsonify({"error": "Database is not configured"}), 503
-        
+
         user_id, _email = get_authenticated_user()
         if user_id is None:
             return jsonify({"error": "Unauthorized"}), 401
-        
+
         search_query = request.args.get("q", "").strip()
-        
+
         session = db_session()
         try:
             # Get enrolled course IDs from class_members
@@ -1248,27 +1347,27 @@ class DiscoverCoursesResource(Resource):
                 ClassMember.user_id == user_id,
                 ClassMember.role == "student"
             ).all()
-            
+
             for cm in class_members:
                 course_class = session.query(CourseClass).filter(
                     CourseClass.id == cm.course_class_id
                 ).first()
                 if course_class:
                     enrolled_course_ids.add(course_class.course_id)
-            
+
             # Get user's organization IDs
             user_org_ids = get_user_organization_ids(session, user_id)
-            
+
             # Build query for discoverable courses
             query = session.query(Course).filter(
                 Course.status == "published",
                 Course.created_by != user_id
             )
-            
+
             # Exclude enrolled courses
             if enrolled_course_ids:
                 query = query.filter(~Course.id.in_(enrolled_course_ids))
-            
+
             # Apply visibility rules
             if user_org_ids:
                 query = query.filter(
@@ -1282,7 +1381,7 @@ class DiscoverCoursesResource(Resource):
                 )
             else:
                 query = query.filter(Course.visibility == "public")
-            
+
             # Apply search filter
             if search_query:
                 query = query.filter(
@@ -1291,14 +1390,14 @@ class DiscoverCoursesResource(Resource):
                         Course.description.ilike(f"%{search_query}%")
                     )
                 )
-            
+
             courses = query.order_by(Course.created_at.desc()).limit(50).all()
-            
+
             result_courses = []
             for course in courses:
                 instructor = get_instructor_info(session, course.created_by)
                 org = session.query(Organization).filter(Organization.id == course.organization_id).first()
-                
+
                 result_courses.append({
                     "id": course.id,
                     "title": course.title,
@@ -1312,12 +1411,12 @@ class DiscoverCoursesResource(Resource):
                     "instructor_avatar": instructor["avatar"],
                     "enrolled": False,
                 })
-            
+
             return jsonify({
                 "courses": result_courses,
                 "total": len(result_courses)
             }), 200
-            
+
         except SQLAlchemyError as exc:
             import traceback
             traceback.print_exc()
@@ -1334,30 +1433,30 @@ class UserCreatedCoursesResource(Resource):
         db_session = current_app.config.get("DB_SESSION")
         if db_session is None:
             return jsonify({"error": "Database is not configured"}), 503
-        
+
         user_id, _email = get_authenticated_user()
         if user_id is None:
             return jsonify({"error": "Unauthorized"}), 401
-        
+
         include_archived = request.args.get("include_archived", "false").lower() == "true"
-        
+
         session = db_session()
         try:
             # Build query for courses created by this user
             query = session.query(Course).filter(Course.created_by == user_id)
-            
+
             # Filter by status
             if include_archived:
                 query = query.filter(Course.status.in_(["draft", "published", "archived"]))
             else:
                 query = query.filter(Course.status.in_(["draft", "published"]))
-            
+
             courses = query.order_by(Course.created_at.desc()).all()
-            
+
             result_courses = []
             for course in courses:
                 org = session.query(Organization).filter(Organization.id == course.organization_id).first()
-                
+
                 # Get student count for this course
                 course_classes = session.query(CourseClass).filter(CourseClass.course_id == course.id).all()
                 class_ids = [cc.id for cc in course_classes]
@@ -1367,7 +1466,7 @@ class UserCreatedCoursesResource(Resource):
                         ClassMember.course_class_id.in_(class_ids),
                         ClassMember.role == "student"
                     ).count()
-                
+
                 result_courses.append({
                     "id": course.id,
                     "title": course.title,
@@ -1383,12 +1482,12 @@ class UserCreatedCoursesResource(Resource):
                     "enrolled": False,
                     "students_count": student_count,  # Add student count for teacher view
                 })
-            
+
             return jsonify({
                 "courses": result_courses,
                 "total": len(result_courses)
             }), 200
-            
+
         except SQLAlchemyError as exc:
             import traceback
             traceback.print_exc()
@@ -1404,28 +1503,28 @@ class UserCreatedCoursesResource(Resource):
         db_session = current_app.config.get("DB_SESSION")
         if db_session is None:
             return jsonify({"error": "Database is not configured"}), 503
-        
+
         user_id, _email = get_authenticated_user()
         if user_id is None:
             return jsonify({"error": "Unauthorized"}), 401
-        
+
         include_archived = request.args.get("include_archived", "false").lower() == "true"
-        
+
         session = db_session()
         try:
             status_filter = ["draft", "published"]
             if include_archived:
                 status_filter.append("archived")
-            
+
             courses = session.query(Course).filter(
                 Course.created_by == user_id,
                 Course.status.in_(status_filter)
             ).order_by(Course.created_at.desc()).all()
-            
+
             result_courses = []
             for course in courses:
                 org = session.query(Organization).filter(Organization.id == course.organization_id).first()
-                
+
                 result_courses.append({
                     "id": course.id,
                     "title": course.title,
@@ -1440,12 +1539,12 @@ class UserCreatedCoursesResource(Resource):
                     "instructor_avatar": None,
                     "enrolled": False,
                 })
-            
+
             return jsonify({
                 "courses": result_courses,
                 "total": len(result_courses)
             }), 200
-            
+
         except SQLAlchemyError as exc:
             return jsonify({"error": str(exc)}), 500
         finally:
@@ -1471,7 +1570,7 @@ class CourseThumbnailUploadResource(Resource):
         # Check if file was uploaded
         if 'file' not in request.files:
             return jsonify({"error": "No file uploaded"}), 400
-        
+
         file = request.files['file']
         if file.filename == '':
             return jsonify({"error": "No file selected"}), 400
@@ -1479,7 +1578,7 @@ class CourseThumbnailUploadResource(Resource):
         # Validate file type
         ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
         file_ext = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else ''
-        
+
         if file_ext not in ALLOWED_EXTENSIONS:
             return jsonify({"error": f"File type not allowed. Allowed: {', '.join(ALLOWED_EXTENSIONS)}"}), 400
 
@@ -1488,7 +1587,7 @@ class CourseThumbnailUploadResource(Resource):
         file_size = file.tell()
         file.seek(0)
         MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
-        
+
         if file_size > MAX_FILE_SIZE:
             return jsonify({"error": f"File size exceeds {MAX_FILE_SIZE // (1024*1024)}MB limit"}), 400
 
@@ -1496,42 +1595,42 @@ class CourseThumbnailUploadResource(Resource):
             # Get Supabase client
             supabase_url = os.environ.get("SUPABASE_URL")
             supabase_service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-            
+
             if not supabase_url or not supabase_service_key:
                 return jsonify({"error": "Storage configuration missing"}), 500
-            
+
             supabase_admin = create_client(supabase_url, supabase_service_key)
-            
+
             # Ensure course-thumbnails bucket exists
             try:
                 supabase_admin.storage.get_bucket('course-thumbnails')
             except:
                 supabase_admin.storage.create_bucket('course-thumbnails', {'public': True})
-            
+
             # Generate unique filename
             filename = secure_filename(file.filename)
             unique_filename = f"courses/{user_id}/{uuid.uuid4().hex}.{file_ext}"
-            
+
             file_content = file.read()
-            
+
             response = supabase_admin.storage.from_('course-thumbnails').upload(
                 unique_filename,
                 file_content,
                 file_options={"content-type": file.content_type or "image/jpeg"}
             )
-            
+
             if not response:
                 raise Exception("Failed to upload file")
-            
+
             public_url = supabase_admin.storage.from_('course-thumbnails').get_public_url(unique_filename)
-            
+
             return jsonify({
                 "success": True,
                 "thumbnail_url": public_url,
                 "file_name": filename,
                 "file_size": file_size
             }), 200
-            
+
         except Exception as e:
             print(f"Thumbnail upload error: {str(e)}")
             return jsonify({"error": str(e)}), 500
@@ -1931,12 +2030,12 @@ class CourseModulesResource(Resource):
             return jsonify({"error": "Database not configured"}), 503
 
         include_lessons = request.args.get("include_lessons", "false").lower() == "true"
-        
+
         session = db_session()
         try:
             query = session.query(Module).filter(Module.course_id == course_id).order_by(Module.order_index.asc())
             modules = query.all()
-            
+
             result = []
             for module in modules:
                 module_data = {
@@ -1945,17 +2044,17 @@ class CourseModulesResource(Resource):
                     "order_index": module.order_index,
                     "classes": []
                 }
-                
+
                 if include_lessons:
                     classes = session.query(ContentClass).filter(
                         ContentClass.module_id == module.id
                     ).order_by(ContentClass.order_index.asc()).all()
-                    
+
                     for class_item in classes:
                         lessons = session.query(Lesson).filter(
                             Lesson.class_id == class_item.id
                         ).order_by(Lesson.order_index.asc()).all()
-                        
+
                         module_data["classes"].append({
                             "id": class_item.id,
                             "title": class_item.title,
@@ -1971,9 +2070,9 @@ class CourseModulesResource(Resource):
                                 for l in lessons
                             ]
                         })
-                
+
                 result.append(module_data)
-            
+
             return jsonify(result), 200
         except SQLAlchemyError as exc:
             return jsonify({"error": str(exc)}), 500
@@ -2010,7 +2109,7 @@ class CourseClassStudentsResource(Resource):
             # Check permission
             is_instructor = course_class.instructor_id == user_id
             is_creator = course.created_by == user_id
-            
+
             if not is_instructor and not is_creator:
                 membership = session.query(OrganizationMember).filter(
                     OrganizationMember.organization_id == course.organization_id,
@@ -2092,7 +2191,7 @@ class CourseClassStudentResource(Resource):
 
             is_instructor = course_class.instructor_id == current_user_id
             is_creator = course.created_by == current_user_id
-            
+
             if not is_instructor and not is_creator:
                 membership = session.query(OrganizationMember).filter(
                     OrganizationMember.organization_id == course.organization_id,
@@ -2137,7 +2236,7 @@ class FileUploadResource(Resource):
 
         if 'file' not in request.files:
             return jsonify({"error": "No file uploaded"}), 400
-        
+
         file = request.files['file']
         if file.filename == '':
             return jsonify({"error": "No file selected"}), 400
@@ -2150,50 +2249,50 @@ class FileUploadResource(Resource):
         file_size = file.tell()
         file.seek(0)
         MAX_FILE_SIZE = 50 * 1024 * 1024
-        
+
         if file_size > MAX_FILE_SIZE:
             return jsonify({"error": f"File size exceeds 50MB limit"}), 400
 
         try:
             supabase_url = os.environ.get("SUPABASE_URL")
             supabase_service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-            
+
             if not supabase_url or not supabase_service_key:
                 return jsonify({"error": "Storage configuration missing"}), 500
-            
+
             supabase_admin = create_client(supabase_url, supabase_service_key)
-            
+
             # Ensure bucket exists
             try:
                 supabase_admin.storage.get_bucket(bucket)
             except:
                 supabase_admin.storage.create_bucket(bucket, {'public': True})
-            
+
             # Generate unique filename
             filename = secure_filename(file.filename)
             file_ext = filename.rsplit('.', 1)[1].lower() if '.' in filename else ''
             unique_filename = f"{folder}/{user_id}/{uuid.uuid4().hex}.{file_ext}" if folder else f"{user_id}/{uuid.uuid4().hex}.{file_ext}"
-            
+
             file_content = file.read()
-            
+
             response = supabase_admin.storage.from_(bucket).upload(
                 unique_filename,
                 file_content,
                 file_options={"content-type": file.content_type or "application/octet-stream"}
             )
-            
+
             if not response:
                 raise Exception("Failed to upload file")
-            
+
             public_url = supabase_admin.storage.from_(bucket).get_public_url(unique_filename)
-            
+
             return jsonify({
                 "success": True,
                 "file_url": public_url,
                 "file_name": filename,
                 "file_size": file_size
             }), 200
-            
+
         except Exception as e:
             print(f"Upload error: {str(e)}")
             return jsonify({"error": str(e)}), 500
@@ -2207,16 +2306,16 @@ class OrganizationPublishedCoursesResource(Resource):
         db_session = current_app.config.get("DB_SESSION")
         if db_session is None:
             return jsonify({"error": "Database is not configured"}), 503
-        
+
         limit = request.args.get("limit", 6, type=int)
         session = db_session()
-        
+
         try:
             courses = session.query(Course).filter(
                 Course.organization_id == org_id,
                 Course.status == "published"
             ).order_by(Course.created_at.desc()).limit(limit).all()
-            
+
             result = []
             for course in courses:
                 # Get instructor info
@@ -2229,7 +2328,7 @@ class OrganizationPublishedCoursesResource(Resource):
                         instructor_name = instructor.first_name
                     elif instructor.username:
                         instructor_name = instructor.username
-                
+
                 # Get student count
                 course_classes = session.query(CourseClass).filter(CourseClass.course_id == course.id).all()
                 class_ids = [cc.id for cc in course_classes]
@@ -2239,11 +2338,11 @@ class OrganizationPublishedCoursesResource(Resource):
                         ClassMember.course_class_id.in_(class_ids),
                         ClassMember.role == "student"
                     ).count()
-                
+
                 # Get average rating
                 reviews = session.query(CourseReview).filter(CourseReview.course_id == course.id).all()
                 avg_rating = sum(r.rating for r in reviews) / len(reviews) if reviews else 0
-                
+
                 result.append({
                     "id": course.id,
                     "title": course.title,
@@ -2256,7 +2355,7 @@ class OrganizationPublishedCoursesResource(Resource):
                     "rating": round(avg_rating, 1),
                     "created_at": course.created_at.isoformat(),
                 })
-            
+
             return jsonify({"courses": result}), 200
         except SQLAlchemyError as exc:
             return jsonify({"error": str(exc)}), 500
@@ -2276,21 +2375,21 @@ class OrganizationCoursesResource(Resource):
         user_id, _email = None, None
         if token:
             user_id, _email = verify_supabase_jwt(token)
-        
+
         include_stats = request.args.get('include_stats', 'false').lower() == 'true'
-        
+
         session = db_session()
         try:
             # Check if organization exists
             org = session.query(Organization).filter(Organization.id == org_id).first()
             if not org:
                 return jsonify({"error": "Organization not found"}), 404
-            
+
             # Get all courses for this organization
             courses = session.query(Course).filter(
                 Course.organization_id == org_id
             ).order_by(Course.created_at.desc()).all()
-            
+
             result_courses = []
             for course in courses:
                 # Get instructor info
@@ -2303,7 +2402,7 @@ class OrganizationCoursesResource(Resource):
                         instructor_name = instructor.first_name
                     elif instructor.username:
                         instructor_name = instructor.username
-                
+
                 course_data = {
                     "id": course.id,
                     "title": course.title,
@@ -2316,7 +2415,7 @@ class OrganizationCoursesResource(Resource):
                     "created_at": course.created_at.isoformat(),
                     "instructor_name": instructor_name,
                 }
-                
+
                 if include_stats:
                     # Get enrollment count
                     course_classes = session.query(CourseClass).filter(CourseClass.course_id == course.id).all()
@@ -2327,7 +2426,7 @@ class OrganizationCoursesResource(Resource):
                             ClassMember.course_class_id.in_(class_ids),
                             ClassMember.role == "student"
                         ).count()
-                    
+
                     # Get lesson count
                     modules = session.query(Module).filter(Module.course_id == course.id).all()
                     lesson_count = 0
@@ -2335,17 +2434,17 @@ class OrganizationCoursesResource(Resource):
                         classes = session.query(ContentClass).filter(ContentClass.module_id == module.id).all()
                         for class_item in classes:
                             lesson_count += session.query(Lesson).filter(Lesson.class_id == class_item.id).count()
-                    
+
                     course_data["enrolled_count"] = enrolled_count
                     course_data["lesson_count"] = lesson_count
-                
+
                 result_courses.append(course_data)
-            
+
             return jsonify({
                 "courses": result_courses,
                 "total": len(result_courses)
             }), 200
-            
+
         except SQLAlchemyError as exc:
             return jsonify({"error": str(exc)}), 500
         finally:
@@ -2384,7 +2483,7 @@ class CourseClassResource(Resource):
             is_instructor = course_class.instructor_id == user_id
             is_creator = course.created_by == user_id
             is_org_admin = False
-            
+
             if not is_instructor and not is_creator:
                 membership = session.query(OrganizationMember).filter(
                     OrganizationMember.organization_id == course.organization_id,
@@ -2392,7 +2491,7 @@ class CourseClassResource(Resource):
                     OrganizationMember.member_role.in_(['admin', 'sub_admin'])
                 ).first()
                 is_org_admin = membership is not None
-            
+
             # Check if user is enrolled as student
             is_enrolled = session.query(ClassMember).filter(
                 ClassMember.course_class_id == course_class_id,
@@ -2479,7 +2578,7 @@ class CourseClassResource(Resource):
 
             is_instructor = course_class.instructor_id == user_id
             is_creator = course.created_by == user_id
-            
+
             if not is_instructor and not is_creator:
                 membership = session.query(OrganizationMember).filter(
                     OrganizationMember.organization_id == course.organization_id,
@@ -2555,7 +2654,7 @@ class CourseClassResource(Resource):
 
             is_instructor = course_class.instructor_id == user_id
             is_creator = course.created_by == user_id
-            
+
             if not is_instructor and not is_creator:
                 membership = session.query(OrganizationMember).filter(
                     OrganizationMember.organization_id == course.organization_id,
@@ -2642,7 +2741,7 @@ class CourseClassSchedulesResource(Resource):
 
             is_instructor = course_class.instructor_id == user_id
             is_creator = course.created_by == user_id
-            
+
             if not is_instructor and not is_creator:
                 membership = session.query(OrganizationMember).filter(
                     OrganizationMember.organization_id == course.organization_id,
@@ -2718,7 +2817,7 @@ class ClassScheduleResource(Resource):
 
             is_instructor = course_class.instructor_id == user_id
             is_creator = course.created_by == user_id
-            
+
             if not is_instructor and not is_creator:
                 membership = session.query(OrganizationMember).filter(
                     OrganizationMember.organization_id == course.organization_id,
@@ -2787,7 +2886,7 @@ class ClassScheduleResource(Resource):
 
             is_instructor = course_class.instructor_id == user_id
             is_creator = course.created_by == user_id
-            
+
             if not is_instructor and not is_creator:
                 membership = session.query(OrganizationMember).filter(
                     OrganizationMember.organization_id == course.organization_id,
@@ -2837,10 +2936,10 @@ class AssignmentSubmissionsResource(Resource):
             course = session.query(Course).filter(Course.id == assignment.course_id).first()
             if not course:
                 return jsonify({"error": "Course not found"}), 404
-                
+
             is_creator = course.created_by == user_id
             is_instructor = False
-            
+
             # Check if user is instructor for this assignment's course class
             if assignment.course_class_id:
                 course_class = session.query(CourseClass).filter(
@@ -2848,7 +2947,7 @@ class AssignmentSubmissionsResource(Resource):
                 ).first()
                 if course_class and course_class.instructor_id == user_id:
                     is_instructor = True
-            
+
             # Check if user is org admin
             is_org_admin = False
             if not is_creator and not is_instructor:
@@ -2859,7 +2958,7 @@ class AssignmentSubmissionsResource(Resource):
                 ).first()
                 if membership:
                     is_org_admin = True
-            
+
             if not (is_creator or is_instructor or is_org_admin):
                 return jsonify({"error": "Permission denied"}), 403
 
@@ -2878,7 +2977,7 @@ class AssignmentSubmissionsResource(Resource):
             result = []
             for submission in submissions:
                 profile = profiles.get(submission.user_id)
-                
+
                 # Build user info
                 user_info = {
                     "id": str(submission.user_id),
@@ -2888,13 +2987,13 @@ class AssignmentSubmissionsResource(Resource):
                     "username": None,
                     "avatar_url": None,
                 }
-                
+
                 if profile:
                     user_info["first_name"] = profile.first_name
                     user_info["last_name"] = profile.last_name
                     user_info["username"] = profile.username
                     user_info["avatar_url"] = profile.avatar_url
-                
+
                 result.append({
                     "id": submission.id,
                     "assignment_id": submission.assignment_id,
@@ -2943,7 +3042,7 @@ class CourseClassCreateResource(Resource):
             return jsonify({"error": "Unauthorized"}), 401
 
         payload = request.get_json(silent=True) or {}
-        
+
         course_id = payload.get('course_id')
         name = payload.get('name')
         description = payload.get('description')
@@ -3041,11 +3140,11 @@ class AssignmentResource(Resource):
 
             # Check if user has access (instructor, creator, or enrolled student)
             course = session.query(Course).filter(Course.id == assignment.course_id).first()
-            
+
             is_creator = course and course.created_by == user_id
             is_instructor = False
             is_enrolled = False
-            
+
             if assignment.course_class_id:
                 course_class = session.query(CourseClass).filter(CourseClass.id == assignment.course_class_id).first()
                 if course_class:
@@ -3055,7 +3154,7 @@ class AssignmentResource(Resource):
                         ClassMember.user_id == user_id,
                         ClassMember.role == "student"
                     ).first() is not None
-            
+
             if not is_creator and not is_instructor and not is_enrolled:
                 return jsonify({"error": "Permission denied"}), 403
 
@@ -3385,17 +3484,17 @@ class ModulesReorderResource(Resource):
             for update in updates:
                 module_id = update.get("id")
                 order_index = update.get("order_index")
-                
+
                 if module_id is None or order_index is None:
                     continue
-                    
+
                 session.query(Module).filter(Module.id == module_id).update({
                     "order_index": order_index
                 })
-            
+
             session.commit()
             return jsonify({"message": "Modules reordered successfully"}), 200
-            
+
         except SQLAlchemyError as exc:
             session.rollback()
             return jsonify({"error": str(exc)}), 500
@@ -3452,19 +3551,19 @@ class ClassesReorderResource(Resource):
                 class_id = update.get("id")
                 module_id = update.get("module_id")
                 order_index = update.get("order_index")
-                
+
                 if class_id is None or order_index is None:
                     continue
-                
+
                 update_data = {"order_index": order_index}
                 if module_id is not None:
                     update_data["module_id"] = module_id
-                    
+
                 session.query(ContentClass).filter(ContentClass.id == class_id).update(update_data)
-            
+
             session.commit()
             return jsonify({"message": "Classes reordered successfully"}), 200
-            
+
         except SQLAlchemyError as exc:
             session.rollback()
             return jsonify({"error": str(exc)}), 500
@@ -3523,19 +3622,19 @@ class LessonsReorderResource(Resource):
                 lesson_id = update.get("id")
                 class_id = update.get("class_id")
                 order_index = update.get("order_index")
-                
+
                 if lesson_id is None or order_index is None:
                     continue
-                
+
                 update_data = {"order_index": order_index}
                 if class_id is not None:
                     update_data["class_id"] = class_id
-                    
+
                 session.query(Lesson).filter(Lesson.id == lesson_id).update(update_data)
-            
+
             session.commit()
             return jsonify({"message": "Lessons reordered successfully"}), 200
-            
+
         except SQLAlchemyError as exc:
             session.rollback()
             return jsonify({"error": str(exc)}), 500
@@ -3705,7 +3804,7 @@ class ModuleResource(Resource):
                 session.query(Lesson).filter(Lesson.class_id == class_item.id).delete()
                 session.query(Assignment).filter(Assignment.course_class_id == class_item.id).delete()
             session.query(ContentClass).filter(ContentClass.module_id == module_id).delete()
-            
+
             session.delete(module)
             session.commit()
 
@@ -3715,7 +3814,7 @@ class ModuleResource(Resource):
             return jsonify({"error": str(exc)}), 500
         finally:
             session.close()
-    
+
 # ========== CLASS CRUD ENDPOINTS ==========
 
 # Find the ClassListResource and replace with:
@@ -3881,7 +3980,7 @@ class ClassResource(Resource):
 
             # Delete all lessons in this class
             session.query(Lesson).filter(Lesson.class_id == class_id).delete()
-            
+
             session.delete(class_item)
             session.commit()
 
@@ -4033,8 +4132,8 @@ class LessonResource(Resource):
                         if not membership:
                             return jsonify({"error": "Permission denied"}), 403
 
-            updatable_fields = ['title', 'content_type', 'content_url', 'content_json', 
-                                'class_id', 'order_index', 'duration_seconds', 
+            updatable_fields = ['title', 'content_type', 'content_url', 'content_json',
+                                'class_id', 'order_index', 'duration_seconds',
                                 'is_free_preview', 'is_published']
             for field in updatable_fields:
                 if field in payload:
@@ -4082,7 +4181,7 @@ class LessonResource(Resource):
             for assignment in assignments:
                 session.query(Submission).filter(Submission.assignment_id == assignment.id).delete()
             session.query(Assignment).filter(Assignment.lesson_id == lesson_id).delete()
-            
+
             session.delete(lesson)
             session.commit()
 
@@ -4283,19 +4382,19 @@ class ClassMemberProgressResource(Resource):
             class_member = session.query(ClassMember).filter(
                 ClassMember.id == class_member_id
             ).first()
-            
+
             if not class_member:
                 return jsonify({"error": "Class member not found"}), 404
-            
+
             # Check if user has permission to view this progress
             # Allow if: user is the student themselves, OR user is course creator/instructor
             is_owner = class_member.user_id == user_id
-            
+
             # Check if user is course creator or instructor
             course_class = session.query(CourseClass).filter(
                 CourseClass.id == class_member.course_class_id
             ).first()
-            
+
             has_teacher_access = False
             if course_class:
                 course = session.query(Course).filter(Course.id == course_class.course_id).first()
@@ -4315,15 +4414,15 @@ class ClassMemberProgressResource(Resource):
                         ).first()
                         if membership:
                             has_teacher_access = True
-            
+
             if not is_owner and not has_teacher_access:
                 return jsonify({"error": "Permission denied"}), 403
-            
+
             # Get all progress for this class member
             progress = session.query(LessonProgress).filter(
                 LessonProgress.class_member_id == class_member_id
             ).all()
-            
+
             return jsonify({
                 "progress": [
                     {
@@ -4335,7 +4434,7 @@ class ClassMemberProgressResource(Resource):
                     for p in progress
                 ]
             }), 200
-            
+
         except SQLAlchemyError as exc:
             return jsonify({"error": str(exc)}), 500
         finally:
