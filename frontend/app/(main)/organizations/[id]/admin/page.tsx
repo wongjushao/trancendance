@@ -697,11 +697,16 @@ export default function OrganizationSettingsPage({ params }: PageProps) {
           headers: { 'Authorization': `Bearer ${token}` }
         });
 
+		const orgData = await orgResponse.json();
+
+        if (orgData.exists === false) {
+          return;
+        }
+
         if (!orgResponse.ok) {
           throw new Error("Failed to fetch organization");
         }
 
-        const orgData = await orgResponse.json();
         setOrganization(orgData);
         setSettingsForm({
           name: orgData.name,

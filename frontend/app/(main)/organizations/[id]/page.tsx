@@ -61,7 +61,7 @@ export default function OrganizationPublicPage({ params }: PageProps) {
   const { id } = use(params);
   const organizationId = parseInt(id);
   const { roleData } = useRole();
-  
+
   const [loading, setLoading] = useState(true);
   const [organization, setOrganization] = useState<OrganizationData | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
@@ -82,10 +82,10 @@ export default function OrganizationPublicPage({ params }: PageProps) {
 
   const loadOrganizationData = async () => {
     setLoading(true);
-    
+
     try {
       const token = await getAuthToken();
-      
+
       // Get current user from backend API (optional - don't fail if not logged in)
       let currentUserId = null;
       if (token) {
@@ -108,12 +108,17 @@ export default function OrganizationPublicPage({ params }: PageProps) {
         headers: token ? { 'Authorization': `Bearer ${token}` } : {}
       });
 
+      const org = await orgResponse.json();
+
+        if (org.exists === false) {
+          return;
+        }
+
       if (!orgResponse.ok) {
         toast.error("Organization not found");
         return;
       }
 
-      const org = await orgResponse.json();
       setOrganization(org);
 
       // 2. Get user's role in this organization (only if logged in)
@@ -138,7 +143,7 @@ export default function OrganizationPublicPage({ params }: PageProps) {
 
       if (membersResponse.ok) {
         const membersData = await membersResponse.json();
-        
+
         // Collect user IDs to fetch emails (only if logged in and member)
         const userIds = membersData.members?.map((m: any) => m.user_id) || [];
         let emailsMap = {};
@@ -149,11 +154,11 @@ export default function OrganizationPublicPage({ params }: PageProps) {
         }
 
         const formattedMembers: Member[] = (membersData.members || []).map((m: any) => {
-          const name = m.user?.first_name 
+          const name = m.user?.first_name
             ? `${m.user.first_name} ${m.user.last_name || ""}`.trim()
             : m.user?.username || "Member";
           const avatarInitial = m.user?.first_name?.[0] || m.user?.username?.[0] || "U";
-          
+
           return {
             id: m.id,
             user_id: m.user_id,
@@ -166,7 +171,7 @@ export default function OrganizationPublicPage({ params }: PageProps) {
             email: (userRole && emailsMap[m.user_id]) || "", // Only show email if user is member
           };
         });
-        
+
         setMembers(formattedMembers);
         setStats(prev => ({ ...prev, totalMembers: formattedMembers.length }));
       }
@@ -178,13 +183,13 @@ export default function OrganizationPublicPage({ params }: PageProps) {
 
       if (coursesResponse.ok) {
         const coursesData = await coursesResponse.json();
-        
+
         // Get detailed info for each course (this requires auth but fails gracefully)
         const formattedCourses: Course[] = await Promise.all(
           (coursesData.courses || []).map(async (course: any) => {
             let studentCount = 0;
             let avgRating = 0;
-            
+
             // Try to get detailed info, but don't fail if not authenticated
             if (token) {
               try {
@@ -200,7 +205,7 @@ export default function OrganizationPublicPage({ params }: PageProps) {
                 console.log(`Could not fetch details for course ${course.id} - showing limited info`);
               }
             }
-            
+
             return {
               id: course.id,
               title: course.title,
@@ -214,7 +219,7 @@ export default function OrganizationPublicPage({ params }: PageProps) {
         );
 
         setCourses(formattedCourses);
-        
+
         // Calculate stats from courses data
         const totalStudents = formattedCourses.reduce((sum, c) => sum + c.students, 0);
         const avgRating = formattedCourses.length > 0
@@ -239,7 +244,7 @@ export default function OrganizationPublicPage({ params }: PageProps) {
 
   const fetchMemberEmails = async (userIds: string[], token: string) => {
     if (userIds.length === 0) return;
-    
+
     try {
       const response = await fetch('/api/org-service/users/batch-emails', {
         method: 'POST',
@@ -249,7 +254,7 @@ export default function OrganizationPublicPage({ params }: PageProps) {
         },
         body: JSON.stringify({ user_ids: userIds }),
       });
-      
+
       if (response.ok) {
         const data = await response.json();
         setMemberEmails(data.users || {});
@@ -301,7 +306,7 @@ export default function OrganizationPublicPage({ params }: PageProps) {
           <div className="w-24 h-24 sm:w-32 sm:h-32 rounded-3xl bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center text-5xl sm:text-6xl shadow-2xl shadow-purple-500/20 shrink-0">
             {organization.name.charAt(0).toUpperCase()}
           </div>
-          
+
           <div className="flex-1 text-center md:text-left">
             <div className="flex flex-col md:flex-row items-center md:items-start justify-between gap-6 mb-6">
               <div>
@@ -318,7 +323,7 @@ export default function OrganizationPublicPage({ params }: PageProps) {
                   </div>
                 )}
               </div>
-              
+
               {isAdmin && (
                 <Link href={`/organizations/${organization.id}/admin`}>
                   <GlowButton variant="secondary" className="px-4 h-11">
@@ -331,7 +336,7 @@ export default function OrganizationPublicPage({ params }: PageProps) {
           </div>
         </div>
       </GlowCard>
-      
+
       {/* Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard icon={Users} label="Total Members" value={stats.totalMembers.toLocaleString()} />
@@ -339,26 +344,26 @@ export default function OrganizationPublicPage({ params }: PageProps) {
         <StatCard icon={Award} label="Total Students" value={stats.totalStudents.toLocaleString()} />
         <StatCard icon={Star} label="Avg. Rating" value={stats.avgRating.toFixed(1)} />
       </div>
-      
+
       {/* Content Tabs */}
       <Tabs defaultValue="members" className="w-full">
         <TabsList className="bg-[#12121A] border border-white/5 p-1 rounded-2xl mb-8">
-          <TabsTrigger 
-            value="members" 
+          <TabsTrigger
+            value="members"
             className="rounded-xl px-6 py-2.5 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-500 data-[state=active]:to-violet-600 data-[state=active]:text-white transition-all"
           >
             <Users className="w-4 h-4 mr-2" />
             Members ({stats.totalMembers})
           </TabsTrigger>
-          <TabsTrigger 
-            value="courses" 
+          <TabsTrigger
+            value="courses"
             className="rounded-xl px-6 py-2.5 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-500 data-[state=active]:to-violet-600 data-[state=active]:text-white transition-all"
           >
             <BookOpen className="w-4 h-4 mr-2" />
             Courses ({stats.totalCourses})
           </TabsTrigger>
         </TabsList>
-        
+
         {/* Members Tab - Read-only view */}
         <TabsContent value="members" className="outline-none focus:ring-0">
           <GlowCard className="border-white/5">
@@ -368,7 +373,7 @@ export default function OrganizationPublicPage({ params }: PageProps) {
                 {members.length} members
               </span>
             </div>
-            
+
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {members.length === 0 ? (
                 <div className="col-span-full text-center py-12">
@@ -400,7 +405,7 @@ export default function OrganizationPublicPage({ params }: PageProps) {
             </div>
           </GlowCard>
         </TabsContent>
-        
+
         {/* Courses Tab - Read-only view */}
         <TabsContent value="courses" className="outline-none focus:ring-0">
           <GlowCard className="border-white/5">
