@@ -862,7 +862,7 @@ export default function CourseDetailPage() {
                 };
                 
                 return (
-                  <Link key={assignment.id} href={`/assignments/${assignment.id}`}>
+                  <Link key={assignment.id} href={`/assignments`}>
                     <GlowCard className="hover:scale-[1.01] transition-transform cursor-pointer">
                       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                         <div>
