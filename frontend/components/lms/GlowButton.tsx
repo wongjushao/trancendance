@@ -4,6 +4,7 @@ import { Loader2 } from "lucide-react";
 interface GlowButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   children: ReactNode;
   variant?: "primary" | "secondary" | "outline" | "ghost";
+  size?: "default" | "sm";
   isLoading?: boolean;
   fullWidth?: boolean;
 }
@@ -11,13 +12,18 @@ interface GlowButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 export function GlowButton({ 
   children, 
   variant = "primary", 
+  size = "default",
   isLoading, 
   fullWidth,
   className = "",
   disabled,
   ...props 
 }: GlowButtonProps) {
-  const baseClasses = "px-6 py-3 rounded-xl font-medium transition-all duration-300 flex items-center justify-center gap-2";
+  const baseClasses = "rounded-xl font-medium transition-all duration-300 flex items-center justify-center gap-2";
+  const sizeClasses = {
+    default: "px-6 py-3",
+    sm: "px-4 py-2 text-sm",
+  };
   
   const variantClasses = {
     primary: "bg-gradient-to-r from-purple-500 to-violet-600 text-white shadow-lg shadow-purple-500/30 hover:shadow-purple-500/50 hover:scale-105",
@@ -29,7 +35,8 @@ export function GlowButton({
   return (
     <button
       className={`
-        ${baseClasses} 
+        ${baseClasses}
+        ${sizeClasses[size]}
         ${variantClasses[variant]} 
         ${fullWidth ? "w-full" : ""}
         ${disabled || isLoading ? "opacity-50 cursor-not-allowed" : ""}

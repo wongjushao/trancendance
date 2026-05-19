@@ -6,8 +6,10 @@ import {
   ArrowLeft,
   Award,
   Briefcase,
+  Building2,
   Calendar,
   Check,
+  ChevronRight,
   Code,
   FileText,
   Github,
@@ -27,6 +29,8 @@ import {
   UserPlus,
   Linkedin,
 } from "lucide-react";
+import Link from "next/link";
+import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { GlowCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
@@ -70,6 +74,12 @@ interface PublicProfile {
   professional_summary: string | null;
   skills: UserSkill[];
   educations: Education[];
+  organizations?: Array<{
+    id: number;
+    name: string;
+    role: string;
+    joined_at: string;
+  }>;
 }
 
 type FriendStatus = "unknown" | "none" | "self" | "pending_sent" | "pending_received" | "accepted" | "rejected";

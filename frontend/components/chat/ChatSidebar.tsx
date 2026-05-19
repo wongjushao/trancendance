@@ -53,13 +53,11 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
             {/* ================================================= */}
             
             <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-zinc-500">
-                    <Settings className="h-4 w-4" />
-                  </Button>
-                }
-              />
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8 text-zinc-500">
+                  <Settings className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuGroup>
                   <DropdownMenuLabel>Moderation Tools ({currentRole})</DropdownMenuLabel>

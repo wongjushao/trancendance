@@ -1507,7 +1507,7 @@ export default function CourseLearnPage() {
               progress_percent: progress?.progress_percent || 0,
               assignments, // Now assignments will be populated
             };
-          }).sort((a, b) => a.order_index - b.order_index);
+          }).sort((a: { order_index: number }, b: { order_index: number }) => a.order_index - b.order_index);
 
           const completedInClass = lessonsWithProgress.filter(l => l.is_completed).length;
           const classProgress = lessonsWithProgress.length > 0 ? (completedInClass / lessonsWithProgress.length) * 100 : 0;
@@ -1521,7 +1521,7 @@ export default function CourseLearnPage() {
             total_count: lessonsWithProgress.length,
             progress: classProgress,
           };
-        }).sort((a, b) => a.order_index - b.order_index);
+        }).sort((a: { order_index: number }, b: { order_index: number }) => a.order_index - b.order_index);
 
         const completedInModule = classesWithProgress.reduce((sum, c) => sum + c.completed_count, 0);
         const totalInModule = classesWithProgress.reduce((sum, c) => sum + c.total_count, 0);
@@ -1536,7 +1536,7 @@ export default function CourseLearnPage() {
           total_count: totalInModule,
           progress: moduleProgress,
         };
-      }).sort((a, b) => a.order_index - b.order_index);
+      }).sort((a: { order_index: number }, b: { order_index: number }) => a.order_index - b.order_index);
 
       setModules(modulesWithProgress);
       setOverallProgress(totalLessons > 0 ? (completedLessons / totalLessons) * 100 : 0);

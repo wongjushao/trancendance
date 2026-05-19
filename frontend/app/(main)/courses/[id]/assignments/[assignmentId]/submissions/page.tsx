@@ -32,6 +32,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import {
   Select,
@@ -108,7 +109,7 @@ export default function AssignmentSubmissionsPage() {
   useEffect(() => {
     const initAuth = async () => {
       const token = await getAuthToken();
-      setAccessToken(token);
+      setAccessToken(token ?? null);
     };
     initAuth();
   }, []);

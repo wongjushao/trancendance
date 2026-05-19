@@ -25,7 +25,7 @@ interface ChatRoom {
   type: 'direct' | 'course';
   display_name: string;
   last_message: string | null;
-  last_message_time: string | null;
+  last_message_time?: string | null;
   unread_count: number;
   related_course_id?: number;
   profile_user_id?: string | null;
@@ -41,8 +41,8 @@ interface Message {
   sender_id: string;
   sender_name: string;
   sender_avatar?: string;
-  content: string;
-  message_type: string;
+  content: string | null;
+  message_type?: string;
   created_at: string;
   timestamp: string;
   is_me: boolean;
@@ -121,10 +121,10 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     new Map(),
   );
   const lastToastedErrorRef = useRef<string | null>(null);
-  const typingEmitThrottleTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>();
-  const typingIdleStopTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>();
-  const peerTypingHideTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>();
-  const markReadDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>();
+  const typingEmitThrottleTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const typingIdleStopTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const peerTypingHideTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const markReadDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const [peerTypingLabel, setPeerTypingLabel] = useState<string | null>(null);
 
@@ -259,14 +259,14 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         );
       }
 
-      setRooms((prev) =>
-        prev.map((room) => {
+      setRooms((prev): ChatRoom[] =>
+        prev.map((room): ChatRoom => {
           if (room.id !== message.room_id) return room;
           const shouldIncrement = currentRoom?.id !== message.room_id && !isFromMe;
           return {
             ...room,
-            last_message: message.content,
-            last_message_time: message.created_at,
+            last_message: message.content ?? "",
+            last_message_time: message.created_at ?? null,
             unread_count: shouldIncrement
               ? (room.unread_count || 0) + 1
               : room.unread_count,
@@ -289,11 +289,10 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
             : room,
         ),
       );
-      setCurrentRoom((room) =>
-        room?.profile_user_id === presence.user_id
-          ? { ...room, profile_is_online: presence.is_online }
-          : room,
-      );
+      setCurrentRoom((room): ChatRoom | null => {
+        if (!room || room.profile_user_id !== presence.user_id) return room;
+        return { ...room, profile_is_online: presence.is_online };
+      });
     });
 
     const unsubscribeTyping = on(
@@ -381,11 +380,11 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (append) {
           setMessages((prev) => {
             const existingIds = new Set(prev.map((m) => m.id));
-            const newMessages = messagesData.filter((m) => !existingIds.has(m.id));
+            const newMessages = (messagesData as Message[]).filter((m) => !existingIds.has(m.id));
             return [...prev, ...newMessages];
           });
         } else {
-          setMessages(messagesData);
+          setMessages(messagesData as Message[]);
         }
       } catch (e) {
         console.error('[ChatContext] loadMessages error:', e);

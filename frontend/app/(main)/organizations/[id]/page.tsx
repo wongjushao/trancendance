@@ -146,7 +146,7 @@ export default function OrganizationPublicPage({ params }: PageProps) {
 
         // Collect user IDs to fetch emails (only if logged in and member)
         const userIds = membersData.members?.map((m: any) => m.user_id) || [];
-        let emailsMap = {};
+        let emailsMap: Record<string, string> = {};
         if (userIds.length > 0 && token && userRole) {
           // Only fetch emails if user is a member of this org
           await fetchMemberEmails(userIds, token);

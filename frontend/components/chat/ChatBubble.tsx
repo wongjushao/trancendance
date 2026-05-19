@@ -19,8 +19,8 @@ interface Message {
   sender_id: string;
   sender_name: string;
   sender_avatar?: string;
-  content: string;
-  message_type: string;
+  content: string | null;
+  message_type?: string;
   created_at: string;
   timestamp: string;
   is_me: boolean;
@@ -279,7 +279,7 @@ export function ChatBubble() {
     router.push("/messages");
   };
 
-  const handleSelectRoom = (room: ChatRoom) => {
+  const handleSelectRoom = (room: (typeof rooms)[number]) => {
     selectRoom(room);
     setView('chat');
     setSearchQuery("");

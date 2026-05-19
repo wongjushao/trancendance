@@ -59,7 +59,7 @@ export default function ChatRoomsPage() {
         setUser(authUser);
         
         const roomsData = await getUserChatRooms(authUser.id);
-        setRooms(roomsData || []);
+        setRooms((roomsData || []) as unknown as ChatRoomWithDetails[]);
         
       } catch (error) {
         console.error("Error loading chat rooms:", error);

@@ -349,7 +349,7 @@ export default function SettingsPage() {
         const passwordData = passwordRes.ok ? await passwordRes.json() : null;
         
         // Parse organizations if available
-        if (orgsRes.ok) {
+        if (orgsRes.ok && "json" in orgsRes) {
           const orgsData = await orgsRes.json();
           const organizations = orgsData.organizations || [];
           
@@ -1054,23 +1054,29 @@ export default function SettingsPage() {
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
     
-    if (formData.username && !validateUsername(formData.username).isValid) {
-      newErrors.username = validateUsername(formData.username).error;
+    const usernameResult = formData.username ? validateUsername(formData.username) : null;
+    if (usernameResult && !usernameResult.isValid && usernameResult.error) {
+      newErrors.username = usernameResult.error;
     }
-    if (formData.first_name && !validateName(formData.first_name, "First name").isValid) {
-      newErrors.first_name = validateName(formData.first_name, "First name").error;
+    const firstNameResult = formData.first_name ? validateName(formData.first_name, "First name") : null;
+    if (firstNameResult && !firstNameResult.isValid && firstNameResult.error) {
+      newErrors.first_name = firstNameResult.error;
     }
-    if (formData.last_name && !validateName(formData.last_name, "Last name").isValid) {
-      newErrors.last_name = validateName(formData.last_name, "Last name").error;
+    const lastNameResult = formData.last_name ? validateName(formData.last_name, "Last name") : null;
+    if (lastNameResult && !lastNameResult.isValid && lastNameResult.error) {
+      newErrors.last_name = lastNameResult.error;
     }
-    if (formData.bio && !validateBio(formData.bio).isValid) {
-      newErrors.bio = validateBio(formData.bio).error;
+    const bioResult = formData.bio ? validateBio(formData.bio) : null;
+    if (bioResult && !bioResult.isValid && bioResult.error) {
+      newErrors.bio = bioResult.error;
     }
-    if (formData.birthday && !validateBirthday(formData.birthday).isValid) {
-      newErrors.birthday = validateBirthday(formData.birthday).error;
+    const birthdayResult = formData.birthday ? validateBirthday(formData.birthday) : null;
+    if (birthdayResult && !birthdayResult.isValid && birthdayResult.error) {
+      newErrors.birthday = birthdayResult.error;
     }
-    if (formData.language && !validateLanguage(formData.language).isValid) {
-      newErrors.language = validateLanguage(formData.language).error;
+    const languageResult = formData.language ? validateLanguage(formData.language) : null;
+    if (languageResult && !languageResult.isValid && languageResult.error) {
+      newErrors.language = languageResult.error;
     }
     
     setErrors(newErrors);
@@ -1258,8 +1264,8 @@ export default function SettingsPage() {
   };
 
   const handleDeleteAccount = async () => {
+    const supabase = getSupabaseBrowserClient();
     try {
-      const supabase = getSupabaseBrowserClient();
       
       // Force refresh the session first
       const { data: { session: refreshedSession }, error: refreshError } = 

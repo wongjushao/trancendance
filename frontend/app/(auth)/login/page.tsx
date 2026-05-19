@@ -256,7 +256,7 @@ export default function LoginPage() {
     
     if (error) {
       console.error("Google login error:", error);
-      toast.error(getFriendlyLoginError(error.message));
+      toast.error(getFriendlyLoginError(error.message).message);
     }
   };
 

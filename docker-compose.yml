@@ -99,6 +99,7 @@ services:
     environment:
       - CHOKIDAR_USEPOLLING=true
       - INFISICAL_TOKEN=${INFISICAL_TOKEN}
+      - INFISICAL_PROJECT_ID=${INFISICAL_PROJECT_ID}
       - NODE_EXTRA_CA_CERTS=/etc/trancendance-certs/internal-ca.crt
     volumes:
       - ./frontend:/app

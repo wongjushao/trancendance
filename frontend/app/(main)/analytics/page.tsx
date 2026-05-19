@@ -99,7 +99,7 @@ export default function AnalyticsPage() {
         <GlowCard>
           <h2 className="text-xl font-semibold text-white mb-6">Learning Hours Over Time</h2>
           <div className="relative h-[300px] w-full">
-            <ResponsiveContainer width="100%" height="300">
+            <ResponsiveContainer width="100%" height={300}>
               <LineChart data={learningProgressData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#16161F" />
                 <XAxis dataKey="month" stroke="#6B6B80" />
@@ -128,7 +128,7 @@ export default function AnalyticsPage() {
         <GlowCard>
           <h2 className="text-xl font-semibold text-white mb-6">Course Completion Progress</h2>
           <div className="relative h-[300px] w-full">
-            <ResponsiveContainer width="100%" height="300">
+            <ResponsiveContainer width="100%" height={300}>
               <BarChart data={courseCompletionData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#16161F" />
                 <XAxis dataKey="course" stroke="#6B6B80" />
@@ -157,7 +157,7 @@ export default function AnalyticsPage() {
         <GlowCard>
           <h2 className="text-xl font-semibold text-white mb-6">Learning Category Distribution</h2>
           <div className="relative h-[300px] w-full">
-            <ResponsiveContainer width="100%" height="300">
+            <ResponsiveContainer width="100%" height={300}>
               <PieChart>
                 <Pie
                   data={categoryDistribution}
@@ -200,7 +200,7 @@ export default function AnalyticsPage() {
         <GlowCard>
           <h2 className="text-xl font-semibold text-white mb-6">Weekly Activity</h2>
           <div className="relative h-[300px] w-full">
-            <ResponsiveContainer width="100%" height="300">
+            <ResponsiveContainer width="100%" height={300}>
               <BarChart data={activityHeatmap}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#16161F" />
                 <XAxis dataKey="day" stroke="#6B6B80" />

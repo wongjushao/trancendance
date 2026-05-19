@@ -42,9 +42,14 @@ export function InviteMemberModal({
 
   // Determine which roles can be invited based on inviter's role
   const getAvailableRoles = (): { role: OrganizationRole; label: string; icon: React.ReactNode; description: string }[] => {
-    const roles = [
-      { role: 'student' as const, label: 'Student', icon: <Users className="w-4 h-4" />, description: 'Can view and join courses, submit assignments' },
-      { role: 'teacher' as const, label: 'Teacher', icon: <GraduationCap className="w-4 h-4" />, description: 'Can create courses, manage assignments, invite students' },
+    const roles: {
+      role: OrganizationRole;
+      label: string;
+      icon: React.ReactNode;
+      description: string;
+    }[] = [
+      { role: 'student', label: 'Student', icon: <Users className="w-4 h-4" />, description: 'Can view and join courses, submit assignments' },
+      { role: 'teacher', label: 'Teacher', icon: <GraduationCap className="w-4 h-4" />, description: 'Can create courses, manage assignments, invite students' },
     ];
     
     // Only admins can invite sub_admins

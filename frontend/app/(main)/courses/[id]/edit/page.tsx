@@ -397,7 +397,15 @@ export default function EditCoursePage() {
     due_at: "",
     points: 100,
   });
-  const [offeringForm, setOfferingForm] = useState({
+  const [offeringForm, setOfferingForm] = useState<{
+    name: string;
+    description: string;
+    instructor_id: string | null;
+    start_date: string;
+    end_date: string;
+    max_students: number;
+    status: "upcoming" | "ongoing" | "completed" | "cancelled";
+  }>({
     name: "",
     description: "",
     instructor_id: null,
@@ -1039,21 +1047,22 @@ const getDayName = (day: number): string => {
     let quizData = null;
     
     // Check if lesson has content_json
-    if (lesson.content_json) {
-      console.log("Lesson has content_json:", lesson.content_json);
+    if (lesson.content_json && typeof lesson.content_json === "object" && !Array.isArray(lesson.content_json)) {
+      const parsedContent = lesson.content_json as Record<string, unknown>;
+      console.log("Lesson has content_json:", parsedContent);
       
       if (lesson.content_type === "video") {
-        notes = lesson.content_json.notes || "";
-        resources = lesson.content_json.resources || [];
-        contentJson = lesson.content_json;
+        notes = (parsedContent.notes as string) || "";
+        resources = (parsedContent.resources as typeof resources) || [];
+        contentJson = parsedContent;
       } else if (lesson.content_type === "text") {
-        textContent = lesson.content_json.content || "";
-        resources = lesson.content_json.resources || [];
+        textContent = (parsedContent.content as string) || "";
+        resources = (parsedContent.resources as typeof resources) || [];
         contentJson = textContent;
       } else if (lesson.content_type === "quiz") {
-        quizData = lesson.content_json;
-        resources = lesson.content_json.resources || [];
-        contentJson = lesson.content_json;
+        quizData = parsedContent;
+        resources = (parsedContent.resources as typeof resources) || [];
+        contentJson = parsedContent;
       }
     } else {
       console.log("No content_json found for lesson");
@@ -1445,7 +1454,8 @@ const getDayName = (day: number): string => {
       
     } catch (error) {
       console.error("Error deleting assignment:", error);
-      toast.error(`Failed to delete assignment: ${error.message || "Please try again"}`);
+      const message = error instanceof Error ? error.message : "Please try again";
+      toast.error(`Failed to delete assignment: ${message}`);
     }
   };
 

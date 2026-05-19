@@ -56,7 +56,7 @@ export async function getLessonProgress(lessonId: number): Promise<LessonProgres
     return null;
   }
 
-  return data;
+  return data as LessonProgress | null;
 }
 
 export async function getCourseProgress(courseId: number): Promise<{

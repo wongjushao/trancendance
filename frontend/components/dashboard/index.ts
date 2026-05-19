@@ -1,3 +1,3 @@
-export { default as StudentDashboard } from './StudentDashboard';
-export { default as TeacherDashboard } from './TeacherDashboard';
-export { default as AdminDashboard } from './AdminDashboard';
+export { LearningCalendar } from "./LearningCalendar";
+export { UpcomingItems } from "./UpcomingItems";
+export { RecentItems } from "./RecentItems";

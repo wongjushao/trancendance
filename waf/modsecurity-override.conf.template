@@ -18,3 +18,9 @@ SecRule REQUEST_URI "@beginsWith /api/chat-service/socket.io/" \
 # Disable the WAF for Grafana entirely.
 SecRule REQUEST_URI "@beginsWith /grafana/" \
   "id:1000003,phase:1,pass,nolog,t:none,ctl:ruleEngine=Off"
+
+# Supabase SSR auth cookies (session + PKCE verifier) use sb-<ref>-auth-token
+# with optional -code-verifier suffix and optional .N chunk index. Values use a
+# "base64-" prefix; CRS 932260 treats "base64" in cookies as Unix RCE.
+SecRule REQUEST_COOKIES_NAMES "@rx ^sb-[-a-z0-9]+-auth-token(?:-code-verifier)?(?:\.[0-9]+)?$" \
+  "id:1000004,phase:1,pass,nolog,t:none,ctl:ruleRemoveById=932260"

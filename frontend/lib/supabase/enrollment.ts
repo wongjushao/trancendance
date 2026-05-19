@@ -34,7 +34,11 @@ export async function enrollInCourse(courseClassId: number, userId: string, orga
   }
   
   // Check capacity
-  if (courseClass?.max_students && enrolledCount && enrolledCount >= courseClass.max_students) {
+  if (!courseClass) {
+    throw new Error("Course class not found");
+  }
+
+  if (courseClass.max_students && enrolledCount && enrolledCount >= courseClass.max_students) {
     throw new Error("Course is full");
   }
   

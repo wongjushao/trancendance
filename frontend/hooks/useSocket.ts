@@ -56,7 +56,7 @@ export const useSocket = (token?: string) => {
   const [isConnecting, setIsConnecting] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
   const reconnectAttemptsRef = useRef(0);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout>();
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
 
   const cleanupSocket = useCallback(() => {
     if (reconnectTimeoutRef.current) {

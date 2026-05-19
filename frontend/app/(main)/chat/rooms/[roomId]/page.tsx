@@ -37,15 +37,15 @@ interface Message {
   id: number;
   room_id: number;
   sender_id: string;
-  content: string;
+  content: string | null;
   message_type: string;
   created_at: string;
   sender: {
     id: string;
-    username: string;
-    first_name: string;
-    last_name: string;
-    avatar_url: string;
+    username: string | null;
+    first_name: string | null;
+    last_name: string | null;
+    avatar_url: string | null;
   };
 }
 
@@ -153,7 +153,7 @@ export default function ChatRoomPage() {
       return;
     }
 
-    setRoom(roomData);
+    setRoom(roomData as unknown as ChatRoom);
     setLoading(false);
   };
 
@@ -179,7 +179,7 @@ export default function ChatRoomPage() {
       return;
     }
 
-    setMessages(data || []);
+    setMessages((data || []) as Message[]);
   };
 
   const loadMembers = async () => {
@@ -204,7 +204,7 @@ export default function ChatRoomPage() {
       return;
     }
 
-    setMembers(data || []);
+    setMembers((data || []) as unknown as RoomMember[]);
   };
 
   const subscribeToMessages = async () => {
@@ -281,7 +281,7 @@ export default function ChatRoomPage() {
     return date.toLocaleDateString();
   };
 
-  const getInitials = (firstName: string, lastName: string, username: string) => {
+  const getInitials = (firstName?: string | null, lastName?: string | null, username?: string | null) => {
     if (firstName && lastName) return `${firstName[0]}${lastName[0]}`.toUpperCase();
     if (firstName) return firstName[0].toUpperCase();
     if (username) return username[0].toUpperCase();

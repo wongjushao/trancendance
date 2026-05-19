@@ -260,7 +260,7 @@ export const validateUrl = (url: string, fieldName: string = "URL"): ValidationR
   
   try {
     const parsedUrl = new URL(url);
-    if (!parsedUrl.protocol === 'http:' && !parsedUrl.protocol === 'https:') {
+    if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
       return { isValid: false, error: `${fieldName} must start with http:// or https://` };
     }
     return { isValid: true };

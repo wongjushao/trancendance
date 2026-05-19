@@ -233,7 +233,7 @@ export function approveJoinRequest(requestId: string, reviewerId: string): JoinR
     };
     mockOrganizationMembers.push(newMember);
   }
-  return request;
+  return request ?? null;
 }
 
 export function rejectJoinRequest(requestId: string, reviewerId: string): JoinRequest | null {
@@ -243,7 +243,7 @@ export function rejectJoinRequest(requestId: string, reviewerId: string): JoinRe
     request.reviewed_at = new Date().toISOString();
     request.reviewed_by = reviewerId;
   }
-  return request;
+  return request ?? null;
 }
 
 export function createOrganizationProposal(

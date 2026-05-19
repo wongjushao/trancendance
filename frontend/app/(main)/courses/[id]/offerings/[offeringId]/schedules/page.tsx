@@ -63,7 +63,7 @@ export default function ManageSchedulesPage() {
   useEffect(() => {
     const initAuth = async () => {
       const token = await getAuthToken();
-      setAccessToken(token);
+      setAccessToken(token ?? null);
     };
     initAuth();
   }, []);

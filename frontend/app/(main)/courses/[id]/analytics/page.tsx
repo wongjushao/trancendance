@@ -76,7 +76,7 @@ export default function CourseAnalyticsPage() {
   useEffect(() => {
     const initAuth = async () => {
       const token = await getAuthToken();
-      setAccessToken(token);
+      setAccessToken(token ?? null);
     };
     initAuth();
   }, []);

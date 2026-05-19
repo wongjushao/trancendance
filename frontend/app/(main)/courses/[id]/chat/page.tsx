@@ -31,22 +31,22 @@ interface Message {
   id: number;
   room_id: number;
   sender_id: string;
-  content: string;
+  content: string | null;
   message_type: string;
   created_at: string;
   sender: {
     id: string;
-    username: string;
-    first_name: string;
-    last_name: string;
-    avatar_url: string;
+    username: string | null;
+    first_name: string | null;
+    last_name: string | null;
+    avatar_url: string | null;
   };
 }
 
 interface ChatRoom {
   id: number;
   type: string;
-  related_course_id: number;
+  related_course_id: number | null;
   created_at: string;
 }
 
@@ -101,14 +101,14 @@ export default function CourseChatPage() {
         
         // Get or create chat room
         let room = await autoCreateCourseChatRoom(courseId);
-        setChatRoom(room);
+        setChatRoom(room as ChatRoom);
         
         // Ensure user is added to chat room
         await addUserToChatRoom(room.id, authUser.id);
         
         // Load messages
         const msgs = await getChatMessages(room.id, 100);
-        setMessages(msgs || []);
+        setMessages((msgs || []) as Message[]);
         
         // Subscribe to new messages
         subscriptionRef.current = supabase

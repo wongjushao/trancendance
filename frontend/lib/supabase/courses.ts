@@ -110,16 +110,21 @@ export async function updateCourse(
 export async function getCourseClassIdForUser(courseId: number, userId: string): Promise<number | null> {
   const supabase = getSupabaseBrowserClient();
   
+  const { data: courseClasses } = await supabase
+    .from('course_classes')
+    .select('id')
+    .eq('course_id', courseId);
+
+  const classIds = (courseClasses ?? []).map((row) => row.id);
+  if (classIds.length === 0) {
+    return null;
+  }
+
   const { data, error } = await supabase
     .from('class_members')
     .select('course_class_id')
     .eq('user_id', userId)
-    .in('course_class_id', 
-      supabase
-        .from('course_classes')
-        .select('id')
-        .eq('course_id', courseId)
-    )
+    .in('course_class_id', classIds)
     .limit(1);
   
   if (error) {
@@ -209,6 +214,7 @@ export async function getCourseWithDetails(courseId: number): Promise<CourseWith
   
   const lessonsByClassId: Record<number, any[]> = {};
   (allLessons || []).forEach(lesson => {
+    if (lesson.class_id == null) return;
     if (!lessonsByClassId[lesson.class_id]) {
       lessonsByClassId[lesson.class_id] = [];
     }
@@ -307,12 +313,12 @@ export async function getCourseWithDetails(courseId: number): Promise<CourseWith
     }
     
     // Assemble offerings
-    courseClassesWithDetails = courseClasses.map(courseClass => ({
+    courseClassesWithDetails = courseClasses.map((courseClass) => ({
       ...courseClass,
       schedules: schedulesByOfferingId[courseClass.id] || [],
       members: membersByOfferingId[courseClass.id] || [],
-      chat_room: chatRoom || null
-    }));
+      chat_room: chatRoom || null,
+    })) as CourseClassWithDetails[];
   }
   
   return {

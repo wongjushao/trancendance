@@ -262,7 +262,12 @@ export default function OnboardingPage() {
         return;
     }
     
-    setFieldErrors(prev => ({ ...prev, [field]: error }));
+    setFieldErrors((prev) => {
+      const next = { ...prev };
+      if (error) next[field] = error;
+      else delete next[field];
+      return next;
+    });
   };
 
   // Check for pending invite from sessionStorage
@@ -623,7 +628,11 @@ export default function OnboardingPage() {
       
       // Clear field error when user starts typing
       if (fieldErrors[field]) {
-        setFieldErrors(prev => ({ ...prev, [field]: undefined }));
+        setFieldErrors((prev) => {
+          const next = { ...prev };
+          delete next[field];
+          return next;
+        });
       }
     };
 

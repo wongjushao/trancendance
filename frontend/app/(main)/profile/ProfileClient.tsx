@@ -12,7 +12,7 @@ import {
   LogOut, Plus, Heart, Music, Camera as CameraIcon, Coffee, 
   Gamepad, Book, Film, Mic, Dumbbell, Globe2, Target, Award as AwardIcon,
   CheckCircle2, ExternalLink, ThumbsUp, MessageCircle, Activity,
-  Linkedin, Github, Twitter, Instagram, FileText, GraduationCap,
+  Linkedin, Github, Twitter, Instagram, FileText, GraduationCap, PlayCircle,
 } from "lucide-react";
 import { GlowCard } from "@/components/lms/Cards";
 import { GlowButton } from "@/components/lms/GlowButton";
@@ -58,6 +58,7 @@ interface Education {
   end_year: number | null;
   is_current: boolean;
   order_index: number;
+  description?: string | null;
 }
 
 interface UserSkill {

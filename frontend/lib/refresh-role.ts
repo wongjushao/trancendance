@@ -41,7 +41,7 @@ export async function refreshUserRoleFromBackend(): Promise<RoleData | null> {
         activeOrgId = orgId;
         activeOrgName = orgName;
         break;
-      } else if (role === 'teacher' && highestRole !== 'admin') {
+      } else if (role === 'teacher') {
         highestRole = 'teacher';
         activeOrgId = orgId;
         activeOrgName = orgName;
