@@ -19,8 +19,12 @@ services:
     ports:
       - "8080:8080"
       - "8443:8443"
+    environment:
+      MODSEC_AUDIT_LOG: /var/log/waf/modsecurity-audit.log
+      ERRORLOG: /var/log/waf/nginx-error.log
     volumes:
       - certs-data:/etc/nginx/certs:ro
+      - ./waf/logs:/var/log/waf
     depends_on:
       cert-fetcher:
         condition: service_completed_successfully
