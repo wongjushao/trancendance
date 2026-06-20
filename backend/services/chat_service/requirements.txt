@@ -1,0 +1,13 @@
+flask-restx
+Flask-Cors
+Flask-SocketIO
+eventlet
+psycopg2-binary
+SQLAlchemy
+pydantic
+requests
+PyJWT
+cryptography
+prometheus-client
+gunicorn<26
+supabase

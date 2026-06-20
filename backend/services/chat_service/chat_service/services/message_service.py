@@ -1,0 +1,218 @@
+# backend/services/chat_service/chat_service/services/message_service.py
+from __future__ import annotations
+
+import uuid
+import logging
+from datetime import datetime
+from sqlalchemy import and_, or_
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
+
+from backend.common.models import ChatRoom, Friendship, Message, ChatRoomMember, Profile
+from backend.services.chat_service.chat_service.services.room_service import (
+    RoomAccessError,
+    assert_can_message_room,
+)
+from backend.services.chat_service.chat_service.services.serialization import serialize_message
+
+logger = logging.getLogger(__name__)
+
+
+def get_dm_peer_last_read_message_id(
+    session: Session,
+    room_id: int,
+    viewer_id: uuid.UUID,
+) -> int | None:
+    """For direct chats only: last-read cursor for the other participant."""
+    room = session.query(ChatRoom).filter(ChatRoom.id == room_id).first()
+    if not room or room.type != "direct":
+        return None
+
+    rows = session.query(ChatRoomMember).filter(ChatRoomMember.room_id == room_id).all()
+    if len(rows) != 2:
+        return None
+
+    for row in rows:
+        if row.user_id != viewer_id:
+            return row.last_read_message_id
+    return None
+
+
+def update_room_member_last_read(
+    session: Session,
+    room_id: int,
+    reader_id: uuid.UUID,
+    message_id: int,
+) -> tuple[bool, int | None]:
+    """Persist reader progress monotonically. Caller commits."""
+    message_row = (
+        session.query(Message)
+        .filter(Message.id == message_id, Message.room_id == room_id)
+        .first()
+    )
+    if not message_row:
+        raise RoomAccessError("Invalid message for this room")
+
+    member = (
+        session.query(ChatRoomMember)
+        .filter(ChatRoomMember.room_id == room_id, ChatRoomMember.user_id == reader_id)
+        .first()
+    )
+    if not member:
+        raise RoomAccessError(f"User {reader_id} is not a member of room {room_id}")
+
+    prev = member.last_read_message_id or 0
+    if message_id > prev:
+        member.last_read_message_id = message_id
+        return True, member.last_read_message_id
+    return False, member.last_read_message_id
+
+
+def create_message(
+    session: Session,
+    room_id: int,
+    sender_id: uuid.UUID,
+    content: str,
+    message_type: str = "text"
+) -> dict:
+    """Create and save a new message to the database with transaction safety."""
+    logger.info(f"[MessageService] Creating message in room {room_id} from user {sender_id}")
+    
+    try:
+        # Verify user is still a member of the room
+        is_member = session.query(ChatRoomMember).filter(
+            ChatRoomMember.room_id == room_id,
+            ChatRoomMember.user_id == sender_id
+        ).first() is not None
+        
+        if not is_member:
+            logger.error(f"[MessageService] User {sender_id} is not a member of room {room_id}")
+            raise RoomAccessError(f"User {sender_id} is not a member of room {room_id}")
+
+        assert_can_message_room(session, room_id, sender_id)
+        
+        # Create message
+        now = datetime.utcnow()
+        message = Message(
+            room_id=room_id,
+            sender_id=sender_id,
+            content=content,
+            message_type=message_type,
+            created_at=now
+        )
+        session.add(message)
+        session.flush()  # Get the ID without committing
+        session.refresh(message)
+        
+        # Get sender info for response
+        sender = session.query(Profile).filter(Profile.id == sender_id).first()
+        
+        logger.info(f"[MessageService] Message created with ID: {message.id}")
+        
+        result = serialize_message(message, sender, sender_id, peer_last_read_message_id=None)
+        session.commit()
+        return result
+        
+    except SQLAlchemyError as e:
+        logger.error(f"[MessageService] Database error: {e}", exc_info=True)
+        session.rollback()
+        raise e
+
+
+def get_room_messages(
+    session: Session,
+    room_id: int,
+    user_id: uuid.UUID,
+    page: int = 1,
+    page_size: int = 50,
+    cursor: int | None = None
+) -> dict:
+    """Get room messages in chronological order.
+
+    Without a cursor, the latest page is returned. With a cursor, older
+    messages with IDs lower than the cursor are returned for upward scrolling.
+    """
+    logger.info(
+        "[MessageService] Getting messages for room %s, user %s, page %s, cursor %s",
+        room_id,
+        user_id,
+        page,
+        cursor,
+    )
+    
+    # Verify user is a member
+    is_member = session.query(ChatRoomMember).filter(
+        ChatRoomMember.room_id == room_id,
+        ChatRoomMember.user_id == user_id
+    ).first() is not None
+    
+    if not is_member:
+        logger.warning(f"[MessageService] User {user_id} not a member of room {room_id}")
+        raise RoomAccessError(f"User {user_id} is not a member of room {room_id}")
+    
+    # Query messages with sender info in a single JOIN query
+    base_query = (
+        session.query(Message, Profile)
+        .join(Profile, Profile.id == Message.sender_id)
+        .filter(Message.room_id == room_id)
+    )
+
+    query = base_query.order_by(Message.id.desc())
+    if cursor is not None:
+        query = query.filter(Message.id < cursor)
+    else:
+        # Keep the legacy page parameter working for clients that still send it.
+        query = query.offset((page - 1) * page_size)
+
+    messages_with_senders = query.limit(page_size + 1).all()
+    has_more = len(messages_with_senders) > page_size
+    messages_with_senders = messages_with_senders[:page_size]
+    messages_with_senders = list(reversed(messages_with_senders))
+    next_cursor = messages_with_senders[0][0].id if has_more and messages_with_senders else None
+
+    total = session.query(Message).filter(Message.room_id == room_id).count()
+
+    peer_last_read = get_dm_peer_last_read_message_id(session, room_id, user_id)
+
+    # Process messages using centralized serialization
+    result_messages = []
+    for msg, sender in messages_with_senders:
+        serialized = serialize_message(
+            msg,
+            sender,
+            user_id,
+            peer_last_read_message_id=peer_last_read,
+        )
+        if msg.message_type == "friend_request":
+            friendship = (
+                session.query(Friendship)
+                .filter(
+                    or_(
+                        and_(Friendship.requester_id == msg.sender_id, Friendship.addressee_id == user_id),
+                        and_(Friendship.requester_id == user_id, Friendship.addressee_id == msg.sender_id),
+                    )
+                )
+                .first()
+            )
+            if friendship:
+                if friendship.status == "accepted":
+                    serialized["friend_request_status"] = "accepted"
+                elif friendship.status == "rejected":
+                    serialized["friend_request_status"] = "rejected"
+                elif friendship.requester_id == user_id:
+                    serialized["friend_request_status"] = "pending_sent"
+                else:
+                    serialized["friend_request_status"] = "pending_received"
+        result_messages.append(serialized)
+    
+    logger.info(f"[MessageService] Retrieved {len(result_messages)} messages for room {room_id}")
+    
+    return {
+        "messages": result_messages,
+        "total": len(result_messages),
+        "total_count": total,
+        "page": page,
+        "page_size": page_size,
+        "next_cursor": next_cursor,
+        "has_more": has_more
+    }

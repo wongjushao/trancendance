@@ -1,34 +1,170 @@
-version: '3.8'
 services:
-  backend:
-    build: ./backend
-    ports:
-      - "5000:5000"
+  cert-fetcher:
+    image: trancendance-cert-fetcher:latest
+    build:
+      context: .
+      dockerfile: cert-fetcher/Dockerfile
     environment:
-      - FLASK_ENV=production
+      INFISICAL_TOKEN: ${INFISICAL_TOKEN:-}
+      INFISICAL_PROJECT_ID: ${INFISICAL_PROJECT_ID:-}
+    volumes:
+      - certs-data:/certs
+      - ./waf/certs:/local-certs:ro
+
+  waf-proxy:
+    image: trancendance-waf-proxy:latest
+    build:
+      context: .
+      dockerfile: waf/Dockerfile
+    ports:
+      - "8080:8080"
+      - "8443:8443"
+    environment:
+      MODSEC_AUDIT_LOG: /var/log/waf/modsecurity-audit.log
+      ERRORLOG: /var/log/waf/nginx-error.log
+    volumes:
+      - certs-data:/etc/nginx/certs:ro
+      - ./waf/logs:/var/log/waf
+    depends_on:
+      cert-fetcher:
+        condition: service_completed_successfully
+      frontend:
+        condition: service_started
+      prometheus:
+        condition: service_started
+      grafana:
+        condition: service_started
+
+  auth-service:
+    image: trancendance-auth-service:latest
+    build:
+      context: .
+      dockerfile: backend/services/auth_service/Dockerfile
+    expose:
+      - "5001"
+    environment:
+      - INFISICAL_TOKEN=${INFISICAL_TOKEN}
+    volumes:
+      - certs-data:/etc/trancendance-certs:ro
+    depends_on:
+      cert-fetcher:
+        condition: service_completed_successfully
+
+  chat-service:
+    image: trancendance-chat-service:latest
+    build:
+      context: .
+      dockerfile: backend/services/chat_service/Dockerfile
+    expose:
+      - "5002"
+    environment:
+      - INFISICAL_TOKEN=${INFISICAL_TOKEN}
+    volumes:
+      - certs-data:/etc/trancendance-certs:ro
+    depends_on:
+      cert-fetcher:
+        condition: service_completed_successfully
+
+  org-service:
+    image: trancendance-org-service:latest
+    build:
+      context: .
+      dockerfile: backend/services/org_service/Dockerfile
+    expose:
+      - "5003"
+    environment:
+      - INFISICAL_TOKEN=${INFISICAL_TOKEN}
+    volumes:
+      - certs-data:/etc/trancendance-certs:ro
+    depends_on:
+      cert-fetcher:
+        condition: service_completed_successfully
+
+  notification-service:
+    image: trancendance-notification-service:latest
+    build:
+      context: .
+      dockerfile: backend/services/notification_service/Dockerfile
+    expose:
+      - "5004"
+    environment:
+      - INFISICAL_TOKEN=${INFISICAL_TOKEN}
+    volumes:
+      - certs-data:/etc/trancendance-certs:ro
+    depends_on:
+      cert-fetcher:
+        condition: service_completed_successfully
 
   frontend:
     build: ./frontend
-    ports:
-      - "3000:80"
+    working_dir: /app
+    expose:
+      - "3000"
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+      - INFISICAL_TOKEN=${INFISICAL_TOKEN}
+      - INFISICAL_PROJECT_ID=${INFISICAL_PROJECT_ID}
+      - NODE_EXTRA_CA_CERTS=/etc/trancendance-certs/internal-ca.crt
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - certs-data:/etc/trancendance-certs:ro
     depends_on:
-      - backend
+      cert-fetcher:
+        condition: service_completed_successfully
+      auth-service:
+        condition: service_started
+      chat-service:
+        condition: service_started
+      org-service:
+        condition: service_started
+      notification-service:
+        condition: service_started
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    expose:
+      - "9100"
+    volumes:
+      - /:/host:ro
+    command:
+      - '--path.rootfs=/host'
 
   prometheus:
     image: prom/prometheus:latest
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-    ports:
-      - "9090:9090"
+      - ./prometheus/web.yml:/etc/prometheus/web.yml:ro
+      - certs-data:/etc/trancendance-certs:ro
+    expose:
+      - "9090"
     command:
       - --config.file=/etc/prometheus/prometheus.yml
+      - --web.config.file=/etc/prometheus/web.yml
+      - --web.external-url=https://localhost/prometheus/
+    depends_on:
+      cert-fetcher:
+        condition: service_completed_successfully
 
   grafana:
-    image: grafana/grafana:latest
-    ports:
-      - "3001:3000"
+    build:
+      context: .
+      dockerfile: grafana/Dockerfile
+    expose:
+      - "3000"
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+      - INFISICAL_TOKEN=${INFISICAL_TOKEN}
     volumes:
+      - ./grafana/grafana.ini:/etc/grafana/grafana.ini:ro
       - ./grafana/provisioning:/etc/grafana/provisioning
       - ./grafana/dashboards:/var/lib/grafana/dashboards
+      - certs-data:/etc/trancendance-certs:ro
     depends_on:
-      - prometheus
+      cert-fetcher:
+        condition: service_completed_successfully
+      prometheus:
+        condition: service_started
+
+volumes:
+  certs-data:

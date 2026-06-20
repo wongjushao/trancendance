@@ -1,0 +1,11 @@
+apiVersion: 1
+contactPoints:
+  - orgId: 1
+    name: admin
+    receivers:
+      - uid: dfduef5tlh2iob
+        type: email
+        settings:
+          addresses: wongjushao@gmail.com
+          singleEmail: false
+        disableResolveMessage: false

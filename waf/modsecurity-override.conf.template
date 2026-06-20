@@ -1,0 +1,26 @@
+# Custom ModSecurity overrides for this project.
+#
+# The OWASP CRS default allowed methods don't include PATCH, which breaks our API
+# endpoints that use PATCH for partial updates (e.g. notification preferences).
+#
+# Limit expanded methods to API routes only.
+SecRule REQUEST_URI "@beginsWith /api/" \
+  "id:1000001,phase:1,pass,nolog,t:none,setvar:'tx.allowed_methods=GET HEAD POST OPTIONS PUT PATCH DELETE'"
+
+# Socket.IO polling POST frames are plain Engine.IO payloads, not normal JSON
+# request bodies. Let the chat socket endpoint pass through the WAF so the
+# long-polling handshake can complete and then upgrade to WebSocket.
+SecRule REQUEST_URI "@beginsWith /api/chat-service/socket.io/" \
+  "id:1000002,phase:1,pass,nolog,t:none,ctl:ruleEngine=Off"
+
+# Grafana sends PromQL expressions in JSON bodies that frequently trip CRS SQLi
+# detection (false positives), and Grafana Live relies on WebSockets.
+# Disable the WAF for Grafana entirely.
+SecRule REQUEST_URI "@beginsWith /grafana/" \
+  "id:1000003,phase:1,pass,nolog,t:none,ctl:ruleEngine=Off"
+
+# Supabase SSR auth cookies (session + PKCE verifier) use sb-<ref>-auth-token
+# with optional -code-verifier suffix and optional .N chunk index. Values use a
+# "base64-" prefix; CRS 932260 treats "base64" in cookies as Unix RCE.
+SecRule REQUEST_COOKIES_NAMES "@rx ^sb-[-a-z0-9]+-auth-token(?:-code-verifier)?(?:\.[0-9]+)?$" \
+  "id:1000004,phase:1,pass,nolog,t:none,ctl:ruleRemoveById=932260"

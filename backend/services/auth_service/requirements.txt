@@ -1,0 +1,13 @@
+flask-restx
+Flask-Cors
+psycopg2-binary
+SQLAlchemy
+pydantic
+requests
+PyJWT
+cryptography
+pyotp
+prometheus-client
+gunicorn
+supabase
+werkzeug
